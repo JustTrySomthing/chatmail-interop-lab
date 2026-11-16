@@ -469,8 +469,6 @@ public class WebRTCClient {
           @Override
           public void onMessage(DataChannel.Buffer buffer) {
             String json = extractString(buffer);
-            Log.d(TAG, "Received ICE candidate: " + json);
-
             IceCandidate candidate = parseIceCandidate(json);
 
             if (candidate != null) {

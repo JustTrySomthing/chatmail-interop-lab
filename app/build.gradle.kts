@@ -38,6 +38,12 @@ android {
             manifestPlaceholders["p2pAppLabel"] = "Relay Lab Recovery Test"
         }
     }
+    buildTypes.create("preview") {
+        initWith(buildTypes.getByName("release"))
+        // Keep the existing test install eligible for in-place upgrades.
+        signingConfig = signingConfigs.getByName("debug")
+        matchingFallbacks += "release"
+    }
     androidResources { noCompress += "voicepack" }
     packaging {
         jniLibs.useLegacyPackaging = true

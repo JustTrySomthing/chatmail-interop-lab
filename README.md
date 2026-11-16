@@ -14,6 +14,8 @@ Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK dire
 
 The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 scripts/check-call-apk.py app/build/outputs/apk/debug/app-debug.apk` to check the packaged WebRTC library and bootstrap. Use `P2P_INTEROP_KEYSTORE` and `P2P_INTEROP_KEY_PASSWORD` for separately signed release builds.
 
+For a non-debuggable development APK, run `./gradlew :app:assemblePreview`. The output is `app/build/outputs/apk/preview/app-preview.apk`. This variant uses the local debug signing configuration, so an existing Relay Lab test install can upgrade in place when built with the same keystore. Use the separate release key for distribution.
+
 ## Contacts, profiles, and encrypted chats
 
 In **Contacts → Add contact → Send invite**, show your SecureJoin QR code, copy its link, or share it. **Accept invite** can scan a code, read a saved image, or paste a link. Android links that open in Relay Lab are prefilled for confirmation. Existing signed P2P invitations remain readable.

@@ -1,8 +1,11 @@
 package app.p2p
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceError
 import android.webkit.WebView
@@ -22,11 +25,13 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
@@ -70,6 +75,16 @@ internal fun parsePreviewLink(value: String): PreviewLink? = runCatching {
     }?.takeIf(videoIdPattern::matches)
     PreviewLink(url.toASCIIString(), host, id)
 }.getOrNull()
+
+internal fun inAppBrowserUrl(value: String, upgradeHttp: Boolean = false): String? {
+    val link = parsePreviewLink(value) ?: return null
+    val url = URI(link.url)
+    if (url.scheme.equals("https", ignoreCase = true)) return link.url
+    if (!upgradeHttp) return null
+    val authority = if (url.port == 80) url.host else url.rawAuthority
+    val suffix = link.url.substring(url.scheme.length + "://".length + url.rawAuthority.length)
+    return "https://$authority$suffix"
+}
 
 @Composable
 internal fun LinkedMessageText(
@@ -134,17 +149,28 @@ internal fun MessageLinkCard(link: PreviewLink, preview: () -> Unit, open: () ->
 
 @Composable
 private fun YoutubeThumbnail(id: String, modifier: Modifier, open: () -> Unit) {
+    var requested by rememberSaveable(id) { mutableStateOf(false) }
+    if (!requested) {
+        TextButton(onClick = { requested = true }) { Text("Load YouTube thumbnail") }
+        return
+    }
     val download = LocalMediaDownload.current
-    val bitmap by produceState<Bitmap?>(null, id) {
+    val result by produceState<Result<Bitmap>?>(null, id) {
         value = withContext(Dispatchers.IO) {
-            runCatching { fetchYoutubeThumbnail(id) }.getOrNull()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+            runCatching {
+                val bytes = fetchYoutubeThumbnail(id)
+                checkNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+            }
         }
     }
-    bitmap?.let {
-        Image(it.asImageBitmap(), "YouTube thumbnail", modifier.combinedClickable(onClick = open,
+    val image = result?.getOrNull()
+    when {
+        image != null -> Image(image.asImageBitmap(), "YouTube thumbnail", modifier.combinedClickable(onClick = open,
             onLongClickLabel = "Download image",
             onLongClick = download?.let { save -> { save(MediaDownload("YouTube-$id.jpg", "image/jpeg", thumbnail = id)) } }),
             contentScale = ContentScale.Fit)
+        result != null -> Text("YouTube thumbnail unavailable")
+        else -> LinearProgressIndicator(Modifier.fillMaxWidth())
     }
 }
 
@@ -176,12 +202,16 @@ internal fun fetchYoutubeThumbnail(id: String): ByteArray {
 
 @Composable
 internal fun InAppBrowser(link: PreviewLink, close: () -> Unit) {
+    val destination = remember(link.url) { inAppBrowserUrl(link.url, upgradeHttp = true) } ?: return
+    val context = LocalContext.current
     Dialog(onDismissRequest = close,
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = false,
             dismissOnClickOutside = false, decorFitsSystemWindows = false)) {
         var browser by remember(link.url) { mutableStateOf<WebView?>(null) }
-        var address by remember(link.url) { mutableStateOf(link.url) }
+        var address by remember(link.url) { mutableStateOf(destination) }
         var failed by remember(link.url) { mutableStateOf(false) }
+        var insecureRedirect by remember(link.url) { mutableStateOf<String?>(null) }
+        var noExternalBrowser by remember(link.url) { mutableStateOf(false) }
         fun back() {
             val view = browser
             if (view?.canGoBack() == true) view.goBack() else close()
@@ -194,7 +224,22 @@ internal fun InAppBrowser(link: PreviewLink, close: () -> Unit) {
                     Text(address, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     IconButton(onClick = close) { Icon(Icons.Outlined.Close, "Close browser") }
                 }
-                if (failed) Text("This page couldn’t load.", Modifier.padding(16.dp))
+                if (failed) {
+                    val fallback = insecureRedirect ?: link.url.takeIf { inAppBrowserUrl(it) == null }
+                    Column(Modifier.padding(16.dp)) {
+                        Text(if (fallback != null) "A secure connection to this page couldn’t be opened."
+                            else "This page couldn’t load.")
+                        if (fallback != null) TextButton(onClick = {
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(fallback))
+                                    .addCategory(Intent.CATEGORY_BROWSABLE))
+                            } catch (_: ActivityNotFoundException) {
+                                noExternalBrowser = true
+                            }
+                        }) { Text("Open HTTP link in external browser") }
+                        if (noExternalBrowser) Text("No browser is available to open this link.")
+                    }
+                }
                 else AndroidView(factory = { context ->
                     WebView(context).apply {
                         settings.javaScriptEnabled = false
@@ -205,8 +250,15 @@ internal fun InAppBrowser(link: PreviewLink, close: () -> Unit) {
                         settings.setSupportMultipleWindows(false)
                         android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
                         webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) =
-                                parsePreviewLink(request.url.toString()) == null
+                            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                                val url = request.url.toString()
+                                if (inAppBrowserUrl(url) != null) return false
+                                if (request.isForMainFrame && request.url.scheme.equals("http", ignoreCase = true)) {
+                                    insecureRedirect = parsePreviewLink(url)?.url
+                                    failed = true
+                                }
+                                return true
+                            }
 
                             override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
                                 address = url
@@ -222,7 +274,7 @@ internal fun InAppBrowser(link: PreviewLink, close: () -> Unit) {
                             }
                         }
                         browser = this
-                        loadUrl(link.url)
+                        loadUrl(destination)
                     }
                 }, modifier = Modifier.fillMaxWidth().weight(1f), onRelease = { view ->
                     browser = null

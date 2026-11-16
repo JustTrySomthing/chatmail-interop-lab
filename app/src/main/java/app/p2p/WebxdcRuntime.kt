@@ -325,6 +325,8 @@ private class WebxdcBridge(
     private val draft: (String, AttachmentDraft?) -> Unit,
     private val speak: (String) -> Unit
 ) {
+    private var draftPrepared = false
+
     @JavascriptInterface fun selfAddr() = info.selfAddr
     @JavascriptInterface fun selfName() = info.selfName
     @JavascriptInterface fun isAppSender() = info.sender
@@ -361,7 +363,7 @@ private class WebxdcBridge(
     }
 
     @JavascriptInterface fun sendToChat(json: String): String? {
-        if (!live.get() || json.length > CHATMAIL_FILE_LIMIT * 2) return "The draft is unavailable or too large."
+        if (!live.get() || draftPrepared || json.length > CHATMAIL_FILE_LIMIT * 2) return "The draft is unavailable or too large."
         return try {
             val message = JSONObject(json)
             val text = message.optString("text")
@@ -382,6 +384,7 @@ private class WebxdcBridge(
                 }
             } else null
             require(text.isNotBlank() || attachment != null)
+            draftPrepared = true
             draft(text, attachment)
             null
         } catch (_: Exception) { "The app couldn’t prepare this draft." }
