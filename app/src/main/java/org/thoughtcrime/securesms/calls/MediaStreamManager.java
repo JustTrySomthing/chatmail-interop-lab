@@ -48,6 +48,7 @@ public class MediaStreamManager {
   private volatile String currentDeviceName;
   private volatile int currentCaptureWidth;
   private volatile int currentCaptureHeight;
+  private volatile int currentCaptureFps;
 
   public interface Callback {
     void onMediaStreamReady(MediaStream stream);
@@ -124,9 +125,10 @@ public class MediaStreamManager {
     int[] captureFormat = selectCaptureFormat(currentDeviceName);
     currentCaptureWidth = captureFormat[0];
     currentCaptureHeight = captureFormat[1];
+    currentCaptureFps = captureFormat[2];
 
-    videoCapturer.startCapture(currentCaptureWidth, currentCaptureHeight, TARGET_FPS);
-    videoSource.adaptOutputFormat(TARGET_WIDTH, TARGET_HEIGHT, TARGET_FPS);
+    videoSource.adaptOutputFormat(TARGET_WIDTH, TARGET_HEIGHT, currentCaptureFps);
+    videoCapturer.startCapture(currentCaptureWidth, currentCaptureHeight, currentCaptureFps);
     isCapturing = true;
     Log.d(
         TAG,
@@ -134,7 +136,9 @@ public class MediaStreamManager {
             + currentCaptureWidth
             + "x"
             + currentCaptureHeight
-            + ", adapted to "
+            + " at "
+            + currentCaptureFps
+            + " fps, adapted to "
             + TARGET_WIDTH
             + "x"
             + TARGET_HEIGHT);
@@ -162,56 +166,54 @@ public class MediaStreamManager {
 
   private int[] selectCaptureFormat(@Nullable String deviceName) {
     if (deviceName == null) {
-      Log.w(TAG, "Device name is null, using target dimensions");
-      return new int[] {TARGET_WIDTH, TARGET_HEIGHT};
+      return new int[] {TARGET_WIDTH, TARGET_HEIGHT, TARGET_FPS};
+    }
+    return chooseCaptureFormat(new Camera2Enumerator(context).getSupportedFormats(deviceName));
+  }
+
+  static int[] chooseCaptureFormat(@Nullable List<CameraEnumerationAndroid.CaptureFormat> formats) {
+    if (formats == null || formats.isEmpty()) {
+      return new int[] {TARGET_WIDTH, TARGET_HEIGHT, TARGET_FPS};
     }
 
-    Camera2Enumerator enumerator = new Camera2Enumerator(context);
-    List<CameraEnumerationAndroid.CaptureFormat> formats =
-        enumerator.getSupportedFormats(deviceName);
-
-    if (formats == null || formats.isEmpty()) {
-      Log.w(TAG, "No supported formats for " + deviceName);
-      return new int[] {TARGET_WIDTH, TARGET_HEIGHT};
+    // Prefer modes that can deliver the requested cadence. A larger still frame can cost
+    // smoothness if the camera cannot sustain 30 fps at that resolution.
+    boolean hasFullRate = false;
+    for (CameraEnumerationAndroid.CaptureFormat format : formats) {
+      if (format.framerate.max == 0 || Math.round(format.framerate.max / 1000f) >= TARGET_FPS) {
+        hasFullRate = true;
+        break;
+      }
     }
 
     CameraEnumerationAndroid.CaptureFormat best = null;
-    int bestPixels = Integer.MAX_VALUE;
-
-    for (CameraEnumerationAndroid.CaptureFormat f : formats) {
-      if (f.width >= TARGET_WIDTH && f.height >= TARGET_HEIGHT) {
-        int pixels = f.width * f.height;
-        if (pixels < bestPixels) {
-          bestPixels = pixels;
-          best = f;
-        }
+    for (CameraEnumerationAndroid.CaptureFormat format : formats) {
+      if (hasFullRate && format.framerate.max > 0 && Math.round(format.framerate.max / 1000f) < TARGET_FPS) {
+        continue;
+      }
+      if (best == null || betterCaptureFormat(format, best, hasFullRate)) {
+        best = format;
       }
     }
 
-    if (best != null) {
-      Log.d(
-          TAG, "Selected capture format: " + best.width + "x" + best.height + " for " + deviceName);
-      return new int[] {best.width, best.height};
-    }
+    if (best == null) return new int[] {TARGET_WIDTH, TARGET_HEIGHT, TARGET_FPS};
+    int maximumFps = Math.round(best.framerate.max / 1000f);
+    int fps = maximumFps > 0 ? Math.min(maximumFps, TARGET_FPS) : TARGET_FPS;
+    return new int[] {best.width, best.height, fps};
+  }
 
-    CameraEnumerationAndroid.CaptureFormat largest = null;
-    int largestPixels = 0;
-    for (CameraEnumerationAndroid.CaptureFormat f : formats) {
-      int pixels = f.width * f.height;
-      if (pixels > largestPixels) {
-        largestPixels = pixels;
-        largest = f;
-      }
+  private static boolean betterCaptureFormat(
+      CameraEnumerationAndroid.CaptureFormat next, CameraEnumerationAndroid.CaptureFormat current,
+      boolean hasFullRate) {
+    if (!hasFullRate && next.framerate.max != current.framerate.max) {
+      return next.framerate.max > current.framerate.max;
     }
-
-    if (largest != null) {
-      Log.w(
-          TAG,
-          "Using largest format " + largest.width + "x" + largest.height + " for " + deviceName);
-      return new int[] {largest.width, largest.height};
-    }
-
-    return new int[] {TARGET_WIDTH, TARGET_HEIGHT};
+    boolean nextMeetsTarget = next.width >= TARGET_WIDTH && next.height >= TARGET_HEIGHT;
+    boolean currentMeetsTarget = current.width >= TARGET_WIDTH && current.height >= TARGET_HEIGHT;
+    if (nextMeetsTarget != currentMeetsTarget) return nextMeetsTarget;
+    int nextPixels = next.width * next.height;
+    int currentPixels = current.width * current.height;
+    return nextMeetsTarget ? nextPixels < currentPixels : nextPixels > currentPixels;
   }
 
   @Nullable
@@ -302,7 +304,8 @@ public class MediaStreamManager {
             currentDeviceName = finalTargetCameraName;
 
             int[] newFormat = selectCaptureFormat(finalTargetCameraName);
-            if (newFormat[0] != currentCaptureWidth || newFormat[1] != currentCaptureHeight) {
+            if (newFormat[0] != currentCaptureWidth || newFormat[1] != currentCaptureHeight
+                || newFormat[2] != currentCaptureFps) {
               Log.d(
                   TAG,
                   "Changing capture format: "
@@ -315,12 +318,13 @@ public class MediaStreamManager {
                       + newFormat[1]);
               currentCaptureWidth = newFormat[0];
               currentCaptureHeight = newFormat[1];
+              currentCaptureFps = newFormat[2];
               cameraVideoCapturer.changeCaptureFormat(
-                  currentCaptureWidth, currentCaptureHeight, TARGET_FPS);
+                  currentCaptureWidth, currentCaptureHeight, currentCaptureFps);
             }
 
             if (videoSource != null) {
-              videoSource.adaptOutputFormat(TARGET_WIDTH, TARGET_HEIGHT, TARGET_FPS);
+              videoSource.adaptOutputFormat(TARGET_WIDTH, TARGET_HEIGHT, currentCaptureFps);
             }
 
             if (callback != null) callback.onCameraSwitch(isFront);

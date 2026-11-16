@@ -33,6 +33,7 @@ import org.webrtc.MediaStreamTrack;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
 import org.webrtc.RTCStats;
+import org.webrtc.RTCStatsCollectorCallback;
 import org.webrtc.RtpReceiver;
 import org.webrtc.RtpSender;
 import org.webrtc.SdpObserver;
@@ -954,6 +955,12 @@ public class WebRTCClient {
 
   public VideoTrack getRemoteVideoTrack() {
     return remoteVideoTrack;
+  }
+
+  public synchronized void getCallStats(RTCStatsCollectorCallback callback) {
+    if (peerConnection != null && !isEnded.get()) {
+      peerConnection.getStats(callback);
+    }
   }
 
   private void detectRelayUsage() {

@@ -97,6 +97,7 @@ internal class TalkCalls(
     private var client: WebRTCClient? = null
     private var media: MediaStreamManager? = null
     private var timer: Job? = null
+    private var videoStats: Job? = null
     private var ringtone: Ringtone? = null
     private var chatId = 0
     private var messageId = 0
@@ -255,6 +256,37 @@ internal class TalkCalls(
         else rtc.setVideoEnabled(true)
         current.value = call.copy(camera = !call.camera)
         rtc.sendMutedState(!call.muted, !call.camera)
+        videoStats?.cancel()
+        videoStats = if (call.camera) null else sampleOutgoingVideo(call.id, rtc)
+    }
+
+    private fun sampleOutgoingVideo(id: String, rtc: WebRTCClient): Job = scope.launch {
+        repeat(2) {
+            delay(if (it == 0) 3_000 else 6_000)
+            if (current.value?.let { call -> call.id == id && call.camera } != true) return@launch
+            rtc.getCallStats { report ->
+                val stats = report.statsMap
+                val outbound = stats.values
+                    .filter { it.type == "outbound-rtp" && it.members["kind"] == "video" }
+                    .maxByOrNull { (it.members["framesEncoded"] as? Number)?.toLong() ?: 0L }
+                    ?.members ?: return@getCallStats
+                val width = (outbound["frameWidth"] as? Number)?.toInt() ?: return@getCallStats
+                val height = (outbound["frameHeight"] as? Number)?.toInt() ?: return@getCallStats
+                val fps = (outbound["framesPerSecond"] as? Number)?.toInt()?.let { " at $it fps" }.orEmpty()
+                val codec = (outbound["codecId"] as? String)
+                    ?.let { stats[it]?.members?.get("mimeType") as? String }
+                    ?.takeIf { it in setOf("video/VP8", "video/VP9", "video/H264", "video/AV1") }
+                val limit = (outbound["qualityLimitationReason"] as? String)
+                    ?.takeIf { it in setOf("none", "cpu", "bandwidth", "other") }
+                scope.launch(Dispatchers.IO) {
+                    if (current.value?.let { call -> call.id == id && call.camera } == true) {
+                        val details = listOfNotNull(codec, limit?.let { "limited by $it" }).joinToString(", ")
+                        AppLog.record(context, "Talk: outgoing video ${width}x$height$fps" +
+                            if (details.isBlank()) "" else " ($details)")
+                    }
+                }
+            }
+        }
     }
 
     fun toggleMute() {
@@ -338,6 +370,8 @@ internal class TalkCalls(
         current.value = call.copy(phase = TalkPhase.Finished, detail = detail, camera = false,
             localVideo = null, remoteVideo = null, remoteCamera = false)
         timer?.cancel()
+        videoStats?.cancel()
+        videoStats = null
         silence()
         clearAlert(call.id)
         runCatching { media?.dispose() }

@@ -2,3 +2,4 @@ WebRTCClient.java, MediaStreamManager.java and EglUtils.java are from Delta Chat
 Android v2.69.0, licensed under GPL-3.0. Source and license:
 https://github.com/deltachat/deltachat-android/tree/v2.69.0
 ArcaneChat Android v2.69.0 ships the identical WebRTCClient.java and WebRTC artifact.
+Relay Lab changes camera mode selection and exposes outbound call statistics.
