@@ -65,7 +65,9 @@ Talk uses Chatmail Core for call signaling and relay configuration. It bundles t
 
 | Client | Relay Lab calls client | Client calls Relay Lab |
 | --- | --- | --- |
-| Delta Chat | Device test pending | Device test pending |
+| Delta Chat | Passed on device (user-reported, 2026-11-16) | Passed on device (user-reported, 2026-11-16) |
 | ArcaneChat | Device test pending | Device test pending |
+
+The Delta Chat report confirms a successful call initiated by each client. Client versions, network type, and individual video checks were not recorded.
 
 For each direction, record ringing and answer time, two-way audio, camera toggles on both phones, and hang-up on Wi-Fi and mobile data. Legacy P2P voicemail remains available for legacy conversations.

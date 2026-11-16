@@ -3,7 +3,7 @@
   "version_code": 89,
   "sha256": {
     ".gitignore": "57752bc83258c3f60383f01be18a07066ff22025f89f995f19878ee0664e740b",
-    "README.md": "0e185cf67f0bfe34283297dac2574a76572e705df58d35023f158389f9ec52b2",
+    "README.md": "022923ae920819fc4f5e97cd567b188608dc0bc9ac4fbc94a412eb1cef4ebfd4",
     "app/build.gradle.kts": "6acfb1612119866be9e1a8a3d81c37404dacedac53702f6e93e80e757fae00a9",
     "app/proguard-rules.pro": "5c4bb565ceea112dfd25a087e5dbac2d4dcc1cd2f3a724d5b9031c836b39818b",
     "app/src/main/AndroidManifest.xml": "9be1d8c4e8ba084d884dcf2e3b9e76e951a841b4d9892dc0b046bbfb883de120",
