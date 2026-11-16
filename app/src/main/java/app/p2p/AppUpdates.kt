@@ -125,7 +125,7 @@ internal object UpdateChecks {
         if (foreground || AppAlertMute.isMuted(context) || !shouldPrompt(prefs(context), release) ||
             !NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "P2P updates", NotificationManager.IMPORTANCE_DEFAULT))
+        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Relay Lab updates", NotificationManager.IMPORTANCE_DEFAULT))
         val open = PendingIntent.getActivity(context, JOB_ID, Intent(context, MainActivity::class.java)
             .setAction(OPEN).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -135,7 +135,7 @@ internal object UpdateChecks {
             manager.notify(CHANNEL, JOB_ID, NotificationCompat.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setSilent(QuietHours.read(context).active())
-                .setContentTitle("P2P update available")
+                .setContentTitle("Relay Lab update available")
                 .setContentText("Version ${release.version} is available.")
                 .setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(true).build())
         }
@@ -390,7 +390,7 @@ class P2pUpdateModel(application: Application) : AndroidViewModel(application) {
         val release = state.release ?: return
         if (!state.ready) return
         start(state.copy(preparingInstall = true, requestInstall = false)) {
-            check(context.packageManager.canRequestPackageInstalls()) { "Allow P2P to install updates in Android settings." }
+            check(context.packageManager.canRequestPackageInstalls()) { "Allow Relay Lab to install updates in Android settings." }
             try {
                 withContext(Dispatchers.IO) { UpdateApk.verify(context, verified, release) }
             } catch (error: CancellationException) {
@@ -402,7 +402,7 @@ class P2pUpdateModel(application: Application) : AndroidViewModel(application) {
             if (launch(UpdateApk.installer(context, verified))) {
                 installAttempt = release.version
             } else {
-                state = state.copy(error = "P2P couldn’t open the Android installer. Return to this screen and tap Install update again.")
+                state = state.copy(error = "Relay Lab couldn’t open the Android installer. Return to this screen and tap Install update again.")
             }
         }
     }
@@ -414,10 +414,10 @@ class P2pUpdateModel(application: Application) : AndroidViewModel(application) {
     }
 
     internal fun installReturned() {
-        state = state.copy(message = "Android returned without updating P2P. You can try again.")
+        state = state.copy(message = "Android returned without updating Relay Lab. You can try again.")
     }
 
     internal fun installPermissionDenied() {
-        state = state.copy(error = "Allow P2P to install updates in Android settings, then try again.")
+        state = state.copy(error = "Allow Relay Lab to install updates in Android settings, then try again.")
     }
 }

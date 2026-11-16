@@ -1,8 +1,8 @@
-# P2P Interop
+# Relay Lab
 
 Private Android project for experimenting with Delta Chat and ArcaneChat interoperability. The source starts from the verified [P2P 0.7.23-rc45 workspace](https://github.com/JustTrySomthing/P2P-Releases/releases/tag/v0.7.23-rc45).
 
-Experimental installations use `app.p2p.interop` and display **P2P Interop**. Use a fresh test profile and separate signing credentials. Automatic update checks default to off. The experimental updater points to this repository.
+Experimental installations use `app.p2p.interop` and display **Relay Lab**. Use a fresh test profile and separate signing credentials. Automatic update checks default to off. The experimental updater points to `JustTrySomthing/chatmail-interop-lab`.
 
 ## Build a debug APK
 

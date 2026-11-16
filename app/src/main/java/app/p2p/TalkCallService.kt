@@ -26,7 +26,7 @@ class TalkCallService : Service() {
             val end = Intent(this, TalkDeclineReceiver::class.java).setAction(ACTION_END)
                 .setData(Uri.fromParts("p2p-talk-ongoing", id, null)).putExtra(LocalAlerts.EXTRA_TARGET, id)
             val notification = Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle("P2P Talk call").setContentText("Tap to return to the call")
+                .setContentTitle("Relay Lab call").setContentText("Tap to return to the call")
                 .setContentIntent(PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE))
                 .setCategory(Notification.CATEGORY_CALL).setVisibility(Notification.VISIBILITY_PRIVATE)
                 .setOngoing(true).setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)

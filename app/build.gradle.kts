@@ -17,7 +17,7 @@ android {
         targetSdk = 35
         versionCode = 81
         versionName = "0.7.23-rc45"
-        manifestPlaceholders["p2pAppLabel"] = "P2P Interop"
+        manifestPlaceholders["p2pAppLabel"] = "Relay Lab"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     signingConfigs.create("p2pRelease") {
@@ -35,7 +35,7 @@ android {
     buildTypes.getByName("debug") {
         if (auditPreview.get()) {
             applicationIdSuffix = ".audit"
-            manifestPlaceholders["p2pAppLabel"] = "P2P Recovery Test"
+            manifestPlaceholders["p2pAppLabel"] = "Relay Lab Recovery Test"
         }
     }
     androidResources { noCompress += "voicepack" }

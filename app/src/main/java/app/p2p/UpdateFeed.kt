@@ -55,7 +55,7 @@ internal data class UpdateRelease(val version: UpdateVersion, val filename: Stri
 }
 
 internal object UpdateFeed {
-    const val REPOSITORY = "JustTrySomthing/P2P-Interop"
+    const val REPOSITORY = "JustTrySomthing/chatmail-interop-lab"
     const val MAX_APK = 256L * 1024 * 1024
     private const val API = "https://api.github.com/repos/$REPOSITORY/releases?per_page=50"
     private const val MAX_FEED = 4 * 1024 * 1024

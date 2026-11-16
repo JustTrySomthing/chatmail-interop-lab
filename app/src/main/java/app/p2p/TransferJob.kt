@@ -113,7 +113,7 @@ class TransferJob : JobService() {
         val percent = if (size > 0) ((offset.toDouble() / size) * 100).toInt().coerceIn(0, 100) else 0
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("P2P file transfer")
+            .setContentTitle("Relay Lab file transfer")
             .setContentText(if (size > 0) "$percent% downloaded" else "Waiting to connect")
             .setOnlyAlertOnce(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE)

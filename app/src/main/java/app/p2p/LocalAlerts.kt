@@ -84,7 +84,7 @@ internal class LocalAlerts(private val context: Context) {
         val open = PendingIntent.getActivity(context, id, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val public = Notification.Builder(context, area.channel)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("P2P")
+            .setContentTitle("Relay Lab")
             .setContentText(area.label)
             .build()
         val notification = NotificationCompat.Builder(context, area.channel)
