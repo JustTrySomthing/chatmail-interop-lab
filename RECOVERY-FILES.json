@@ -118,7 +118,7 @@
     "app/src/test/java/app/p2p/ThreadComposerTest.kt": "28f8eb05db942903e6415c19249b2fc460b2d44964d636c8719fa34937206600",
     "app/src/test/java/app/p2p/ThreadFeedTest.kt": "3e04e94840109c3fca20f33723b1db6d91ce74c3a04e59a3f62c2eb202d87827",
     "app/src/test/java/app/p2p/TransferDiskTest.kt": "65f9d4df8c494089e9fab4398f36495cf65ebdebab56f8f2771a0bec6bdc9ad3",
-    "app/src/test/java/app/p2p/UpdateUiTest.kt": "676aca37f85aaebe615116958e8736b7968dc6fb6cddbc1325c5b8427c3e77db",
+    "app/src/test/java/app/p2p/UpdateUiTest.kt": "699bc0efe3481fc4c93b846a5edf540c858733a2e3aaad05ac9255da27885f2f",
     "app/src/test/java/org/thoughtcrime/securesms/calls/CallCaptureFormatTest.java": "9e3d3b1cbd49dec82455928e1947bfff21ab15b46b704d1864c5062bd40929f3",
     "build.gradle.kts": "0762724f11dc1267d79f5d4bd4fca53c37d98cec7605880400688dba9fb2412b",
     "docs/RC28-NATIVE-ASSETS.json": "5bbc8f9ec7696e6324b69bf5f32e264fe603de3ae91a9fef80a3577bcae1b883",

@@ -57,7 +57,7 @@ class UpdateUiTest {
             compose.waitUntil(5_000) {
                 runCatching { compose.onNodeWithText("Inbox").assertIsDisplayed() }.isSuccess
             }
-            for ((tab, control) in listOf("Groups" to "Inbox", "Talk" to "VoiceMail")) {
+            for ((tab, control) in listOf("Groups" to "Inbox", "Talk" to "Call")) {
                 compose.onAllNodesWithText(tab)[0].performClick()
                 compose.onNodeWithText(control).assertIsDisplayed()
                 scenario.onActivity {
