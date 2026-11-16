@@ -52,6 +52,9 @@ interface Records {
     @Query("SELECT * FROM records WHERE key = :key")
     fun observeRecord(key: String): Flow<Record?>
 
+    @Query("SELECT * FROM records WHERE kind IN ('message', 'file-sent', 'file-received')")
+    suspend fun threadItems(): List<Record>
+
     @Query("SELECT * FROM records WHERE kind = :kind ORDER BY created ASC")
     suspend fun all(kind: String): List<Record>
 
@@ -202,6 +205,9 @@ internal object Rendezvous {
 
 internal fun remainingMessageTargets(data: JSONObject): Int =
     (data.optInt("targets", 1) - data.optInt("delivered") - data.optInt("failed") - data.optInt("cancelled")).coerceAtLeast(0)
+
+internal fun canCancelLegacyDelivery(data: JSONObject): Boolean =
+    data.optInt("nativeMessage") <= 9 && remainingMessageTargets(data) > 0
 
 internal fun messageDeliveryStatus(data: JSONObject): String {
     val delivered = data.optInt("delivered")

@@ -135,6 +135,31 @@ class ChatmailTest {
     }
 
     @Test
+    fun historyFindsAnOlderPageWhenCoreRemovedTheCursorMessage() {
+        val ids = listOf(90, 23, 19, 100, 41)
+        val cached = setOf(100, 41, 77)
+        assertEquals(1 until 3, chatmailHistoryWindow(ids, 2, before = 77, after = null, cached = cached))
+        assertEquals(3 until 5, chatmailHistoryWindow(ids, 2, before = null, after = 100, cached = cached))
+        assertEquals(0 until 0, chatmailHistoryWindow(ids, 2, before = 90, after = null, cached = cached))
+        assertEquals(2 until 5, chatmailHistoryWindow(ids, 2, before = null, after = 77, cached = setOf(23)))
+    }
+
+    @Test
+    fun cachedHistoryReconcilesOnlyNativeMessagesInTheAffectedThread() {
+        fun row(key: String, thread: String, native: Int?) = Record(key, "message",
+            obj("thread" to thread, "unread" to true, "nativeMessage" to native).toString())
+        val expired = row("expired", "chat", 19)
+        val live = row("live", "chat", 20)
+        val legacy = row("legacy", "chat", null)
+        val other = row("other", "another", 21)
+        val cached = listOf(expired, live, legacy, other)
+        assertEquals(listOf(expired), cached.removedChatmailMessages("chat", setOf(20)))
+        assertEquals(listOf(expired, live, legacy), cached.unreadThreadItems("chat"))
+        assertFalse(canCancelLegacyDelivery(live.data()))
+        assertTrue(canCancelLegacyDelivery(legacy.data()))
+    }
+
+    @Test
     fun callsUseTheSharedEncryptedThreadAndContactRecords() {
         val chat = obj("id" to 12, "chatType" to "Single", "isEncrypted" to true,
             "contactIds" to org.json.JSONArray(listOf(1, 20)), "canSend" to true)

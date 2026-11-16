@@ -70,7 +70,40 @@ internal fun readChatmailAttachment(row: JSONObject): ChatmailAttachment? {
         mime, row.optLong("fileBytes"), viewType, row.optString("downloadState"))
 }
 
-internal data class NativeHistory(val messages: List<NativeMessage>, val first: Int?, val last: Int?, val hasOlder: Boolean)
+internal data class NativeHistory(
+    val messages: List<NativeMessage>, val first: Int?, val last: Int?, val hasOlder: Boolean,
+    val existingIds: Set<Int> = emptySet()
+)
+
+internal fun chatmailHistoryWindow(
+    ids: List<Int>, limit: Int, before: Int?, after: Int?, cached: Set<Int>
+): IntRange {
+    val anchor = before?.let(ids::indexOf)?.takeIf { it >= 0 }
+    // Core may remove the oldest cached message between requests.
+    val fallback = if (before == null || anchor != null) null
+        else ids.indexOfFirst { it in cached }.takeIf { it >= 0 }
+    val end = anchor ?: fallback ?: ids.size
+    val recentStart = (end - limit).coerceAtLeast(0)
+    val previous = after?.let { id ->
+        ids.indexOf(id).takeIf { it in 0 until end }
+            ?: ids.subList(0, end).indexOfLast { it in cached }.takeIf { it >= 0 }
+    }
+    val start = if (previous == null) recentStart else minOf(recentStart, previous + 1)
+    return start until end
+}
+
+internal fun Collection<Record>.unreadThreadItems(thread: String): List<Record> = filter {
+    val data = it.data()
+    (it.kind == "message" || it.kind == "file-received") && data.optString("thread") == thread &&
+        data.optBoolean("unread") &&
+        !data.optBoolean("voicemail") && !data.optBoolean("locallyDeleted")
+}
+
+internal fun Collection<Record>.removedChatmailMessages(thread: String, existingIds: Set<Int>): List<Record> = filter {
+    val data = it.data()
+    val id = data.optInt("nativeMessage")
+    id > 9 && data.optString("thread") == thread && id !in existingIds
+}
 
 internal fun readNativeMessage(row: JSONObject, chat: Int): NativeMessage? {
     if (!isEncryptedChatmailMessage(row, chat)) return null

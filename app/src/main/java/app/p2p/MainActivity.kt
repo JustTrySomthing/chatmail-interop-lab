@@ -633,10 +633,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             model.setVisibleThread(thread)
             onDispose { model.setVisibleThread(null) }
         }
-        val unreadThread = records.count { it.kind in listOf("message", "file-received") &&
-            it.data().optString("thread") == thread && it.data().optBoolean("unread") }
+        val unreadThread = remember(records, thread) {
+            thread?.let { records.unreadThreadItems(it).map(Record::key) }.orEmpty()
+        }
         androidx.lifecycle.compose.LifecycleStartEffect(thread, unreadThread) {
-            if (unreadThread > 0) thread?.let { model.markRead(it) }
+            if (unreadThread.isNotEmpty()) thread?.let { model.markRead(it) }
             onStopOrDispose {}
         }
         LaunchedEffect(alert, records) {
@@ -1046,9 +1047,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             attachments = mediaDrafts[id].orEmpty(), preparing = submitting || sendingDraft,
                             loadOlder = if (conversation?.optBoolean("nativeHasOlder") == true)
                                 ({ model.loadOlderNativeMessages(id) }) else null,
-                            canCompose = conversation?.let {
+                            canCompose = !blocked(id) && (conversation?.let {
                                 !it.has("nativeChat") || (it.optBoolean("nativeCanSend") && !it.optBoolean("contactRequest"))
-                            } ?: true,
+                            } ?: true),
                             removeAttachment = { removeDraft(id, it) },
                             trimAttachment = { trimIndex = it; modal = "trim-attachment" },
                             send = { text, done ->
@@ -1418,7 +1419,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                 threadView = Feed
                                 modal = null
                             })
-                            if (author == peer && remainingMessageTargets(data) > 0) {
+                            if (author == peer && canCancelLegacyDelivery(data)) {
                                 add(ItemAction("Cancel queued delivery", Icons.Outlined.Cancel) {
                                     model.cancelQueuedMessage(item.key)
                                     modal = null
@@ -2706,7 +2707,7 @@ internal fun ColumnScope.ThreadView(
                                     val actions: @Composable () -> Unit = {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             ReadAloudButton(message.key, if (isAttachment) data.optString("caption") else data.optString("text"), "message")
-                                            IconButton(onClick = { react(message.key) }) {
+                                            IconButton(onClick = { react(message.key) }, enabled = canCompose) {
                                                 Icon(Icons.Outlined.EmojiEmotions, if (isAttachment) "React to attachment" else "React to message", Modifier.size(24.dp))
                                             }
                                             StarButton(data.optBoolean("star"), if (isAttachment) "attachment" else "message") { star(message.key) }
@@ -2874,7 +2875,7 @@ internal fun ChatAttachment(
         val state = downloadState(data)
         val bytes = data.optLong("size")
         if (state == "Downloading") {
-            if (bytes > 0) {
+            if (bytes > 0 && data.has("offset")) {
                 val fraction = (data.optLong("offset").toDouble() / bytes).coerceIn(0.0, 1.0)
                 LinearProgressIndicator(progress = { fraction.toFloat() }, modifier = Modifier.fillMaxWidth())
                 Text("Downloading · " + (fraction * 100).toInt() + "%", fontSize = 12.sp)

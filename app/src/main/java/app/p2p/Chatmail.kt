@@ -152,6 +152,13 @@ internal class Chatmail(directory: File) : AutoCloseable {
         return ChannelHistory(posts.toList(), ids.size > limit)
     }
 
+    fun channelPost(id: Int): ChannelPost? {
+        val row = messageRows(listOf(id)).firstOrNull() ?: return null
+        val chatId = row.optInt("chatId")
+        if (chatId <= 9) return null
+        return channel(chatId)?.let { parseChannelPost(row, it) }
+    }
+
     fun createChannel(name: String): Int = (call("create_broadcast", name) as Number).toInt()
 
     fun channelInvite(channel: ChatmailChannel): String {
@@ -208,15 +215,12 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     fun nativeThreadIds(): List<Int> = (chatIds() + chatIds(ARCHIVED_CHATS_ONLY)).distinct()
 
-    fun nativeHistory(chat: Int, limit: Int, before: Int?, after: Int?): NativeHistory {
+    fun nativeHistory(chat: Int, limit: Int, before: Int?, after: Int?, cached: Set<Int>): NativeHistory {
         val all = messageIds(chat)
-        val end = before?.let(all::indexOf)?.takeIf { it >= 0 } ?: all.size
-        val recentStart = (end - limit).coerceAtLeast(0)
-        val previous = after?.let(all::indexOf)?.takeIf { it in 0 until end }
-        val start = if (previous == null) recentStart else minOf(recentStart, previous + 1)
-        val ids = all.subList(start, end)
+        val window = chatmailHistoryWindow(all, limit, before, after, cached)
+        val ids = all.subList(window.first, window.last + 1)
         val rows = messageRows(ids).mapNotNull { readNativeMessage(it, chat) }
-        return NativeHistory(rows.toList(), ids.firstOrNull(), ids.lastOrNull(), start > 0)
+        return NativeHistory(rows.toList(), ids.firstOrNull(), ids.lastOrNull(), window.first > 0, all.toSet())
     }
 
     fun nativeSend(chat: Int, text: String, quote: Int?, file: File? = null,
@@ -238,7 +242,9 @@ internal class Chatmail(directory: File) : AutoCloseable {
     }
 
     fun nativeArchive(chat: Int, archived: Boolean) {
-        call("set_chat_visibility", chat, if (archived) "Archived" else "Normal")
+        if (fullChat(chat).optBoolean("archived") != archived) {
+            call("set_chat_visibility", chat, if (archived) "Archived" else "Normal")
+        }
     }
 
     fun nativeRead(ids: List<Int>) {

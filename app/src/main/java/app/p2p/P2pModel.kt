@@ -158,11 +158,20 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             ?.data()?.let { it.optInt("nativeChat").takeIf { id -> id > 9 } ?: it.optInt("chatmailChat") }
         require(chat != null && chat > 9) { "Exchange a Chatmail invite before calling this contact." }
         return withChatmail { core ->
+            check(!isBlockedChatmailContact(chat)) { "Unblock this contact before calling." }
             requireNotNull(core.callContact(chat)) {
                 "An accepted, encrypted contact is required to call."
             }
         }
     }
+
+    private suspend fun isBlockedChatmailContact(chat: Int): Boolean =
+        records.get(nativeThreadKey(chat))?.data()?.optBoolean("blocked") == true ||
+            records.all("contact").any {
+                val data = it.data()
+                data.optBoolean("blocked") &&
+                    (data.optInt("nativeChat") == chat || data.optInt("chatmailChat") == chat)
+            }
 
     private fun openChatmail(directory: File): Chatmail = Chatmail(directory).also { core ->
         core.listenForEvents(onMessagesChanged = { changed ->
@@ -170,12 +179,20 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             nextNativeSync = 0L
         }) { event ->
             viewModelScope.launch {
-                val accepted = chatmailLock.withLock {
-                    if (chatmail !== core) return@withLock false to null
-                    val caller = if (event.kind == "IncomingCall") runCatching {
-                        core.callContact(event.chatId)?.takeIf { core.isRingingCall(event.id) }
-                    }.getOrNull() else null
-                    true to caller
+                val accepted = withContext(Dispatchers.IO) {
+                    chatmailLock.withLock {
+                        if (chatmail !== core) return@withLock false to null
+                        val caller = if (event.kind == "IncomingCall" && !isBlockedChatmailContact(event.chatId)) {
+                            try {
+                                core.callContact(event.chatId)?.takeIf { core.isRingingCall(event.id) }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                null
+                            }
+                        } else null
+                        true to caller
+                    }
                 }
                 if (accepted.first) talk.event(event, accepted.second)
             }
@@ -450,9 +467,13 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             .mapTo(mutableSetOf()) { it.data().optInt("chatmailChat") }
 
     internal suspend fun nativeContacts(): List<ChatmailContact> = withChatmail { core ->
-        val legacyContactIds = signedChatmailIds().filter { it > 9 }
-            .mapNotNull { runCatching { core.chatContactId(it) }.getOrNull() }.toSet()
-        core.contacts().filterNot { it.id in legacyContactIds }
+        val hiddenIds = signedChatmailIds().filter { it > 9 }
+            .mapNotNullTo(mutableSetOf()) { runCatching { core.chatContactId(it) }.getOrNull() }
+        records.all("contact").forEach { record ->
+            val data = record.data()
+            if (data.optBoolean("blocked")) data.optInt("nativeContact").takeIf { it > 9 }?.let(hiddenIds::add)
+        }
+        core.contacts().filterNot { it.id in hiddenIds }
     }
 
     internal suspend fun openNativeContact(contact: Int): Int = withChatmail { core ->
@@ -525,11 +546,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         if (post.localFile == null && attachment.downloadState != "InProgress") core.download(id)
     }
 
-    private fun channelAttachment(core: Chatmail, id: Int): ChannelPost {
-        val row = core.message(id)
-        val channel = requireNotNull(core.channel(row.getInt("chatId"))) { "This channel is unavailable." }
-        return channelPostMedia(requireNotNull(parseChannelPost(row, channel)) { "This post is unavailable." })
-    }
+    private fun channelAttachment(core: Chatmail, id: Int): ChannelPost =
+        channelPostMedia(requireNotNull(core.channelPost(id)) { "This post is unavailable." })
 
     private fun availableChatmailFile(attachment: ChatmailAttachment): File? {
         val path = attachment.path ?: return null
@@ -725,8 +743,11 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             }
         }
         val chatsById = threads.associateBy(NativeThread::id)
+        val cached = records.threadItems().filter { it.data().optInt("nativeMessage") > 9 }
+            .groupBy { it.data().optString("thread") }
         val recent = threads.flatMapTo(mutableSetOf<Int>()) { chat ->
-            updateNativeHistory(core, chat, legacy[chat.id] ?: nativeThreadKey(chat.id), 25)
+            val thread = legacy[chat.id] ?: nativeThreadKey(chat.id)
+            updateNativeHistory(core, chat, thread, 25, cached = cached[thread].orEmpty())
         }
         for (id in nativeChangedMessages.toList()) {
             if (!nativeChangedMessages.remove(id) || id in recent) continue
@@ -761,32 +782,45 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             val data = records.get(thread)?.data() ?: return@withChatmail
             val chat = core.nativeThread(data.optInt("nativeChat")) ?: return@withChatmail
             val before = data.optInt("nativeHistoryFirst").takeIf { it > 9 } ?: return@withChatmail
-            updateNativeHistory(core, chat, thread, 100, before)
+            val cached = records.threadItems().filter { it.data().optString("thread") == thread }
+            updateNativeHistory(core, chat, thread, 100, before, cached = cached)
         }
     }
 
     private suspend fun updateNativeHistory(
-        core: Chatmail, chat: NativeThread, thread: String, limit: Int, before: Int? = null, messageId: Int? = null
+        core: Chatmail, chat: NativeThread, thread: String, limit: Int, before: Int? = null,
+        messageId: Int? = null, cached: List<Record> = emptyList()
     ): List<Int> {
         val saved = records.get(thread)?.data()
         val loaded = saved?.optInt("nativeHistoryFirst") ?: 0
         val latest = saved?.optInt("nativeHistoryLast")?.takeIf { before == null && it > 9 }
-        val page = if (messageId == null) core.nativeHistory(chat.id, limit, before, latest)
+        val cachedIds = cached.mapTo(mutableSetOf()) { it.data().optInt("nativeMessage") }
+        val page = if (messageId == null) core.nativeHistory(chat.id, limit, before, latest, cachedIds)
             else NativeHistory(listOfNotNull(core.nativeMessage(chat.id, messageId)), null, null, false)
         val batch = page.messages
-        if (batch.isEmpty() && page.first == null && before == null) return emptyList()
+        val missing = if (messageId == null) cached.removedChatmailMessages(thread, page.existingIds) else emptyList()
+        if (batch.isEmpty() && page.first == null && before == null && missing.isEmpty()) return emptyList()
+        val discardedFiles = mutableListOf<Record>()
         var newMessage = false
         var newAttachment = false
         database.withTransaction {
             if (messageId == null && (loaded <= 9 || latest == null)) change(thread) {
                 put("nativeHasOlder", page.hasOlder)
-                page.first?.let { put("nativeHistoryFirst", it) }
+                if (page.first != null) put("nativeHistoryFirst", page.first)
+                else if (!page.hasOlder) remove("nativeHistoryFirst")
             }
             if (before == null && latest != page.last && page.last != null) change(thread) {
                 put("nativeHistoryLast", page.last)
             }
             val knownReactions = records.all("message-reaction").filter { it.data().optString("thread") == thread }
                 .groupBy { it.data().optString("message") }
+            for (expired in missing) {
+                val current = records.get(expired.key) ?: continue
+                if (current.data().optString("thread") != thread) continue
+                records.remove(expired.key)
+                knownReactions[expired.key].orEmpty().forEach { records.remove(it.key) }
+                if (current.kind.startsWith("file-")) discardedFiles.add(current)
+            }
             for (message in batch) {
                 val id = nativeMessageKey(message.id)
                 if (records.get("discarded-message:" + id) != null) continue
@@ -856,6 +890,12 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                         location == "Trash" && !groupBlocked(thread) &&
                         records.get(thread)?.data()?.optBoolean("blocked") != true)) records.remove(key)
             }
+        }
+        for (file in discardedFiles) {
+            if (!isId(file.key)) continue
+            val directory = if (file.kind == "file-sent") outgoing else incoming
+            File(directory, file.key).delete()
+            alerts.clear(AlertArea.FILES, file.key)
         }
         val preferences = records.get("thread-pref:$thread")?.data()
         val contact = records.get(thread)?.data()
@@ -1817,15 +1857,23 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setFolder(thread: String, folder: String) = work {
+    fun setFolder(thread: String, folder: String) = work { moveConversation(thread, folder) }
+
+    private suspend fun moveConversation(thread: String, folder: String) {
         if (folder != "Trash" && (records.get(thread)?.data()?.optBoolean("blocked") == true || groupBlocked(thread))) {
             notice.value = "Unblock this conversation before moving it"
-            return@work
+            return
         }
         val native = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
-        if (native > 9 && folder in setOf("Inbox", "Archive")) {
-            withChatmail { it.nativeArchive(native, folder == "Archive") }
-        }
+        if (native > 9 && (folder == "Inbox" || folder == "Archive")) {
+            withChatmail { core ->
+                core.nativeArchive(native, folder == "Archive")
+                saveLocalFolder(thread, folder)
+            }
+        } else saveLocalFolder(thread, folder)
+    }
+
+    private suspend fun saveLocalFolder(thread: String, folder: String) {
         if (folder == "Inbox") records.remove("folder:" + thread)
         else save("folder:" + thread, "folder", obj("name" to folder))
     }
@@ -1854,9 +1902,18 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }.toSet()
 
     fun restoreTrash(groups: Boolean) = work {
-        database.withTransaction {
-            trashThreads(groups).forEach { records.remove("folder:" + it) }
+        var failed = false
+        for (thread in trashThreads(groups)) {
+            try {
+                moveConversation(thread, "Inbox")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                failed = true
+                AppLog.record(context, "Chatmail conversation restore failed", error)
+            }
         }
+        if (failed) notice.value = "Some conversations couldn’t be restored. Try again."
     }
 
     fun emptyTrash(groups: Boolean) = work {
@@ -1919,27 +1976,26 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
 
     fun markRead(thread: String) = work {
         if (!visible || visibleThread != thread) return@work
-        val native = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
-        if (native > 9) {
-            val unread = (records.all("message") + records.all("file-received")).mapNotNull { record ->
-                val data = record.data()
-                data.optInt("nativeMessage").takeIf {
-                    it > 9 && data.optString("thread") == thread && data.optBoolean("unread")
-                }
-            }
-            if (unread.isNotEmpty() && visible && visibleThread == thread) withChatmail { it.nativeRead(unread) }
+        val unread = records.threadItems().unreadThreadItems(thread)
+        val nativeIds = unread.mapNotNull { it.data().optInt("nativeMessage").takeIf { id -> id > 9 } }
+        if (nativeIds.isNotEmpty()) withChatmail { core ->
+            if (visible && visibleThread == thread) core.nativeRead(nativeIds)
         }
         val attachments = database.withTransaction {
             if (!visible || visibleThread != thread) return@withTransaction emptyList()
-            val unread = (records.all("message") + records.all("file-received")).filter {
-                val value = it.data()
-                value.optString("thread") == thread && value.optBoolean("unread") && !value.optBoolean("voicemail")
+            unread.mapNotNull { item ->
+                val current = records.get(item.key) ?: return@mapNotNull null
+                if (current != item) return@mapNotNull null
+                val data = current.data().put("unread", false)
+                data.remove("locallyUnread")
+                save(current.key, current.kind, data, current.created)
+                current.key.takeIf { current.kind == "file-received" }
             }
-            unread.forEach { record -> change(record.key) { put("unread", false); remove("locallyUnread") } }
-            unread.filter { it.kind == "file-received" }.map(Record::key)
         }
         attachments.forEach { alerts.clear(AlertArea.FILES, it) }
-        if (visible && visibleThread == thread) clearThreadAlerts(thread)
+        if (visible && visibleThread == thread && records.threadItems().unreadThreadItems(thread).isEmpty()) {
+            clearThreadAlerts(thread)
+        }
     }
 
     fun markUnread(id: String) = work {
@@ -1962,6 +2018,11 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             val thread = requireNotNull(record).getString("thread")
             val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
             withChatmail { core ->
+                val conversation = records.get(thread)?.data()
+                check(!groupBlocked(thread) && conversation?.optBoolean("blocked") != true) { "This conversation is blocked." }
+                check(core.nativeThread(chat)?.let { it.canSend && !it.request } == true) {
+                    "This encrypted conversation cannot send reactions yet."
+                }
                 core.nativeReact(native, emoji)
                 refreshAfterNativeSend(core, chat, thread, native)
             }
