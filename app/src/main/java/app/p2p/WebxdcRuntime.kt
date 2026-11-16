@@ -49,11 +49,13 @@ private val sandboxHeaders = mapOf(
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; connect-src 'self' data: blob:; " +
         "img-src 'self' data: blob:; media-src 'self' data: blob:; frame-src 'self' data: blob:; " +
         "worker-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'; webrtc 'block';"),
-    "Permissions-Policy" to "camera=(self), microphone=(self), geolocation=(), accelerometer=(), gyroscope=(), magnetometer=()",
     "X-DNS-Prefetch-Control" to "off",
     "X-Content-Type-Options" to "nosniff",
     "Cache-Control" to "no-store"
 )
+
+private val webxdcHeaders = sandboxHeaders + ("Permissions-Policy" to webxdcPermissionsPolicy(false))
+private val webxdcMotionHeaders = sandboxHeaders + ("Permissions-Policy" to webxdcPermissionsPolicy(true))
 
 internal data class WebxdcInfo(
     val name: String, val selfAddr: String, val selfName: String, val sender: Boolean,
@@ -187,17 +189,17 @@ private fun ColumnScope.SandboxedWebxdc(
     var ready by remember(id) { mutableStateOf(false) }
     var startError by remember(id) { mutableStateOf(false) }
     var fileCallback by remember(id) { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
-    val capture = remember(id, host) { WebxdcCaptureAccess(context, host) }
+    val permissions = remember(id, host) { WebxdcPermissions(context, host) }
     val destroyed = remember(id) { AtomicBoolean(false) }
-    fun captureInForeground(): Boolean = live.get() && !rendererFailed && isVisible &&
+    fun permissionsInForeground(): Boolean = live.get() && !rendererFailed && isVisible &&
         lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
-    val capturePermissionsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        capture.androidResult(captureInForeground())
+    val permissionsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        permissions.androidResult(permissionsInForeground())
     }
     fun releaseBrowser(web: WebView) {
         if (!destroyed.compareAndSet(false, true)) return
         live.set(false)
-        capture.deny()
+        permissions.deny()
         fileCallback?.onReceiveValue(null)
         fileCallback = null
         if (!rendererFailed) {
@@ -208,7 +210,7 @@ private fun ColumnScope.SandboxedWebxdc(
         web.destroy()
         view = null
     }
-    fun endCapture(browser: WebView?) {
+    fun closeSensitiveSession(browser: WebView?) {
         browser?.let(::releaseBrowser)
         closeAction()
     }
@@ -261,19 +263,23 @@ private fun ColumnScope.SandboxedWebxdc(
             if (live.get() && visible && !rendererFailed) when (event) {
                 Lifecycle.Event.ON_RESUME -> {
                     browser?.onResume()
-                    capture.settle(captureInForeground())
+                    permissions.settle(permissionsInForeground())
                 }
                 Lifecycle.Event.ON_PAUSE -> {
-                    if (capture.authorized) endCapture(browser)
+                    if (permissions.authorized && !permissions.androidPromptOpen) closeSensitiveSession(browser)
                     else browser?.onPause()
+                }
+                Lifecycle.Event.ON_STOP -> {
+                    if (permissions.authorized) closeSensitiveSession(browser)
+                    else permissions.deny()
                 }
                 else -> Unit
             }
         }
         if (visible) lifecycle.addObserver(observer)
         else {
-            capture.deny()
-            if (capture.authorized) endCapture(browser)
+            permissions.deny()
+            if (permissions.authorized) closeSensitiveSession(browser)
             else {
                 browser?.onPause()
                 browser?.clearFocus()
@@ -300,7 +306,7 @@ private fun ColumnScope.SandboxedWebxdc(
                     allowContentAccess = false
                     javaScriptCanOpenWindowsAutomatically = false
                     mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                    setGeolocationEnabled(false)
+                    setGeolocationEnabled(true)
                     setSupportMultipleWindows(false)
                     mediaPlaybackRequiresUserGesture = false
                     cacheMode = WebSettings.LOAD_NO_CACHE
@@ -331,7 +337,7 @@ private fun ColumnScope.SandboxedWebxdc(
                             val mime = webxdcMime(path)
                             if (path == "/index.html") web.post { ready = true }
                             WebResourceResponse(mime, if (mime.startsWith("text/")) "UTF-8" else null,
-                                200, "OK", sandboxHeaders, stream)
+                                200, "OK", if (permissions.motionAllowed) webxdcMotionHeaders else webxdcHeaders, stream)
                         } catch (_: Exception) { blocked() }
                     }
 
@@ -342,12 +348,20 @@ private fun ColumnScope.SandboxedWebxdc(
                 }
                 web.webChromeClient = object : WebChromeClient() {
                     override fun onPermissionRequest(request: PermissionRequest) {
-                        capture.receive(request, captureInForeground())
+                        permissions.receiveCapture(request, permissionsInForeground())
                     }
 
                     override fun onPermissionRequestCanceled(request: PermissionRequest) {
-                        capture.canceled(request)
+                        permissions.captureCanceled(request)
                     }
+                    override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
+                        permissions.receiveLocation(origin, callback, permissionsInForeground())
+                    }
+
+                    override fun onGeolocationPermissionsHidePrompt() {
+                        permissions.locationCanceled()
+                    }
+
                     override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>,
                                                    params: FileChooserParams): Boolean {
                         if (!isVisible) {
@@ -374,6 +388,24 @@ private fun ColumnScope.SandboxedWebxdc(
                         web.post {
                             if (live.get() && isVisible) speech?.toggle(speechPrefix + speechCount.incrementAndGet(), text)
                         }
+                    }, sensorPermissionState = {
+                        if (!live.get()) "denied" else if (permissions.motionAllowed) "granted" else "ask"
+                    }, requestSensors = {
+                        web.post {
+                            if (live.get() && !rendererFailed) {
+                                permissions.receiveMotion(permissionsInForeground()) { allowed ->
+                                    if (allowed) {
+                                        // Reload the trusted wrapper so the whole frame tree gets the new policy.
+                                        web.reload()
+                                    } else if (live.get() && !rendererFailed) {
+                                        web.evaluateJavascript(
+                                            "document.getElementById('frame')?.contentWindow?.__webxdcSensorPermission?.(false)",
+                                            null
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }), "InternalJSApi")
                 val destination = href.takeIf { it.startsWith('#') && it.length <= 1_024 }.orEmpty()
                 val entry = URLEncoder.encode("https://$host/index.html$destination", Charsets.UTF_8.name())
@@ -386,10 +418,10 @@ private fun ColumnScope.SandboxedWebxdc(
         },
         onRelease = ::releaseBrowser
     )
-    if (visible && !rendererFailed) capture.promptPermissions?.let { permissions ->
-        WebxdcCapturePrompt(info.name, permissions,
-            approve = { capture.approve(captureInForeground()) { capturePermissionsLauncher.launch(it) } },
-            deny = capture::deny)
+    if (visible && !rendererFailed) permissions.promptCapabilities?.let { capabilities ->
+        WebxdcPermissionPrompt(info.name, capabilities,
+            approve = { permissions.approve(permissionsInForeground()) { permissionsLauncher.launch(it) } },
+            deny = permissions::deny)
     }
     DisposableEffect(id) {
         onDispose {
@@ -408,13 +440,15 @@ private fun webxdcMime(path: String): String = when (val ext = path.substringAft
 }
 
 private fun blocked() = WebResourceResponse("text/plain", "UTF-8", 403, "Blocked",
-    sandboxHeaders, ByteArrayInputStream(ByteArray(0)))
+    webxdcHeaders, ByteArrayInputStream(ByteArray(0)))
 
 private class WebxdcBridge(
     private val model: P2pModel, private val thread: String, private val id: Int, private val info: WebxdcInfo,
     private val cache: File, private val live: AtomicBoolean, private val joined: AtomicBoolean,
     private val draft: (String, AttachmentDraft?) -> Unit,
-    private val speak: (String) -> Unit
+    private val speak: (String) -> Unit,
+    private val sensorPermissionState: () -> String,
+    private val requestSensors: () -> Unit
 ) {
     private var draftPrepared = false
 
@@ -424,8 +458,10 @@ private class WebxdcBridge(
     @JavascriptInterface fun isBroadcast() = info.broadcast
     @JavascriptInterface fun sendUpdateInterval() = info.interval
     @JavascriptInterface fun sendUpdateMaxSize() = info.maxSize
-    @JavascriptInterface fun getSensorPermissionState() = "denied"
-    @JavascriptInterface fun requestSensorPermission() = Unit
+    @JavascriptInterface fun getSensorPermissionState() = sensorPermissionState()
+    @JavascriptInterface fun requestSensorPermission() {
+        if (live.get()) requestSensors()
+    }
     @JavascriptInterface fun ttsSpeak(text: String, @Suppress("UNUSED_PARAMETER") language: String) {
         if (live.get() && text.isNotBlank()) speak(text.take(1_000))
     }

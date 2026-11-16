@@ -33,7 +33,10 @@
       <progress id="progress" max="500" value="0" style="display: none"></progress>
     </div>
     <div class="iframe-container">
-      <iframe id="frame" allow="camera 'self'; microphone 'self'"></iframe>
+      <iframe
+        id="frame"
+        allow="camera 'self'; microphone 'self'; geolocation 'self'; accelerometer 'self'; gyroscope 'self'; magnetometer 'self'"
+      ></iframe>
     </div>
     <iframe
       id="test-isolated-sandbox-context"

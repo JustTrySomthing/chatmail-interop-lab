@@ -2,6 +2,7 @@ package app.p2p
 
 import android.Manifest
 import android.net.Uri
+import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
@@ -42,10 +43,10 @@ class WebxdcTest {
     @Test fun cameraAndMicrophoneAreTheOnlyWebxdcCaptureResources() {
         val host = "rl-test-msg12.localhost"
         fun permissions(url: String, vararg resources: String) =
-            webxdcCapturePermissions(Uri.parse(url), host, arrayOf(*resources))
+            webxdcCaptureCapabilities(Uri.parse(url), host, arrayOf(*resources))
         val video = PermissionRequest.RESOURCE_VIDEO_CAPTURE
         val audio = PermissionRequest.RESOURCE_AUDIO_CAPTURE
-        assertEquals(listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO),
+        assertEquals(listOf(WebxdcCapability.CAMERA, WebxdcCapability.MICROPHONE),
             permissions("https://$host", video, audio))
         assertNull(permissions("http://$host", video))
         assertNull(permissions("https://rl-test-msg13.localhost", video))
@@ -58,7 +59,7 @@ class WebxdcTest {
         val host = "rl-test-msg12.localhost"
         val application = RuntimeEnvironment.getApplication()
         shadowOf(application).grantPermissions(Manifest.permission.CAMERA)
-        val access = WebxdcCaptureAccess(application, host)
+        val access = WebxdcPermissions(application, host)
         class Request : PermissionRequest() {
             var granted: List<String>? = null
             var denied = false
@@ -68,21 +69,75 @@ class WebxdcTest {
             override fun deny() { denied = true }
         }
         val hidden = Request()
-        access.receive(hidden, foreground = false)
+        access.receiveCapture(hidden, foreground = false)
         assertTrue(hidden.denied)
         val canceled = Request()
-        access.receive(canceled, foreground = true)
+        access.receiveCapture(canceled, foreground = true)
         assertNull(canceled.granted)
-        access.canceled(canceled)
+        access.captureCanceled(canceled)
         access.approve(foreground = true) { fail("No pending request") }
         assertNull(canceled.granted)
         val allowed = Request()
-        access.receive(allowed, foreground = true)
-        assertEquals(listOf(Manifest.permission.CAMERA), access.promptPermissions)
+        access.receiveCapture(allowed, foreground = true)
+        assertEquals(listOf(WebxdcCapability.CAMERA), access.promptCapabilities)
         assertNull(allowed.granted)
         access.approve(foreground = true) { fail("Android camera access is already granted") }
         assertEquals(listOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE), allowed.granted)
         assertTrue(access.authorized)
+    }
+
+    @Test fun webxdcLocationRequiresExactOriginConsentAndAndroidPermission() {
+        val host = "rl-test-msg12.localhost"
+        val origin = "https://$host"
+        val application = RuntimeEnvironment.getApplication()
+        val access = WebxdcPermissions(application, host)
+        val answers = mutableListOf<Triple<String, Boolean, Boolean>>()
+        val callback = GeolocationPermissions.Callback { requestOrigin, allow, retain ->
+            answers += Triple(requestOrigin, allow, retain)
+        }
+
+        access.receiveLocation("$origin:443", callback, foreground = true)
+        access.receiveLocation(origin, callback, foreground = false)
+        assertEquals(listOf(Triple("$origin:443", false, false), Triple(origin, false, false)), answers)
+        access.receiveLocation(origin, callback, foreground = true)
+        assertEquals(listOf(WebxdcCapability.LOCATION), access.promptCapabilities)
+        access.locationCanceled()
+        assertNull(access.promptCapabilities)
+        assertEquals(2, answers.size)
+
+        access.receiveLocation(origin, callback, foreground = true)
+        access.approve(foreground = true) { requested ->
+            assertEquals(listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                requested.toList())
+        }
+        assertEquals(2, answers.size)
+        assertFalse(access.authorized)
+        shadowOf(application).grantPermissions(Manifest.permission.ACCESS_COARSE_LOCATION)
+        access.androidResult(foreground = false)
+        assertEquals(2, answers.size)
+        access.settle(foreground = true)
+        assertEquals(Triple(origin, true, false), answers.last())
+        assertTrue(access.authorized)
+    }
+
+    @Test fun webxdcMotionPolicyIsScopedToAnApprovedSession() {
+        val application = RuntimeEnvironment.getApplication()
+        val access = WebxdcPermissions(application, "rl-test-msg12.localhost")
+        val other = WebxdcPermissions(application, "rl-test-msg13.localhost")
+        val answers = mutableListOf<Boolean>()
+        access.receiveMotion(foreground = false) { answers.add(it) }
+        access.receiveMotion(foreground = true) { answers.add(it) }
+        assertEquals(listOf(WebxdcCapability.MOTION), access.promptCapabilities)
+        assertTrue(webxdcPermissionsPolicy(access.motionAllowed).contains("accelerometer=()"))
+        access.deny()
+        assertEquals(listOf(false, false), answers)
+        access.receiveMotion(foreground = true) { answers.add(it) }
+        access.approve(foreground = true) { fail("Motion requires no Android runtime permission") }
+        assertEquals(listOf(false, false, true), answers)
+        assertTrue(access.authorized)
+        assertTrue(webxdcPermissionsPolicy(access.motionAllowed).contains("accelerometer=(self)"))
+        assertTrue(webxdcPermissionsPolicy(access.motionAllowed).contains("ambient-light-sensor=()"))
+        assertFalse(other.motionAllowed)
     }
 
     @Test fun preservesNativeWebxdcTypeEvenForGenericFilePicker() {
