@@ -86,7 +86,9 @@ class MediaNavigationTest {
             compose.onNodeWithText("Block sender").assertDoesNotExist()
             compose.onNodeWithText("Close").performClick()
 
-            compose.onAllNodesWithText("Social")[0].performClick()
+            compose.onAllNodesWithText("Channels")[0].performClick()
+            compose.onNodeWithText("My Channel").performClick()
+            compose.onNodeWithText("Previous Social posts").performClick()
             compose.onNodeWithText("Feed").performClick()
             compose.onNodeWithText("A new post", useUnmergedTree = true).performTouchInput { longClick() }
             compose.onNodeWithText("Post options").assertIsDisplayed()
@@ -191,7 +193,9 @@ class MediaNavigationTest {
         }
 
         ActivityScenario.launch(MainActivity::class.java).use {
-            compose.onAllNodesWithText("Social")[0].performClick()
+            compose.onAllNodesWithText("Channels")[0].performClick()
+            compose.onNodeWithText("My Channel").performClick()
+            compose.onNodeWithText("Previous Social posts").performClick()
             compose.onNodeWithText("Feed").performClick()
             val picture = compose.onNodeWithContentDescription("Garden.png", useUnmergedTree = true)
             try {

@@ -38,7 +38,7 @@ internal data class InviteCreationState(val busy: Boolean = false, val invite: O
 
 internal data class InviteImportState(
     val busy: Boolean = false, val message: String? = null, val failed: Boolean = false, val peer: String? = null,
-    val secureJoinStarted: Boolean = false
+    val secureJoinStarted: Boolean = false, val joinedChannel: Int? = null
 )
 internal const val INVITE_CONNECTING = "Waiting to reach the other device"
 internal const val INVITE_APPROVAL = "Waiting for their approval"
@@ -447,15 +447,53 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         service.sendInteropText(requireInteropChat(service, id), text)
     }
 
-    private suspend fun importSecureJoinInvite(code: String): InviteImportState {
+    internal suspend fun chatmailChannels() = withInteropChatmail(Chatmail::channels)
+
+    internal suspend fun chatmailChannelHistory(id: Int, limit: Int) = withInteropChatmail { core ->
+        val channel = requireNotNull(core.channel(id)) { "Waiting for the channel owner to process your join request." }
+        core.noticeChannel(channel)
+        core.channelPosts(channel, limit)
+    }
+
+    internal suspend fun chatmailChannelFeed(channels: List<ChatmailChannel>, limit: Int) =
+        withInteropChatmail { core ->
+            channels.asSequence().filterNot { it.owned }.mapNotNull { core.channel(it.id) }
+                .filterNot { it.owned }.flatMap { core.channelPosts(it, limit).posts }
+                .sortedWith(compareByDescending<ChannelPost> { it.time }.thenByDescending { it.id })
+                .take(limit).toList()
+        }
+
+    internal suspend fun createChatmailChannel(name: String) = withInteropChatmail { core ->
+        val title = name.trim()
+        require(title.isNotEmpty() && title.length <= 80) { "Enter a channel name of up to 80 characters." }
+        check(core.channels().none { it.owned }) { "You already have a channel on this profile." }
+        core.createChannel(title)
+    }
+
+    internal suspend fun chatmailChannelInvite(id: Int) = withInteropChatmail { core ->
+        core.channelInvite(requireNotNull(core.channel(id)) { "Channel unavailable." })
+    }
+
+    internal suspend fun publishChatmailChannelPost(id: Int, text: String) = withInteropChatmail { core ->
+        core.postToChannel(requireNotNull(core.channel(id)) { "Channel unavailable." }, text)
+    }
+
+    private suspend fun importSecureJoinInvite(code: String, channelOnly: Boolean): InviteImportState {
         awaitInviteAccount()
         awaitInviteNetwork()
         val name = requireChatmailName()
         return chatmailLock.withLock {
             check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
-            val chat = connectedChatmail(name).join(code)
+            val core = connectedChatmail(name)
+            val kind = core.inviteKind(code)
+            val channel = kind == "askJoinBroadcast"
+            require(channel || (!channelOnly && kind == "askVerifyContact")) {
+                if (channelOnly) "This isn’t a channel invite." else "This isn’t a contact or channel invite."
+            }
+            val chat = core.joinChecked(code)
             check(chat > 9) { "Chatmail couldn’t open this conversation." }
-            InviteImportState(message = "SecureJoin started. Keep both apps online while they verify the connection.",
+            if (channel) InviteImportState(joinedChannel = chat)
+            else InviteImportState(message = "SecureJoin started. Keep both apps online while they verify the connection.",
                 secureJoinStarted = true)
         }
     }
@@ -1364,7 +1402,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         if (!current.busy) inviteImportState.compareAndSet(current, InviteImportState())
     }
 
-    private fun submitInvite(read: suspend () -> String, nearby: NearbyContact? = null) {
+    private fun submitInvite(read: suspend () -> String, nearby: NearbyContact? = null, channelOnly: Boolean = false) {
         val previous = inviteImportState.value
         if (previous.busy || !inviteImportState.compareAndSet(previous, InviteImportState(busy = true))) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -1372,7 +1410,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 val code = read()
                 inviteImportState.value = when {
                     nearby != null -> InviteImportState(message = importContactInvite(code, nearby))
-                    isSecureJoinInvite(code) -> importSecureJoinInvite(code.trim())
+                    isSecureJoinInvite(code) -> importSecureJoinInvite(code.trim(), channelOnly)
+                    channelOnly -> error("This isn’t a channel invite.")
                     else -> importChatmailInvite(code)
                 }
             } catch (error: CancellationException) {
@@ -1388,7 +1427,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun importInviteImage(uri: Uri) = submitInvite(read = {
+    fun importInviteImage(uri: Uri, channelOnly: Boolean = false) = submitInvite(channelOnly = channelOnly, read = {
         val text = runCatching { InviteImage.read(context, uri) }.getOrElse {
             error("Couldn’t read the QR code. Try a close-up image with the full code visible, or paste the invite.")
         }
@@ -1396,9 +1435,9 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         text
     })
 
-    fun importInvite(text: String) = submitInvite(read = { text })
+    fun importInvite(text: String, channelOnly: Boolean = false) = submitInvite(read = { text }, channelOnly = channelOnly)
 
-    fun importScannedInvite(text: String) = submitInvite(read = {
+    fun importScannedInvite(text: String, channelOnly: Boolean = false) = submitInvite(channelOnly = channelOnly, read = {
         require(isContactInviteCode(text)) { "This QR code isn’t a contact invite." }
         text
     })

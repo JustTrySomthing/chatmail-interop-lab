@@ -102,7 +102,9 @@ class NavigationSmokeTest {
 
     @Test
     fun socialComposerKeepsItsOnlyAttachmentActionInsideTheSheet() {
-        compose.onAllNodesWithText("Social")[0].performClick()
+        compose.onAllNodesWithText("Channels")[0].performClick()
+        compose.onNodeWithText("My Channel").performClick()
+        compose.onNodeWithText("Previous Social posts").performClick()
         compose.onNodeWithText("My Page").performClick()
         compose.onNodeWithText("No posts yet").assertIsDisplayed()
         compose.onNodeWithText("Add media").assertDoesNotExist()
@@ -132,13 +134,12 @@ class NavigationSmokeTest {
         compose.onNodeWithText("No deleted groups").assertIsDisplayed()
         compose.onNodeWithText("Empty trash").assertIsDisplayed().assertIsNotEnabled()
 
-        compose.onAllNodesWithText("Social")[0].performClick()
-        compose.onNodeWithText("My Page").assertIsDisplayed()
-        compose.onNodeWithText("Friends").performClick()
-        compose.onNodeWithText("No friends yet").assertIsDisplayed()
-        org.junit.Assert.assertEquals(1, compose.onAllNodesWithText("Add friend").fetchSemanticsNodes().size)
-        compose.onNodeWithText("Feed").performClick()
-        compose.onNodeWithText("No posts in your feed").assertIsDisplayed()
+        compose.onAllNodesWithText("Channels")[0].performClick()
+        compose.onNodeWithText("Feed").assertIsDisplayed()
+        compose.onNodeWithText("Publish").assertDoesNotExist()
+        compose.onNodeWithText("My Channel").assertIsDisplayed()
+        compose.onNodeWithText("Following").performClick()
+        compose.onNodeWithText("Join channel").assertIsDisplayed()
 
         compose.onAllNodesWithText("Talk")[0].performClick()
         compose.onNodeWithText("VoiceMail").assertIsDisplayed()
@@ -167,7 +168,7 @@ class NavigationSmokeTest {
         val mute = compose.onNodeWithContentDescription("Mute all notifications")
         val unmute = compose.onNodeWithContentDescription("Unmute all notifications")
         mute.assertIsOff().performClick()
-        for (area in listOf("Talk", "Groups", "Social", "Chats")) {
+        for (area in listOf("Talk", "Groups", "Channels", "Chats")) {
             compose.onAllNodesWithText(area)[0].performClick()
             unmute.assertIsOn()
             compose.onNodeWithContentDescription("Search").assertIsDisplayed()

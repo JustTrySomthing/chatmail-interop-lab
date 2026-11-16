@@ -124,6 +124,7 @@ private fun InteropConversation(model: P2pModel, id: Int) {
                         Text(message.text, Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
                     }
                 }
+                ReadAloudButton("chatmail-message:${message.id}", message.text, "message")
                 if (message.outgoing && message.state == 20) Text("Queued", style = MaterialTheme.typography.bodySmall)
                 if (message.outgoing && message.state == 24) Text("Send failed",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)

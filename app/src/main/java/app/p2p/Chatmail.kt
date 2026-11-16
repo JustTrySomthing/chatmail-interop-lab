@@ -73,9 +73,43 @@ internal class Chatmail(directory: File) : AutoCloseable {
     }
 
     fun join(code: String): Int {
-        val qr = call("check_qr", code) as JSONObject
-        require(qr.optString("kind") == "askVerifyContact") { "This Chatmail invite can’t be used to add a contact." }
-        return (call("secure_join", code) as Number).toInt()
+        require(inviteKind(code) == "askVerifyContact") { "This Chatmail invite can’t be used to add a contact." }
+        return joinChecked(code)
+    }
+
+    fun inviteKind(code: String): String = (call("check_qr", code) as JSONObject).optString("kind")
+
+    fun joinChecked(code: String): Int = (call("secure_join", code) as Number).toInt()
+
+    fun channels(): List<ChatmailChannel> = interoperableChatIds().mapNotNull(::channel)
+
+    fun channel(id: Int): ChatmailChannel? =
+        parseChatmailChannel(call("get_full_chat_by_id", id) as JSONObject)
+
+    fun channelPosts(channel: ChatmailChannel, limit: Int): ChannelHistory {
+        val ids = (call("get_message_ids", channel.id, false, false) as JSONArray).intValues()
+        val batch = messages(ids.takeLast(limit))
+        val posts = ids.takeLast(limit).mapNotNull { id ->
+            batch.optJSONObject(id.toString())?.let { parseChannelPost(it, channel) }
+        }
+        return ChannelHistory(posts, ids.size > limit)
+    }
+
+    fun createChannel(name: String): Int = (call("create_broadcast", name) as Number).toInt()
+
+    fun channelInvite(channel: ChatmailChannel): String {
+        require(channel.owned) { "Only the owner can share this channel’s invite." }
+        return call("get_chat_securejoin_qr_code", channel.id) as String
+    }
+
+    fun postToChannel(channel: ChatmailChannel, text: String) {
+        check(channel.owned && channel.canPost) { "This channel can’t publish posts yet." }
+        require(text.isNotBlank() && text.length <= INTEROP_TEXT_LIMIT) { "Enter a post of up to $INTEROP_TEXT_LIMIT characters." }
+        call("send_msg", channel.id, obj("text" to text))
+    }
+
+    fun noticeChannel(channel: ChatmailChannel) {
+        if (!channel.owned && channel.unread > 0) call("marknoticed_chat", channel.id)
     }
 
     fun canSend(chat: Int): Boolean {
@@ -165,6 +199,36 @@ internal class Chatmail(directory: File) : AutoCloseable {
 private fun JSONArray.intValues(): List<Int> = (0 until length()).map(::getInt)
 
 internal const val INTEROP_TEXT_LIMIT = 12_000
+
+internal data class ChatmailChannel(
+    val id: Int, val name: String, val owned: Boolean, val canPost: Boolean, val unread: Int
+)
+internal data class ChannelPost(
+    val id: Int, val channelId: Int, val channelName: String, val text: String,
+    val time: Long, val state: Int, val attachmentName: String?
+)
+internal data class ChannelHistory(val posts: List<ChannelPost>, val hasOlder: Boolean)
+
+internal fun parseChatmailChannel(chat: JSONObject): ChatmailChannel? {
+    val id = chat.optInt("id")
+    val type = chat.optString("chatType")
+    if (id <= 9 || !chat.optBoolean("isEncrypted") ||
+        (type != "InBroadcast" && type != "OutBroadcast")) return null
+    val owned = type == "OutBroadcast"
+    return ChatmailChannel(id, chat.optString("name").ifBlank { "Channel" }, owned,
+        owned && chat.optBoolean("canSend"), chat.optInt("freshMessageCounter"))
+}
+
+internal fun parseChannelPost(message: JSONObject, channel: ChatmailChannel): ChannelPost? {
+    val id = message.optInt("id")
+    if (id <= 9 || message.optInt("chatId") != channel.id || message.optString("kind") != "message" ||
+        message.optBoolean("isInfo") || !message.optBoolean("showPadlock")) return null
+    val text = message.optString("text")
+    val attachment = message.optString("fileName").takeUnless { it.isBlank() || it == "null" }
+    if (text.isBlank() && attachment == null) return null
+    return ChannelPost(id, channel.id, channel.name, text,
+        message.optLong("timestamp") * 1_000L, message.optInt("state"), attachment)
+}
 
 internal data class InteropChat(val id: Int, val contactId: Int, val name: String, val canSend: Boolean)
 internal data class InteropText(val id: Int, val text: String, val outgoing: Boolean, val state: Int)

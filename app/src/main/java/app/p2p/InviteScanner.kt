@@ -129,7 +129,7 @@ internal fun InviteScanner(
                         Box(Modifier.sizeIn(maxWidth = previewHeight * 0.82f).fillMaxWidth(0.76f).aspectRatio(1f)
                             .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp)))
                     }
-                    Text(if (wrongCode) "That QR code isn’t a contact invite." else "Looking for a contact invite…")
+                    Text(if (wrongCode) "That QR code isn’t a supported invite." else "Looking for a supported invite…")
                     Text("Open the large QR on the other phone. Fit the whole code in the frame and tap to focus.")
                     TextButton(onClick = {
                         val target = !torch

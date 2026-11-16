@@ -77,7 +77,7 @@ internal data class SpeechReading(val text:String,private val source:IntArray,pr
  }
 }
 
-private fun speechText(text: String): String = text.lineSequence().joinToString("\n") { line ->
+private fun speechText(text: String): String = text.splitToSequence('\n').joinToString("\n") { line ->
     if (line.count(Char::isLetter) >= 4 && line.none(Char::isLowerCase)) {
         line.map { if (it in 'A'..'Z') it.lowercaseChar() else it }.joinToString("")
     } else line

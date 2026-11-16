@@ -94,6 +94,33 @@ class ChatmailTest {
     }
 
     @Test
+    fun channelsDistinguishReadOnlySubscriptionsFromPublishers() {
+        val chat = obj("id" to 14, "chatType" to "InBroadcast", "isEncrypted" to true,
+            "name" to "Trail notes", "canSend" to true, "freshMessageCounter" to 2)
+        val followed = requireNotNull(parseChatmailChannel(chat))
+        assertFalse(followed.owned)
+        assertFalse(followed.canPost)
+        assertEquals(2, followed.unread)
+        val owned = requireNotNull(parseChatmailChannel(chat.put("chatType", "OutBroadcast")))
+        assertTrue(owned.owned)
+        assertTrue(owned.canPost)
+        assertNull(parseChatmailChannel(chat.put("chatType", "Group")))
+        assertNull(parseChatmailChannel(chat.put("chatType", "InBroadcast").put("isEncrypted", false)))
+    }
+
+    @Test
+    fun channelHistoryPreservesDatesAndFiltersUnencryptedAndSystemMessages() {
+        val channel = ChatmailChannel(14, "Trail notes", false, false, 0)
+        val message = obj("id" to 51, "kind" to "message", "chatId" to 14, "showPadlock" to true,
+            "timestamp" to 900L, "text" to "The trail is open", "fileName" to "trail.png")
+        assertEquals(ChannelPost(51, 14, "Trail notes", "The trail is open", 900_000L, 0, "trail.png"),
+            parseChannelPost(message, channel))
+        assertNull(parseChannelPost(message.put("isInfo", true), channel))
+        assertNull(parseChannelPost(message.put("isInfo", false).put("showPadlock", false), channel))
+        assertNull(parseChannelPost(message.put("showPadlock", true).put("chatId", 12), channel))
+    }
+
+    @Test
     fun interopTextRequiresAnEncryptedSingleChatAndAReadyKey() {
         val chat = obj("id" to 12, "chatType" to "Single", "isEncrypted" to true,
             "contactIds" to org.json.JSONArray(listOf(1, 20)), "canSend" to true)

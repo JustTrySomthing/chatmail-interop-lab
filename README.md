@@ -28,3 +28,14 @@ Use fresh profiles and record the app version and network for each direction. â€
 | --- | --- | --- | --- | --- |
 | Delta Chat | Device test pending | Device test pending | Device test pending | Device test pending |
 | ArcaneChat | Device test pending | Device test pending | Device test pending | Device test pending |
+
+## Channels and Read Aloud
+
+**Channels â†’ Feed** shows recent posts from joined channels, newest first. **Following** opens an individual channel or joins a standard Chatmail broadcast from a QR code, an image, or an invite link. **My Channel** creates one channel per profile, shares its invite, and publishes text. Existing Social content is reachable through **Previous Social posts**. Channel attachments currently show their filenames.
+
+Read Aloud uses the included offline voices and existing speech animation for regular messages, previous Social posts, Chatmail messages, and channel posts. The native bridge expects upstream voice IDs and maps them into the two-voice pack during synthesis.
+
+| Client | Relay Lab joins and receives posts | Client joins Relay Lab and receives posts |
+| --- | --- | --- |
+| Delta Chat | Device test pending | Device test pending |
+| ArcaneChat | Device test pending | Device test pending |

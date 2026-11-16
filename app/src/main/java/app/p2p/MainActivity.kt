@@ -200,7 +200,7 @@ private enum class Area(val label: String, val icon: ImageVector) {
     Talk("Talk", Icons.Outlined.Call),
     Chats("Chats", Icons.AutoMirrored.Outlined.Chat),
     Groups("Groups", Icons.Outlined.Groups),
-    Social("Social", Icons.Outlined.PeopleOutline)
+    Social("Channels", Icons.Outlined.Campaign)
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -255,6 +255,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         var chatFolder by rememberSaveable { mutableStateOf("Inbox") }
         var groupFolder by rememberSaveable { mutableStateOf("Inbox") }
         var socialPage by rememberSaveable { mutableStateOf("My Page") }
+        var legacySocial by rememberSaveable { mutableStateOf(false) }
+        var channelPage by rememberSaveable { mutableStateOf("Feed") }
+        var channelId by rememberSaveable { mutableStateOf<Int?>(null) }
+        var sharingChannel by remember { mutableStateOf<ChatmailChannel?>(null) }
+        var channelInviteOnly by rememberSaveable { mutableStateOf(false) }
         var thread by rememberSaveable { mutableStateOf<String?>(null) }
         var threadView by rememberSaveable { mutableStateOf(Feed) }
         var threadQuery by rememberSaveable(thread) { mutableStateOf("") }
@@ -265,6 +270,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         var pastedInvite by remember { mutableStateOf("") }
         var trackedInvitePeer by rememberSaveable { mutableStateOf<String?>(null) }
         fun showAddContact(pendingPeer: String? = null) {
+            channelInviteOnly = false
             model.clearInviteImport()
             pastedInvite = ""
             trackedInvitePeer = pendingPeer
@@ -419,7 +425,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             if (result != null) {
                 modal = "add-contact"
                 addContactTab = "Accept invite"
-                model.importInviteImage(result)
+                model.importInviteImage(result, channelInviteOnly)
             }
         }
         fun addDraft(id: String, attachments: List<AttachmentDraft>) {
@@ -553,8 +559,18 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             modal = "link-preview"
         }
         fun openLink(link: PreviewLink) {
-            linkUrl = link.url
-            modal = "browser"
+            if (isSecureJoinInvite(link.url)) {
+                if (inviteImport.busy) return
+                model.clearInviteImport()
+                trackedInvitePeer = null
+                channelInviteOnly = false
+                addContactTab = "Accept invite"
+                pastedInvite = link.url
+                modal = "add-contact"
+            } else {
+                linkUrl = link.url
+                modal = "browser"
+            }
         }
         fun goThread(id: String) {
             thread = id
@@ -566,6 +582,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             chatFolder = "Inbox"
             groupFolder = "Inbox"
             socialPage = "My Page"
+            legacySocial = false
+            channelPage = "Feed"
+            channelId = null
             if (value == Area.Talk) model.markCallHistoryRead()
             area = value
             thread = null
@@ -628,6 +647,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 AlertArea.CONTACTS -> modal = "contacts"
                 AlertArea.SOCIAL -> {
                     goArea(Area.Social)
+                    legacySocial = true
                     val post = records.firstOrNull { it.key == destination.target && it.kind == "post" }
                     socialPage = if (post == null) "Friends" else if (post.data().optString("author") == peer) "My Page" else "Feed"
                     if (post != null && post.key == destination.replyTo && !post.data().optBoolean("locallyDeleted")) {
@@ -698,6 +718,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             if (secureJoinLink != null && !inviteImport.busy) {
                 model.clearInviteImport()
                 trackedInvitePeer = null
+                channelInviteOnly = false
                 addContactTab = "Accept invite"
                 modal = "add-contact"
                 pastedInvite = secureJoinLink
@@ -705,6 +726,14 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             }
         }
         LaunchedEffect(inviteImport, modal) {
+            inviteImport.joinedChannel?.let { joined ->
+                goArea(Area.Social)
+                channelPage = "Following"
+                channelId = joined
+                channelInviteOnly = false
+                model.clearInviteImport()
+                return@LaunchedEffect
+            }
             if (inviteImport.peer != null && !inviteImport.failed) {
                 pastedInvite = ""
                 trackedInvitePeer = inviteImport.peer
@@ -724,7 +753,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             }
             return@P2pTheme
         }
-        LaunchedEffect(area, thread, socialPage, modal == "text-to-speech") {
+        LaunchedEffect(area, thread, socialPage, channelId, channelPage, legacySocial, modal == "text-to-speech") {
             reader?.stop()
         }
         val liveCall = talkCall?.phase?.let { it != TalkPhase.Finished } == true
@@ -751,10 +780,12 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             if (fullPage == FullPageRoute.Updates) updates.dismissPrompt()
             modal = if (fullPage in setOf(FullPageRoute.Settings, FullPageRoute.Contacts, FullPageRoute.Chatmail)) null else "settings"
         }
-        BackHandler(thread != null || modal != null) {
+        BackHandler(thread != null || modal != null || (area == Area.Social && (legacySocial || channelId != null))) {
             when {
                 fullPage != null -> closeFullPage()
                 modal != null -> modal = null
+                area == Area.Social && legacySocial -> legacySocial = false
+                area == Area.Social && channelId != null -> channelId = null
                 threadView != Feed -> threadView = Feed
                 else -> thread = null
             }
@@ -1125,6 +1156,21 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             }
                         }
                     }
+                    area == Area.Social && !legacySocial -> {
+                        ChannelBoard(model, channelPage, channelId, search,
+                            selectPage = { channelPage = it; channelId = null },
+                            selectChannel = { channelId = it },
+                            join = {
+                                model.clearInviteImport()
+                                channelInviteOnly = true
+                                trackedInvitePeer = null
+                                pastedInvite = ""
+                                addContactTab = "Accept invite"
+                                modal = "add-contact"
+                            },
+                            share = { sharingChannel = it; modal = "channel-invite" },
+                            legacy = { legacySocial = true }, openLink = ::openLink)
+                    }
                     area == Area.Social -> {
                         Segments(listOf("My Page", "Friends", "Feed"), socialPage) { socialPage = it }
                         LaunchedEffect(socialPage, records) { if (socialPage != "Friends") model.markSocialRead(socialPage) }
@@ -1489,8 +1535,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     }
                 }
             }
-            "add-contact" -> Sheet("Add contact", { modal = null }) {
-                Segments(listOf("Send invite", "Accept invite"), addContactTab, prominent = true) { tab ->
+            "add-contact" -> Sheet(if (channelInviteOnly) "Join channel" else "Add contact", { modal = null }) {
+                if (!channelInviteOnly) Segments(listOf("Send invite", "Accept invite"), addContactTab, prominent = true) { tab ->
                     addContactTab = tab
                     if (tab == "Send invite" && inviteKey.isEmpty() && !inviteCreation.busy) model.createInternetInvite()
                 }
@@ -1579,7 +1625,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                 Text("Open Chatmail chats")
                             }
                         }
-                        Text("Scan a Relay Lab, Delta Chat, or ArcaneChat invite, choose a saved QR image, or paste an invite link or code.")
+                        Text(if (channelInviteOnly) "Scan a channel QR code, choose a saved QR image, or paste an invite link."
+                            else "Scan a Relay Lab, Delta Chat, or ArcaneChat invite, choose a saved QR image, or paste an invite link or code.")
                         Button(onClick = ::openScanner, enabled = !inviteImport.busy, modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Outlined.QrCodeScanner, null)
                             Spacer(Modifier.width(8.dp))
@@ -1597,14 +1644,37 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                     val clip = clipboard.primaryClip
                                     if (clip != null && clip.itemCount > 0) {
                                         pastedInvite = clip.getItemAt(0).text?.toString()?.take(32_768).orEmpty()
-                                        if (pastedInvite.isNotBlank()) model.importInvite(pastedInvite)
+                                        if (pastedInvite.isNotBlank()) model.importInvite(pastedInvite, channelInviteOnly)
                                     }
                                 }) { Icon(Icons.Outlined.ContentPaste, "Paste invite code") }
                             })
-                        Button(onClick = { model.importInvite(pastedInvite) },
+                        Button(onClick = { model.importInvite(pastedInvite, channelInviteOnly) },
                             enabled = pastedInvite.isNotBlank() && !inviteImport.busy,
-                            modifier = Modifier.fillMaxWidth()) { Text("Connect") }
+                            modifier = Modifier.fillMaxWidth()) { Text(if (channelInviteOnly) "Join channel" else "Connect") }
 
+                    }
+                }
+            }
+            "channel-invite" -> sharingChannel?.let { channel ->
+                Sheet("Channel invite", { modal = null }) {
+                    var code by remember(channel.id) { mutableStateOf<String?>(null) }
+                    var failure by remember(channel.id) { mutableStateOf<String?>(null) }
+                    LaunchedEffect(channel.id) {
+                        try {
+                            code = model.chatmailChannelInvite(channel.id)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            failure = error.message ?: "Couldn’t create the channel invite."
+                        } catch (_: LinkageError) {
+                            failure = "Chatmail couldn’t start on this device."
+                        }
+                    }
+                    val invite = code
+                    when {
+                        invite != null -> ShareContactInvite(invite, channel.name, "", channel = true)
+                        failure != null -> Text(failure.orEmpty(), color = MaterialTheme.colorScheme.error)
+                        else -> LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
                 }
             }
@@ -1719,11 +1789,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 inviteImport,
                 close = { modal = "add-contact" },
                 pickImage = { model.clearInviteImport(); modal = "add-contact"; inviteImagePicker.launch(arrayOf("image/*")) },
-                scanned = model::importScannedInvite
+                scanned = { model.importScannedInvite(it, channelInviteOnly) }
             )
             "camera-unavailable" -> Sheet("Camera unavailable", { modal = "add-contact" }) {
                 Text("Allow camera access to scan a QR code, or use a saved image or invite code.")
-                Button(onClick = { modal = "add-contact" }) { Text("Back to accept invite") }
+                Button(onClick = { modal = "add-contact" }) { Text(if (channelInviteOnly) "Back to join channel" else "Back to accept invite") }
             }
             "chat-new" -> Sheet("New chat", { modal = null }) {
                 val available = contacts.filterNot { blocked(it.key) }
@@ -2370,7 +2440,8 @@ private fun Sheet(title: String, dismiss: () -> Unit, content: @Composable Colum
 }
 
 @Composable
-private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo: String, expiresAt: Long? = null) {
+private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo: String, expiresAt: Long? = null,
+                                        channel: Boolean = false) {
     val context = LocalContext.current
     val bitmap = remember(code) { InviteImage.make(code) }
     val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
@@ -2385,9 +2456,13 @@ private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo:
         ) {
             Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Avatar(profile, photo = photo, size = 38.dp, save = null)
-                InviteQr(bitmap, "Contact invite QR code", Modifier.fillMaxWidth().aspectRatio(1f)
+                InviteQr(bitmap, if (channel) "Channel invite QR code" else "Contact invite QR code", Modifier.fillMaxWidth().aspectRatio(1f)
                     .clickable(onClickLabel = "Enlarge QR code") { enlarged = true })
-                Text(if (profile.isBlank()) "Scan to start a chat" else "Scan to chat with $profile",
+                Text(when {
+                    channel -> "Scan to follow $profile"
+                    profile.isBlank() -> "Scan to start a chat"
+                    else -> "Scan to chat with $profile"
+                },
                     style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
                 if (expiresAt != null) {
                     Text("Expires at " + shortTime(expiresAt), Modifier.padding(top = 4.dp),
@@ -2403,7 +2478,7 @@ private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo:
     Row(Modifier.align(Alignment.CenterHorizontally).widthIn(max = cardWidth).fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         P2pOutlinedButton(onClick = {
-            val clip = android.content.ClipData.newPlainText("Contact invite", code)
+            val clip = android.content.ClipData.newPlainText(if (channel) "Channel invite" else "Contact invite", code)
             clip.description.extras = android.os.PersistableBundle().apply {
                 putBoolean("android.content.extra.IS_SENSITIVE", true)
             }
@@ -2411,7 +2486,7 @@ private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo:
         }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { FittedLabel(if (isSecureJoinInvite(code)) "Copy link" else "Copy code") }
         Button(onClick = {
             val intent = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, code)
-            context.startActivity(Intent.createChooser(intent, "Share contact invite"))
+            context.startActivity(Intent.createChooser(intent, if (channel) "Share channel invite" else "Share contact invite"))
         }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { FittedLabel("Share") }
     }
 }
