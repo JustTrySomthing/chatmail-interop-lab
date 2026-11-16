@@ -109,7 +109,7 @@
     "app/src/test/java/app/p2p/MediaNavigationTest.kt": "be7a087233b17953465e639ade26ed6be23ae7d4855c97f855093057193c79f8",
     "app/src/test/java/app/p2p/MediaRoutingTest.kt": "d996cc6214a9730af0514f36786d22007cf19948c0e7aa0ed4ac33945657bb94",
     "app/src/test/java/app/p2p/NativeCrashTraceTest.kt": "e3d0c20709c45eee4ca732a46c2d80e5c4dc5efff72ffe95b512a540fce1e598",
-    "app/src/test/java/app/p2p/NavigationSmokeTest.kt": "071585aed7ea9c50a75bfb54ea163b4f073a334ddd72d4c93ecea240601661f6",
+    "app/src/test/java/app/p2p/NavigationSmokeTest.kt": "58320ef0403632fb37e2a528e2101c783771e573c86d41f53e53db369e435387",
     "app/src/test/java/app/p2p/ReadAloudTest.kt": "182681a1e23e75096907f74068b04c48b439fcd188fa6a170b824b1b54f13563",
     "app/src/test/java/app/p2p/RecoveryCipherTest.kt": "bd350673fc47012934a7c66862c8025990eea2365989330fb797fc639ae708d1",
     "app/src/test/java/app/p2p/RecoveryReleaseTest.kt": "ec6a1ca228e61db6e95073eca77c7f5dc94cb5b698d3263b598415e9404f15a4",

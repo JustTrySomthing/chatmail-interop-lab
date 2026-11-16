@@ -102,7 +102,9 @@ class NavigationSmokeTest {
 
     @Test
     fun socialComposerKeepsItsOnlyAttachmentActionInsideTheSheet() {
-        compose.onAllNodesWithText("Channels")[0].performClick()
+        val channels = compose.onAllNodesWithText("Channels")[0]
+        compose.waitUntil(5_000) { channels.isDisplayed() }
+        channels.performClick()
         compose.onNodeWithText("My Channel").performClick()
         compose.onNodeWithText("Previous Social posts").performClick()
         compose.onNodeWithText("My Page").performClick()
