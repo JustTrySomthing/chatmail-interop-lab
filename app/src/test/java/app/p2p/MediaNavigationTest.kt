@@ -340,7 +340,7 @@ class MediaNavigationTest {
             compose.onNodeWithText("Accept invite").performSemanticsAction(SemanticsActions.OnClick)
             compose.onNodeWithText("Scan QR code").assertIsDisplayed()
             compose.onNodeWithText("Choose QR image").assertIsDisplayed()
-            compose.onNodeWithText("Invite code").assertIsDisplayed()
+            compose.onNodeWithText("Invite link or code").assertIsDisplayed()
             compose.onNodeWithText("Nearby devices").assertDoesNotExist()
         }
     }

@@ -101,7 +101,7 @@
     "app/src/test/java/app/p2p/InviteCodeTest.kt": "fa097993fe702d9d6979570a7fe81a5c2fa967405977d8cd378b20e7f9b2744f",
     "app/src/test/java/app/p2p/InviteRedemptionTest.kt": "54d6df25b9df5e725087d984944affe4d38e612628deaa8d098ecb89598d83e5",
     "app/src/test/java/app/p2p/LocalAlertsTest.kt": "09a5fd4782cc076db1d9266b9a262ecdf9cdd420ce179e548e1b049164dc6c23",
-    "app/src/test/java/app/p2p/MediaNavigationTest.kt": "59a9a4ad2d98aa1e0b4bad295cb3ed35ae72c17758a4570614bf8643240a5c7e",
+    "app/src/test/java/app/p2p/MediaNavigationTest.kt": "304349ad86c1b8bc716b31c76dd88034f42472148eeaa119c16df3645081447e",
     "app/src/test/java/app/p2p/MediaRoutingTest.kt": "65c4214a6b9939e5859a514b0e8390ccfa05f049c25a7d0ff9882e936aabed5c",
     "app/src/test/java/app/p2p/NativeCrashTraceTest.kt": "a0e25c86b1598cc32a62923fe81c300b332d228712256a039be67d8d2724047a",
     "app/src/test/java/app/p2p/NavigationSmokeTest.kt": "b1c9442983c6b365428570dc1a2de8b2159dbce0fc29e4755b0a6f0d1d134ec0",
