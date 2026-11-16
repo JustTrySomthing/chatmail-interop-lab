@@ -130,19 +130,21 @@ class ChatmailTest {
     }
 
     @Test
-    fun interopTextRequiresAnEncryptedSingleChatAndAReadyKey() {
+    fun callsUseTheSharedEncryptedThreadAndContactRecords() {
         val chat = obj("id" to 12, "chatType" to "Single", "isEncrypted" to true,
             "contactIds" to org.json.JSONArray(listOf(1, 20)), "canSend" to true)
         val contact = obj("id" to 20, "displayName" to "Delta peer", "isKeyContact" to true, "e2eeAvail" to true)
-        val peer = requireNotNull(interopPeerId(chat))
-        assertEquals(20, peer)
-        assertEquals(InteropChat(12, 20, "Delta peer", true), parseInteropChat(chat, contact, peer))
-        assertFalse(requireNotNull(parseInteropChat(chat, contact.put("e2eeAvail", false), peer)).canSend)
-        contact.put("e2eeAvail", true)
-        assertFalse(requireNotNull(parseInteropChat(chat.put("isContactRequest", true), contact, peer)).canSend)
-        assertNull(parseInteropChat(chat, contact.put("isBlocked", true), peer))
-        assertNull(interopPeerId(chat.put("chatType", "Group")))
-        assertNull(interopPeerId(chat.put("chatType", "Single").put("isEncrypted", false)))
+        val thread = requireNotNull(readNativeThread(chat))
+        val profile = requireNotNull(parseChatmailContact(contact))
+        assertEquals(20, thread.contactId)
+        assertEquals(ChatmailCallContact(12, "Delta peer"), callContactFor(thread, profile))
+        assertNull(callContactFor(thread, profile.copy(encryptionAvailable = false)))
+        assertNull(callContactFor(thread, profile.copy(id = 21)))
+        assertNull(callContactFor(thread.copy(request = true), profile))
+        assertNull(callContactFor(thread.copy(canSend = false), profile))
+        assertNull(callContactFor(thread.copy(group = true), profile))
+        assertNull(parseChatmailContact(contact.put("isBlocked", true)))
+        assertNull(readNativeThread(chat.put("isEncrypted", false)))
     }
 
     @Test

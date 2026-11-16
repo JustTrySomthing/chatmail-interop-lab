@@ -73,7 +73,7 @@ internal fun readChatmailCallEvent(event: JSONObject): ChatmailCallEvent? {
 internal class TalkCalls(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val resolve: suspend (String) -> InteropChat,
+    private val resolve: suspend (String) -> ChatmailCallContact,
     private val ice: suspend () -> String,
     private val place: suspend (Int, String) -> Int,
     private val answer: suspend (Int, String) -> Unit,
@@ -117,7 +117,7 @@ internal class TalkCalls(
         }
     }
 
-    suspend fun event(event: ChatmailCallEvent, caller: InteropChat? = null) {
+    suspend fun event(event: ChatmailCallEvent, caller: ChatmailCallContact? = null) {
         if (messageId == 0 && chatId == event.chatId && current.value?.outgoing == true &&
             event.kind in setOf("OutgoingCallAccepted", "CallEnded")) {
             deferredEvent = event

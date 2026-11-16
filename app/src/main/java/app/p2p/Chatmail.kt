@@ -8,7 +8,7 @@ internal const val CHATMAIL_FILE_LIMIT = 20_000_000L
 internal const val CHATMAIL_SUBMITTED = "Sent via Chatmail"
 internal const val CHATMAIL_REQUEST_QUEUED = "Queued for Chatmail delivery"
 internal const val CHATMAIL_REQUEST_SENT = "Sent via Chatmail · waiting for their device"
-private const val PACKET_PREFIX = "P2P/1 "
+internal const val PACKET_PREFIX = "P2P/1 "
 private val MESSAGE_EVENTS = setOf("IncomingMsg", "MsgsChanged", "MsgsNoticed", "MsgDelivered", "MsgFailed",
     "MsgRead", "ChatModified", "ChatlistChanged", "ReactionsChanged")
 
@@ -106,7 +106,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     fun connect(name: String, setupQr: String? = null) {
         if (displayName != name) {
-            // P2P consumes signed protocol messages and needs their complete text.
+            // Earlier signed P2P messages need their complete text for verification.
             call("batch_set_config", obj("displayname" to name, "download_limit" to "0", "bot" to "1",
                 "mdns_enabled" to "0"))
             displayName = name
@@ -127,11 +127,13 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     fun connectivity(): Int = (call("get_connectivity") as Number).toInt()
 
-    fun secureJoinInvite(): String = (call("get_chat_securejoin_qr_code", null) as String).also {
-        check(isSecureJoinInvite(it)) { "Chatmail returned an invalid contact invite." }
+    fun secureJoinInvite(): String = secureJoinLink(null)
+
+    private fun secureJoinLink(chat: Int?): String = (call("get_chat_securejoin_qr_code", chat) as String).also {
+        check(isSecureJoinInvite(it)) { "Chatmail returned an invalid invite." }
     }
 
-    fun join(code: String): Int {
+    fun joinLegacyContact(code: String): Int {
         require(inviteKind(code) == "askVerifyContact") { "This Chatmail invite can’t be used to add a contact." }
         return joinChecked(code)
     }
@@ -140,39 +142,35 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     fun joinChecked(code: String): Int = (call("secure_join", code) as Number).toInt()
 
-    fun channels(): List<ChatmailChannel> = interoperableChatIds().mapNotNull(::channel)
+    fun channels(): List<ChatmailChannel> = chatIds().mapNotNull(::channel)
 
-    fun channel(id: Int): ChatmailChannel? =
-        parseChatmailChannel(call("get_full_chat_by_id", id) as JSONObject)
+    fun channel(id: Int): ChatmailChannel? = parseChatmailChannel(fullChat(id))
 
     fun channelPosts(channel: ChatmailChannel, limit: Int): ChannelHistory {
-        val ids = (call("get_message_ids", channel.id, false, false) as JSONArray).intValues()
-        val batch = messages(ids.takeLast(limit))
-        val posts = ids.takeLast(limit).mapNotNull { id ->
-            batch.optJSONObject(id.toString())?.let { parseChannelPost(it, channel) }
-        }
-        return ChannelHistory(posts, ids.size > limit)
+        val ids = messageIds(channel.id)
+        val posts = messageRows(ids.takeLast(limit)).mapNotNull { parseChannelPost(it, channel) }
+        return ChannelHistory(posts.toList(), ids.size > limit)
     }
 
     fun createChannel(name: String): Int = (call("create_broadcast", name) as Number).toInt()
 
     fun channelInvite(channel: ChatmailChannel): String {
         require(channel.owned) { "Only the owner can share this channel’s invite." }
-        return call("get_chat_securejoin_qr_code", channel.id) as String
+        return secureJoinLink(channel.id)
     }
 
     fun postToChannel(channel: ChatmailChannel, text: String) {
         check(channel.owned && channel.canPost) { "This channel can’t publish posts yet." }
         require(text.isNotBlank() && text.length <= INTEROP_TEXT_LIMIT) { "Enter a post of up to $INTEROP_TEXT_LIMIT characters." }
-        call("send_msg", channel.id, obj("text" to text))
+        sendMessage(channel.id, text)
     }
 
     fun noticeChannel(channel: ChatmailChannel) {
         if (!channel.owned && channel.unread > 0) call("marknoticed_chat", channel.id)
     }
 
-    fun canSend(chat: Int): Boolean {
-        val details = call("get_full_chat_by_id", chat) as JSONObject
+    fun canSendLegacyPacket(chat: Int): Boolean {
+        val details = fullChat(chat)
         return details.optBoolean("isEncrypted") && details.optBoolean("canSend")
     }
 
@@ -186,44 +184,46 @@ internal class Chatmail(directory: File) : AutoCloseable {
         return (0 until entries.length()).mapNotNull { entries.optJSONObject(it)?.let(::parseChatmailContact) }
     }
 
+    private fun contact(id: Int): ChatmailContact? = parseChatmailContact(call("get_contact", id) as JSONObject)
+
     fun openContact(id: Int): Int {
-        require(id > 9 && parseChatmailContact(call("get_contact", id) as JSONObject) != null) {
+        require(id > 9 && contact(id) != null) {
             "This Chatmail contact is unavailable."
         }
         return (call("create_chat_by_contact_id", id) as Number).toInt()
     }
 
-    fun nativeThread(id: Int): NativeThread? = readNativeThread(call("get_full_chat_by_id", id) as JSONObject)
+    private fun fullChat(id: Int): JSONObject = call("get_full_chat_by_id", id) as JSONObject
 
-    fun nativeThreadIds(): List<Int> =
-        (interoperableChatIds() + (call("get_chatlist_entries", 1, null, null) as JSONArray).intValues())
-            .filter { it > 9 }.distinct()
+    private fun chatIds(flags: Int? = null): List<Int> =
+        (call("get_chatlist_entries", flags, null, null) as JSONArray).intValues().filter { it > 9 }
+
+    private fun messageIds(chat: Int): List<Int> =
+        (call("get_message_ids", chat, false, false) as JSONArray).intValues()
+
+    fun nativeThread(id: Int): NativeThread? = readNativeThread(fullChat(id))
+
+    fun nativeThreadIds(): List<Int> = (chatIds() + chatIds(ARCHIVED_CHATS_ONLY)).distinct()
 
     fun nativeHistory(chat: Int, limit: Int, before: Int?, after: Int?): NativeHistory {
-        val all = (call("get_message_ids", chat, false, false) as JSONArray).intValues()
+        val all = messageIds(chat)
         val end = before?.let(all::indexOf)?.takeIf { it >= 0 } ?: all.size
         val recentStart = (end - limit).coerceAtLeast(0)
         val previous = after?.let(all::indexOf)?.takeIf { it in 0 until end }
         val start = if (previous == null) recentStart else minOf(recentStart, previous + 1)
         val ids = all.subList(start, end)
-        val rows = ids.chunked(100).flatMap { page ->
-            val batch = messages(page)
-            page.mapNotNull { batch.optJSONObject(it.toString())?.let { row -> readNativeMessage(row, chat) } }
-        }
-        return NativeHistory(rows, ids.firstOrNull(), ids.lastOrNull(), start > 0)
+        val rows = messageRows(ids).mapNotNull { readNativeMessage(it, chat) }
+        return NativeHistory(rows.toList(), ids.firstOrNull(), ids.lastOrNull(), start > 0)
     }
 
     fun nativeSend(chat: Int, text: String, quote: Int?, file: File? = null,
                    name: String? = null, viewType: String? = null): Int {
         check(nativeThread(chat)?.let { it.canSend && !it.request } == true) { "This encrypted conversation cannot send yet." }
-        val data = obj("text" to text)
-        if (quote != null) data.put("quotedMessageId", quote)
-        if (file != null) data.put("file", file.absolutePath).put("filename", name).put("viewtype", viewType)
-        return (call("send_msg", chat, data) as Number).toInt()
+        return sendMessage(chat, text, quote, file, name, viewType)
     }
 
     fun nativeMessage(chat: Int, id: Int): NativeMessage? =
-        messages(listOf(id)).optJSONObject(id.toString())?.let { readNativeMessage(it, chat) }
+        messageRows(listOf(id)).firstOrNull()?.let { readNativeMessage(it, chat) }
 
     fun nativeReact(id: Int, emoji: String) { call("send_reaction", id, JSONArray(listOf(emoji))) }
 
@@ -231,7 +231,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
         check(nativeThread(chat)?.let { it.group && it.canSend && !it.request } == true) {
             "This group can’t share an invite."
         }
-        return call("get_chat_securejoin_qr_code", chat) as String
+        return secureJoinLink(chat)
     }
 
     fun nativeArchive(chat: Int, archived: Boolean) {
@@ -267,18 +267,15 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     fun isConfigured(): Boolean = call("is_configured") == true
 
-    fun interoperableChatIds(): List<Int> =
-        (call("get_chatlist_entries", null, null, null) as JSONArray).intValues().filter { it > 9 }
+    fun chatContactId(id: Int): Int? = nativeThread(id)?.contactId
 
-    fun chatContactId(id: Int): Int? = interopPeerId(call("get_full_chat_by_id", id) as JSONObject)
-
-    fun interoperableChat(id: Int): InteropChat? {
-        val chat = call("get_full_chat_by_id", id) as JSONObject
-        val peer = interopPeerId(chat) ?: return null
-        return parseInteropChat(chat, call("get_contact", peer) as JSONObject, peer)
+    fun callContact(id: Int): ChatmailCallContact? {
+        val thread = nativeThread(id) ?: return null
+        val profile = thread.contactId?.let(::contact) ?: return null
+        return callContactFor(thread, profile)
     }
 
-    fun unread(after: Int): List<Int> {
+    fun legacyInboxAfter(after: Int): List<Int> {
         if (lastReadCursor != after) {
             call("set_config", "last_msg_id", after.toString())
             lastReadCursor = after
@@ -287,7 +284,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
         return (0 until ids.length()).map { ids.getInt(it) }
     }
 
-    fun cancelPending(id: Int, chat: Int, transfer: String) {
+    fun cancelLegacyPacket(id: Int, chat: Int, transfer: String) {
         val message = messages(listOf(id)).optJSONObject(id.toString())
             ?: error("Chatmail message state is unavailable.")
         if (message.optString("error") == "Message does not exist") return
@@ -302,14 +299,29 @@ internal class Chatmail(directory: File) : AutoCloseable {
     fun messages(ids: List<Int>): JSONObject =
         if (ids.isEmpty()) obj() else call("get_messages", JSONArray(ids)) as JSONObject
 
-    fun send(chat: Int, packet: JSONObject, file: File? = null, name: String? = null): Int {
-        val text = PACKET_PREFIX + packet.getString("transfer") + "\n" + packet
+    private fun messageRows(ids: List<Int>): Sequence<JSONObject> =
+        ids.asSequence().chunked(100).flatMap { page ->
+            val batch = messages(page)
+            page.asSequence().mapNotNull { batch.optJSONObject(it.toString()) }
+        }
+
+    private fun sendMessage(chat: Int, text: String, quote: Int? = null, file: File? = null,
+                            name: String? = null, viewType: String? = null): Int {
         val data = obj("text" to text)
-        if (file != null) data.put("file", file.absolutePath).put("filename", name)
+        if (quote != null) data.put("quotedMessageId", quote)
+        if (file != null) {
+            data.put("file", file.absolutePath).put("filename", name)
+            if (viewType != null) data.put("viewtype", viewType)
+        }
         return (call("send_msg", chat, data) as Number).toInt()
     }
 
-    fun findSent(chat: Int, transfer: String): Int? {
+    fun sendLegacyPacket(chat: Int, packet: JSONObject, file: File? = null, name: String? = null): Int {
+        val text = PACKET_PREFIX + packet.getString("transfer") + "\n" + packet
+        return sendMessage(chat, text, file = file, name = name)
+    }
+
+    fun findLegacyPacket(chat: Int, transfer: String): Int? {
         val prefix = PACKET_PREFIX + transfer + "\n"
         val ids = call("search_messages", PACKET_PREFIX + transfer, chat) as JSONArray
         return (0 until ids.length()).map { ids.getInt(it) }.lastOrNull { id ->
@@ -337,6 +349,8 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
 private fun JSONArray.intValues(): List<Int> = (0 until length()).map(::getInt)
 
+private const val ARCHIVED_CHATS_ONLY = 1
+
 internal const val INTEROP_TEXT_LIMIT = 12_000
 
 internal data class ChatmailChannel(
@@ -359,9 +373,8 @@ internal fun parseChatmailChannel(chat: JSONObject): ChatmailChannel? {
 }
 
 internal fun parseChannelPost(message: JSONObject, channel: ChatmailChannel): ChannelPost? {
-    val id = message.optInt("id")
-    if (id <= 9 || message.optInt("chatId") != channel.id || message.optString("kind") != "message" ||
-        message.optBoolean("isInfo") || !message.optBoolean("showPadlock")) return null
+    if (!isEncryptedChatmailMessage(message, channel.id)) return null
+    val id = message.getInt("id")
     val text = message.optString("text")
     val attachment = message.optString("fileName").takeUnless { it.isBlank() || it == "null" }
     if (text.isBlank() && attachment == null) return null
@@ -369,34 +382,29 @@ internal fun parseChannelPost(message: JSONObject, channel: ChatmailChannel): Ch
         message.optLong("timestamp") * 1_000L, message.optInt("state"), attachment)
 }
 
-internal data class ChatmailContact(val id: Int, val name: String, val bio: String = "", val photoPath: String? = null)
+internal data class ChatmailContact(
+    val id: Int, val name: String, val bio: String = "", val photoPath: String? = null,
+    val encryptionAvailable: Boolean = false
+)
 
 internal fun parseChatmailContact(data: JSONObject): ChatmailContact? {
     val id = data.optInt("id")
     if (id <= 9 || !data.optBoolean("isKeyContact") || data.optBoolean("isBlocked")) return null
     val name = data.optString("displayName").ifBlank { "Chatmail contact" }
     return ChatmailContact(id, name, data.optString("status"),
-        data.optString("profileImage").takeUnless { data.isNull("profileImage") || it.isBlank() })
+        data.optString("profileImage").takeUnless { data.isNull("profileImage") || it.isBlank() },
+        data.optBoolean("e2eeAvail"))
 }
 
-internal data class InteropChat(
-    val id: Int, val contactId: Int, val name: String, val canSend: Boolean,
-    val bio: String = "", val photoPath: String? = null, val request: Boolean = false
-)
+internal data class ChatmailCallContact(val id: Int, val name: String)
 
-internal fun interopPeerId(chat: JSONObject): Int? {
-    if (chat.optInt("id") <= 9 || chat.optString("chatType") != "Single" ||
-        !chat.optBoolean("isEncrypted") || chat.optBoolean("isDeviceChat") || chat.optBoolean("isSelfTalk")) return null
-    return chat.optJSONArray("contactIds")?.intValues()?.filter { it > 9 }?.singleOrNull()
-}
+internal fun callContactFor(thread: NativeThread, profile: ChatmailContact): ChatmailCallContact? =
+    if (thread.contactId == profile.id && thread.canSend && !thread.request && profile.encryptionAvailable)
+        ChatmailCallContact(thread.id, profile.name) else null
 
-internal fun parseInteropChat(chat: JSONObject, contact: JSONObject, peer: Int): InteropChat? {
-    val profile = parseChatmailContact(contact)?.takeIf { it.id == peer } ?: return null
-    val request = chat.optBoolean("isContactRequest")
-    return InteropChat(chat.getInt("id"), peer, profile.name,
-        chat.optBoolean("canSend") && !request && contact.optBoolean("e2eeAvail"),
-        profile.bio, profile.photoPath, request)
-}
+internal fun isEncryptedChatmailMessage(message: JSONObject, chat: Int): Boolean =
+    message.optInt("id") > 9 && message.optInt("chatId") == chat && message.optString("kind") == "message" &&
+        !message.optBoolean("isInfo") && message.optBoolean("showPadlock")
 
 internal fun decodeChatmailPacket(text: String): JSONObject? {
     if (!text.startsWith(PACKET_PREFIX) || text.length > 256_000) return null

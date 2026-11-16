@@ -1562,7 +1562,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     addContactTab = tab
                 }
                 if (addContactTab == "Send invite") {
-                    NativeContactInvite(model, profile, profileData?.optString("photo").orEmpty())
+                    SecureJoinCard(InviteTarget.Contact, profile, profileData?.optString("photo").orEmpty()) {
+                        model.createSecureJoinInvite()
+                    }
                 } else {
                     val acceptedPeer = inviteImport.peer ?: trackedInvitePeer
                     val pending = records.firstOrNull { it.key == "request:" + acceptedPeer && it.kind == "invite-pending" }?.data()
@@ -1638,31 +1640,15 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             "group-invite" -> groups.firstOrNull { it.key == thread }?.let { group ->
                 Sheet("Group invite", { modal = null }) {
                     val chat = group.data().getInt("nativeChat")
-                    NativeSecureJoinCard(name(group.key), photo(group.key), group = true) {
+                    SecureJoinCard(InviteTarget.Group, name(group.key), photo(group.key), chat) {
                         model.nativeGroupInvite(chat)
                     }
                 }
             }
             "channel-invite" -> sharingChannel?.let { channel ->
                 Sheet("Channel invite", { modal = null }) {
-                    var code by remember(channel.id) { mutableStateOf<String?>(null) }
-                    var failure by remember(channel.id) { mutableStateOf<String?>(null) }
-                    LaunchedEffect(channel.id) {
-                        try {
-                            code = model.chatmailChannelInvite(channel.id)
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (error: Exception) {
-                            failure = error.message ?: "Couldn’t create the channel invite."
-                        } catch (_: LinkageError) {
-                            failure = "Chatmail couldn’t start on this device."
-                        }
-                    }
-                    val invite = code
-                    when {
-                        invite != null -> ShareContactInvite(invite, channel.name, "", channel = true)
-                        failure != null -> Text(failure.orEmpty(), color = MaterialTheme.colorScheme.error)
-                        else -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                    SecureJoinCard(InviteTarget.Channel, channel.name, "", channel.id) {
+                        model.chatmailChannelInvite(channel.id)
                     }
                 }
             }
@@ -2415,18 +2401,17 @@ private fun Sheet(title: String, dismiss: () -> Unit, content: @Composable Colum
     }
 }
 
-@Composable
-private fun ColumnScope.NativeContactInvite(model: P2pModel, profile: String, photo: String) {
-    NativeSecureJoinCard(profile, photo) { model.createSecureJoinInvite() }
-}
+private enum class InviteTarget { Contact, Group, Channel }
 
 @Composable
-private fun ColumnScope.NativeSecureJoinCard(profile: String, photo: String, group: Boolean = false,
-                                             createInvite: suspend () -> String) {
-    var attempt by remember { mutableIntStateOf(0) }
-    var code by remember { mutableStateOf<String?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(attempt) {
+private fun ColumnScope.SecureJoinCard(
+    target: InviteTarget, profile: String, photo: String, conversationId: Int? = null,
+    createInvite: suspend () -> String
+) {
+    var attempt by remember(target, conversationId) { mutableIntStateOf(0) }
+    var code by remember(target, conversationId) { mutableStateOf<String?>(null) }
+    var error by remember(target, conversationId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(target, conversationId, attempt) {
         error = null
         try {
             code = createInvite()
@@ -2440,7 +2425,7 @@ private fun ColumnScope.NativeSecureJoinCard(profile: String, photo: String, gro
     }
     val invite = code
     when {
-        invite != null -> ShareContactInvite(invite, profile, photo, group = group)
+        invite != null -> ShareInvite(invite, target, profile, photo)
         error != null -> {
             Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
             P2pTextButton(onClick = { attempt++ }) { Text("Retry") }
@@ -2450,13 +2435,8 @@ private fun ColumnScope.NativeSecureJoinCard(profile: String, photo: String, gro
 }
 
 @Composable
-private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo: String,
-                                        channel: Boolean = false, group: Boolean = false) {
-    val kind = when {
-        channel -> "Channel"
-        group -> "Group"
-        else -> "Contact"
-    }
+private fun ColumnScope.ShareInvite(code: String, target: InviteTarget, profile: String, photo: String) {
+    val kind = target.name
     val context = LocalContext.current
     val bitmap = remember(code) { InviteImage.make(code) }
     val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
@@ -2473,11 +2453,10 @@ private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo:
                 Avatar(profile, photo = photo, size = 38.dp, save = null)
                 InviteQr(bitmap, "$kind invite QR code", Modifier.fillMaxWidth().aspectRatio(1f)
                     .clickable(onClickLabel = "Enlarge QR code") { enlarged = true })
-                Text(when {
-                    channel -> "Scan to follow $profile"
-                    group -> "Scan to join $profile"
-                    profile.isBlank() -> "Scan to start a chat"
-                    else -> "Scan to chat with $profile"
+                Text(when (target) {
+                    InviteTarget.Channel -> "Scan to follow $profile"
+                    InviteTarget.Group -> "Scan to join $profile"
+                    InviteTarget.Contact -> if (profile.isBlank()) "Scan to start a chat" else "Scan to chat with $profile"
                 },
                     style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
             }

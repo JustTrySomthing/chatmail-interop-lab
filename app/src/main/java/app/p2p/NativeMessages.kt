@@ -10,7 +10,9 @@ internal fun nativePeerKey(id: Int): String = "chatmail-peer:$id"
 internal data class NativeThread(
     val id: Int, val name: String, val group: Boolean, val members: List<Int>,
     val canSend: Boolean, val request: Boolean, val archived: Boolean
-)
+) {
+    val contactId: Int? get() = if (group) null else members.singleOrNull()
+}
 
 internal fun readNativeThread(chat: JSONObject): NativeThread? {
     val id = chat.optInt("id")
@@ -34,12 +36,12 @@ internal data class NativeMessage(
 internal data class NativeHistory(val messages: List<NativeMessage>, val first: Int?, val last: Int?, val hasOlder: Boolean)
 
 internal fun readNativeMessage(row: JSONObject, chat: Int): NativeMessage? {
-    val id = row.optInt("id")
+    if (!isEncryptedChatmailMessage(row, chat)) return null
+    val id = row.getInt("id")
     val from = row.optInt("fromId")
-    if (id <= 9 || (from != 1 && from <= 9) || row.optInt("chatId") != chat ||
-        row.optString("kind") != "message" || row.optBoolean("isInfo") || !row.optBoolean("showPadlock")) return null
+    if (from != 1 && from <= 9) return null
     val text = row.optString("text")
-    if (text.startsWith("P2P/1 ")) return null
+    if (text.startsWith(PACKET_PREFIX)) return null
     val path = row.optString("file").takeUnless { it.isBlank() || row.isNull("file") }
     val name = row.optString("fileName").takeUnless { row.isNull("fileName") }.orEmpty()
     if (text.isBlank() && path == null && name.isBlank()) return null

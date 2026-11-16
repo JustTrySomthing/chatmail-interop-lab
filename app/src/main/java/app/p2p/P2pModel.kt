@@ -144,21 +144,21 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private val notificationsMuted = MutableStateFlow(AppAlertMute.isMuted(context))
     internal val appNotificationsMuted = notificationsMuted.asStateFlow()
     internal val talk = TalkCalls(application, viewModelScope, ::resolveTalkContact, ::talkIce,
-        { chat, offer -> withInteropChatmail { it.placeCall(chat, offer) } },
-        { id, answer -> withInteropChatmail { it.acceptCall(id, answer) } },
-        { id -> withInteropChatmail { it.endCall(id) } },
+        { chat, offer -> withChatmail { it.placeCall(chat, offer) } },
+        { id, answer -> withChatmail { it.acceptCall(id, answer) } },
+        { id -> withChatmail { it.endCall(id) } },
         ::announceTalkCall, { call -> alerts.clear(AlertArea.TALK, call) },
         { call -> save("call:" + call.id, "call-history", obj("contact" to call.contact,
             "name" to call.displayName, "outgoing" to call.outgoing, "detail" to call.detail,
             "unread" to (!call.outgoing && call.connectedAt == 0L))) })
 
-    private suspend fun resolveTalkContact(contact: String): InteropChat {
+    private suspend fun resolveTalkContact(contact: String): ChatmailCallContact {
         val chat = if (contact.startsWith("chatmail:")) contact.substringAfter(':').toIntOrNull()
         else records.get(contact)?.takeIf { it.kind == "contact" && !it.data().optBoolean("blocked") }
             ?.data()?.let { it.optInt("nativeChat").takeIf { id -> id > 9 } ?: it.optInt("chatmailChat") }
         require(chat != null && chat > 9) { "Exchange a Chatmail invite before calling this contact." }
-        return withInteropChatmail { core ->
-            requireNotNull(core.interoperableChat(chat)?.takeIf { it.canSend }) {
+        return withChatmail { core ->
+            requireNotNull(core.callContact(chat)) {
                 "An accepted, encrypted contact is required to call."
             }
         }
@@ -173,7 +173,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 val accepted = chatmailLock.withLock {
                     if (chatmail !== core) return@withLock false to null
                     val caller = if (event.kind == "IncomingCall") runCatching {
-                        core.interoperableChat(event.chatId)?.takeIf { it.canSend && core.isRingingCall(event.id) }
+                        core.callContact(event.chatId)?.takeIf { core.isRingingCall(event.id) }
                     }.getOrNull() else null
                     true to caller
                 }
@@ -426,55 +426,50 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         return service
     }
 
-    internal suspend fun createSecureJoinInvite(): String = withContext(Dispatchers.IO) {
+    internal suspend fun createSecureJoinInvite(): String =
+        withChatmail(requireNetwork = true) { it.secureJoinInvite() }
+
+    private suspend fun <T> withChatmail(
+        requireNetwork: Boolean = false, setupQr: String? = null, action: suspend (Chatmail) -> T
+    ): T = withContext(Dispatchers.IO) {
         awaitInviteAccount()
-        awaitInviteNetwork()
+        if (requireNetwork) awaitInviteNetwork()
         val name = requireChatmailName()
         chatmailLock.withLock {
             check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
-            connectedChatmail(name).secureJoinInvite()
+            val directory = File(context.noBackupFilesDir, "chatmail")
+            val service = if (selectedNetwork != null || requireNetwork) connectedChatmail(name, setupQr)
+            else chatmail ?: directory.takeIf(File::isDirectory)?.let { openChatmail(it).also { opened -> chatmail = opened } }
+            check(service != null && service.isConfigured()) { "Connect to the internet to set up Chatmail." }
+            action(service)
         }
     }
-
-    private suspend fun <T> withInteropChatmail(action: suspend (Chatmail) -> T): T =
-        withContext(Dispatchers.IO) {
-            awaitInviteAccount()
-            val name = requireChatmailName()
-            chatmailLock.withLock {
-                check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
-                val directory = File(context.noBackupFilesDir, "chatmail")
-                val service = if (selectedNetwork != null) connectedChatmail(name)
-                else chatmail ?: directory.takeIf(File::isDirectory)?.let { openChatmail(it).also { opened -> chatmail = opened } }
-                check(service != null && service.isConfigured()) { "Connect to the internet to set up Chatmail." }
-                action(service)
-            }
-        }
 
     private suspend fun signedChatmailIds(): Set<Int> =
         listOf("contact", "invite-in", "invite-pending").flatMap { records.all(it) }
             .mapTo(mutableSetOf()) { it.data().optInt("chatmailChat") }
 
-    internal suspend fun nativeContacts(): List<ChatmailContact> = withInteropChatmail { core ->
+    internal suspend fun nativeContacts(): List<ChatmailContact> = withChatmail { core ->
         val legacyContactIds = signedChatmailIds().filter { it > 9 }
             .mapNotNull { runCatching { core.chatContactId(it) }.getOrNull() }.toSet()
         core.contacts().filterNot { it.id in legacyContactIds }
     }
 
-    internal suspend fun openNativeContact(contact: Int): Int = withInteropChatmail { core ->
+    internal suspend fun openNativeContact(contact: Int): Int = withChatmail { core ->
         core.openContact(contact).also { id ->
             core.nativeThread(id)?.let { cacheNativeThread(it) }
             nextNativeSync = 0L
         }
     }
 
-    internal suspend fun nativeGroupContacts(): List<Record> = withInteropChatmail { core ->
-        core.contacts().filter { it.id > 9 }.map { contact ->
+    internal suspend fun nativeGroupContacts(): List<Record> = withChatmail { core ->
+        core.contacts().map { contact ->
             Record(nativePeerKey(contact.id), "contact", obj("name" to contact.name).toString(), 0L)
         }
     }
 
     internal fun acceptNativeThread(thread: String, chat: Int) = work {
-        withInteropChatmail { core ->
+        withChatmail { core ->
             core.nativeAccept(chat)
             core.nativeThread(chat)?.let { cacheNativeThread(it, thread) }
             nextNativeSync = 0L
@@ -487,7 +482,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val ids = members.filter { it.startsWith("chatmail-peer:") }
             .mapNotNull { it.substringAfter(':').toIntOrNull()?.takeIf { id -> id > 9 } }.toSet()
         require(chat != null || ids.isNotEmpty()) { "Choose at least one contact." }
-        val key = withInteropChatmail { core ->
+        val key = withChatmail { core ->
             val id = if (chat == null) core.nativeCreateGroup(title, ids)
                 else chat.also { core.nativeUpdateGroup(it, title, ids) }
             core.nativeThread(id)?.let { cacheNativeThread(it) }
@@ -497,51 +492,45 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         withContext(Dispatchers.Main.immediate) { saved(key) }
     }
 
-    internal suspend fun nativeGroupInvite(chat: Int): String = withInteropChatmail { it.nativeGroupInvite(chat) }
+    internal suspend fun nativeGroupInvite(chat: Int): String = withChatmail { it.nativeGroupInvite(chat) }
 
     internal fun addChatmailRelay(code: String, saved: () -> Unit) = work {
-        withInteropChatmail { it.addRelay(code.trim()) }
+        withChatmail { it.addRelay(code.trim()) }
         withContext(Dispatchers.Main) { saved() }
     }
 
-    internal suspend fun chatmailChannels() = withInteropChatmail(Chatmail::channels)
+    internal suspend fun chatmailChannels() = withChatmail(action = Chatmail::channels)
 
-    internal suspend fun chatmailChannelHistory(id: Int, limit: Int) = withInteropChatmail { core ->
+    internal suspend fun chatmailChannelHistory(id: Int, limit: Int) = withChatmail { core ->
         val channel = requireNotNull(core.channel(id)) { "Waiting for the channel owner to process your join request." }
         core.noticeChannel(channel)
         core.channelPosts(channel, limit)
     }
 
     internal suspend fun chatmailChannelFeed(channels: List<ChatmailChannel>, limit: Int) =
-        withInteropChatmail { core ->
-            channels.asSequence().filterNot { it.owned }.mapNotNull { core.channel(it.id) }
-                .filterNot { it.owned }.flatMap { core.channelPosts(it, limit).posts }
+        withChatmail { core ->
+            channels.asSequence().filterNot { it.owned }.flatMap { core.channelPosts(it, limit).posts }
                 .sortedWith(compareByDescending<ChannelPost> { it.time }.thenByDescending { it.id })
                 .take(limit).toList()
         }
 
-    internal suspend fun createChatmailChannel(name: String) = withInteropChatmail { core ->
+    internal suspend fun createChatmailChannel(name: String) = withChatmail { core ->
         val title = name.trim()
         require(title.isNotEmpty() && title.length <= 80) { "Enter a channel name of up to 80 characters." }
         check(core.channels().none { it.owned }) { "You already have a channel on this profile." }
         core.createChannel(title)
     }
 
-    internal suspend fun chatmailChannelInvite(id: Int) = withInteropChatmail { core ->
+    internal suspend fun chatmailChannelInvite(id: Int) = withChatmail { core ->
         core.channelInvite(requireNotNull(core.channel(id)) { "Channel unavailable." })
     }
 
-    internal suspend fun publishChatmailChannelPost(id: Int, text: String) = withInteropChatmail { core ->
+    internal suspend fun publishChatmailChannelPost(id: Int, text: String) = withChatmail { core ->
         core.postToChannel(requireNotNull(core.channel(id)) { "Channel unavailable." }, text)
     }
 
-    private suspend fun importSecureJoinInvite(code: String, channelOnly: Boolean): InviteImportState {
-        awaitInviteAccount()
-        awaitInviteNetwork()
-        val name = requireChatmailName()
-        return chatmailLock.withLock {
-            check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
-            val core = connectedChatmail(name, code)
+    private suspend fun importSecureJoinInvite(code: String, channelOnly: Boolean): InviteImportState =
+        withChatmail(requireNetwork = true, setupQr = code) { core ->
             val kind = core.inviteKind(code)
             val channel = kind == "askJoinBroadcast"
             val group = kind == "askVerifyGroup"
@@ -558,7 +547,6 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                     joinedChat = chat, joinedGroup = group)
             }
         }
-    }
 
     private suspend fun importChatmailInvite(text: String): InviteImportState {
         val bytes = chatmailInviteBytes(text)
@@ -583,7 +571,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val name = requireChatmailName()
         awaitInviteNetwork()
         return chatmailLock.withLock {
-            check(!recoveryQueued.get() && credentials != null) { "P2P is restoring your identity. Try again in a moment." }
+            check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
             require(id != peer.value) { "This is your own invite. Use the invite from the other device." }
             require(expires > System.currentTimeMillis()) { "This invite expired. Ask for a fresh invite." }
             val contact = records.get(id)?.takeIf { it.kind == "contact" }?.data()
@@ -604,7 +592,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             require(grantDecision(known?.device.orEmpty(), known?.revision ?: 0L, grant.device, grant.revision) != GrantDecision.REJECT) {
                 "This invite is from a replaced device. Ask for a fresh invite."
             }
-            val chat = connectedChatmail(name).join(qr)
+            val chat = connectedChatmail(name).joinLegacyContact(qr)
             check(chat > 9) { "Chatmail couldn’t create this conversation." }
             check(devices.accept(grant)) { "This invite is from a replaced device. Ask for a fresh invite." }
             database.withTransaction {
@@ -655,7 +643,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
         chatmailState.value = if (service.connectivity() >= 3000) "Connected to Chatmail" else "Connecting to Chatmail"
         val cursor = chatmailCursor ?: (records.get("chatmail-cursor")?.data()?.optInt("id") ?: 0)
-        val queued = service.unread(cursor).take(64)
+        val queued = service.legacyInboxAfter(cursor).take(64)
         val messages = service.messages(queued)
         for (id in queued) {
             val message = messages.optJSONObject(id.toString())
@@ -727,7 +715,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             data.put("name", chat.name)
                 .put("members", jsonArray(listOf(peer.value) + chat.members.map(::nativePeerKey)))
                 .put("owner", if (chat.canSend) peer.value else "")
-            if (!chat.group) data.put("nativeContact", chat.members.single())
+            chat.contactId?.let { data.put("nativeContact", it) }
         }
         cacheNativeRecord(key, if (chat.group) "group" else "contact", data, saved?.created ?: 0L)
         if (chat.archived && records.get("folder:" + key) == null) save("folder:" + key, "folder", obj("name" to "Archive"))
@@ -739,10 +727,10 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     }
 
     internal fun loadOlderNativeMessages(thread: String) = work {
-        withInteropChatmail { core ->
-            val data = records.get(thread)?.data() ?: return@withInteropChatmail
-            val chat = core.nativeThread(data.optInt("nativeChat")) ?: return@withInteropChatmail
-            val before = data.optInt("nativeHistoryFirst").takeIf { it > 9 } ?: return@withInteropChatmail
+        withChatmail { core ->
+            val data = records.get(thread)?.data() ?: return@withChatmail
+            val chat = core.nativeThread(data.optInt("nativeChat")) ?: return@withChatmail
+            val before = data.optInt("nativeHistoryFirst").takeIf { it > 9 } ?: return@withChatmail
             updateNativeHistory(core, chat, thread, 100, before)
         }
     }
@@ -941,8 +929,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             val chat = data.getInt("chat")
             val transfer = data.getString("transfer")
             try {
-                val message = data.optInt("message").takeIf { it > 0 } ?: service.findSent(chat, transfer)
-                if (message != null) service.cancelPending(message, chat, transfer)
+                val message = data.optInt("message").takeIf { it > 0 } ?: service.findLegacyPacket(chat, transfer)
+                if (message != null) service.cancelLegacyPacket(message, chat, transfer)
                 records.remove(entry.key)
                 retryAfter.remove(entry.key)
             } catch (error: CancellationException) {
@@ -1065,7 +1053,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (processed >= 6) continue
                 if (transfer in cancellations) continue
-                if (!service.canSend(chat)) {
+                if (!service.canSendLegacyPacket(chat)) {
                     retryAfter[record.key] = now + 5_000L
                     continue
                 }
@@ -1077,8 +1065,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                     handleResult(record.key, "rejected")
                     continue
                 }
-                val message = service.findSent(chat, transfer)
-                    ?: service.send(chat, packet, file, payload.optString("name"))
+                val message = service.findLegacyPacket(chat, transfer)
+                    ?: service.sendLegacyPacket(chat, packet, file, payload.optString("name"))
                 change(record.key) {
                     put("chatmailMessage", message).put("submittedChatmailChat", chat).put("submitted", true)
                 }
@@ -1809,7 +1797,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
         val native = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
         if (native > 9 && folder in setOf("Inbox", "Archive")) {
-            withInteropChatmail { it.nativeArchive(native, folder == "Archive") }
+            withChatmail { it.nativeArchive(native, folder == "Archive") }
         }
         if (folder == "Inbox") records.remove("folder:" + thread)
         else save("folder:" + thread, "folder", obj("name" to folder))
@@ -1912,7 +1900,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                     it > 9 && data.optString("thread") == thread && data.optBoolean("unread")
                 }
             }
-            if (unread.isNotEmpty() && visible && visibleThread == thread) withInteropChatmail { it.nativeRead(unread) }
+            if (unread.isNotEmpty() && visible && visibleThread == thread) withChatmail { it.nativeRead(unread) }
         }
         val attachments = database.withTransaction {
             if (!visible || visibleThread != thread) return@withTransaction emptyList()
@@ -1946,7 +1934,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         if (native > 9) {
             val thread = requireNotNull(record).getString("thread")
             val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
-            withInteropChatmail { core ->
+            withChatmail { core ->
                 core.nativeReact(native, emoji)
                 refreshAfterNativeSend(core, chat, thread, native)
             }
@@ -2046,7 +2034,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             records.get(key)?.data()?.takeIf { it.optString("thread") == thread }?.optInt("nativeMessage")?.takeIf { it > 9 }
         }
         if (attachments.isEmpty()) {
-            withInteropChatmail { core ->
+            withChatmail { core ->
                 core.nativeSend(chat, text, quote)
                 refreshAfterNativeSend(core, chat, thread)
             }
@@ -2058,7 +2046,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             val staged = mutableListOf<JSONObject>()
             try {
                 for (item in attachments.drop(start)) staged.add(stageFile(item.uri, thread, "", item.asFile, draft = item))
-                withInteropChatmail { core ->
+                withChatmail { core ->
                     for ((offset, offer) in staged.withIndex()) {
                         val index = start + offset
                         val mime = offer.getString("mime")
@@ -2405,7 +2393,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val native = snapshot.optInt("nativeMessage")
         if (native > 9) {
             require(snapshot.optLong("size") <= CHATMAIL_FILE_LIMIT) { "This attachment exceeds the 20 MB limit." }
-            withInteropChatmail { it.download(native) }
+            withChatmail { it.download(native) }
             nextNativeSync = 0L
             return
         }
