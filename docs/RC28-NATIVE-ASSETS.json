@@ -1,0 +1,85 @@
+{
+  "provenance": "Recovered from P2P-0.7.23-rc27-ARM64-Preview.apk; WebRTC supplied by Gradle io.github.webrtc-sdk:android:144.7559.15",
+  "files": [
+    {
+      "path": "app/src/main/jniLibs/arm64-v8a/libp2p_engine.so",
+      "bytes": 14101808,
+      "sha256": "2b208a075ae26988f33074e4bfb5318c851d7ef6672567e0268e7dcf30f72612"
+    },
+    {
+      "path": "app/src/main/jniLibs/arm64-v8a/libonnxruntime.so",
+      "bytes": 22249560,
+      "sha256": "33847ad43bffe204699fd4a27f7f3603452a8cdaf2f9a44983a0bc31ffcf2da1"
+    },
+    {
+      "path": "app/src/main/jniLibs/arm64-v8a/libp2p_chatmail.so",
+      "bytes": 5512,
+      "sha256": "9b3ac980d9b6b26a7879ada9b5267ca911df8fa526c49ee9d515a86789518f4d"
+    },
+    {
+      "path": "app/src/main/jniLibs/arm64-v8a/libnative-utils.so",
+      "bytes": 20555240,
+      "sha256": "54a41c90f9fe996cae725752f0ac9beb704fa4ec6e4bc33a871e015cd1a8e536"
+    },
+    {
+      "path": "app/src/main/jniLibs/arm64-v8a/libsherpa-onnx-c-api.so",
+      "bytes": 4465168,
+      "sha256": "c85e2382e2ca12b0513826be926eaccfea896b4cbf568182e287671ba526f80d"
+    },
+    {
+      "path": "app/src/main/jniLibs/arm64-v8a/libonklav_speech.so",
+      "bytes": 596696,
+      "sha256": "381ba7eb88fd5eaf23448b5e818429d8943abb24852627921b3b18b13580247a"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/wallpaper_angkor_light.webp",
+      "bytes": 200388,
+      "sha256": "b803ae422c15172bdbf7003b58ac1a1f3ff2d08bac2873ac248677fd00b34fd8"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/wallpaper_starry_light.webp",
+      "bytes": 346690,
+      "sha256": "f8b42db6ad5302ef26c665d46179216fe2baa5ebb66dfc17cfd78663685994d9"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/wallpaper_cosmos_dark.webp",
+      "bytes": 392598,
+      "sha256": "7564e9c8aa24d4e8b8ca4c65ac23f6be1aecffb97b2b9c1248256b2037159907"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/wallpaper_greatwave_dark.webp",
+      "bytes": 257320,
+      "sha256": "c84a7696549b555ff7db4975cf5e523f5c37795b217d1916ceb93cc18e5dd3bb"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/wallpaper_angkor_dark.webp",
+      "bytes": 205236,
+      "sha256": "ba6f3c640cd7e26422c104f46e2665197a394c4e47c42c9a94e7b1988f6a6005"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/wallpaper_starry_dark.webp",
+      "bytes": 362868,
+      "sha256": "d7170c8ca752b0268636e6e7481a9cd1918df90a977344ea6c7203d611f5988e"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/wallpaper_greatwave_light.webp",
+      "bytes": 236078,
+      "sha256": "d222f0a6d9da80861b04df446dbcaf53d9e5f05e6f407ee2a6311ac6fd08c061"
+    },
+    {
+      "path": "app/src/main/res/drawable-nodpi/wallpaper_cosmos_light.webp",
+      "bytes": 246134,
+      "sha256": "932c7dc14a06222429d9cc388f7ebe1d1d662fc9682111d65bc16d3edd591d02"
+    },
+    {
+      "path": "app/src/main/assets/speech/english.json",
+      "bytes": 2663,
+      "sha256": "bc760010d19db599602a69af4fdc544fbe52b162a4296069cb4cee8ee4a34d93"
+    },
+    {
+      "path": "app/src/main/assets/speech/english.voicepack",
+      "bytes": 53251426,
+      "sha256": "cb36c3f4595ae23784bcd624bf685d208c7b84f9951068f1f4949d0825aa868c"
+    }
+  ]
+}

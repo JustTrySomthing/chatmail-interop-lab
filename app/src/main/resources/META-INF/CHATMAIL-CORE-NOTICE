@@ -1,0 +1,5 @@
+Chatmail Core 2.69.0 is licensed under the Mozilla Public License 2.0.
+Corresponding source: https://github.com/chatmail/core/tree/v2.69.0
+Native binaries: https://github.com/deltachat/deltachat-android/releases/tag/v2.69.0
+Delta Chat's app UI and Java bindings are not used. P2P uses the public
+Chatmail Core JSON-RPC functions through its own Android JNI bridge.

@@ -1,0 +1,10 @@
+.gradle/
+build/
+local.properties
+engine/target/
+*.jks
+*.p12
+*.keystore
+password.txt
+signing/
+.gradle-local/

@@ -1,0 +1,13 @@
+{
+  "version": "0.7.23-rc40",
+  "version_code": 76,
+  "package": "app.p2p.preview",
+  "apk": "P2P-0.7.23-rc40-ARM64-Preview.apk",
+  "bytes": 140925726,
+  "sha256": "60ab6a2eee49d9b526af3ee8742a58a0e83bc63db1f62fce5ab5ec8fd3f0fbd3",
+  "signing_certificate_sha256": "39e8ffec3e664cfd6b3865aa68e8ee43f9707fc8d7bbb14248a363f093314d13",
+  "automated_tests_passed": 112,
+  "lint_errors": 0,
+  "signed_apk_bootstrap_check": "passed",
+  "physical_device_validation": "unverified"
+}
