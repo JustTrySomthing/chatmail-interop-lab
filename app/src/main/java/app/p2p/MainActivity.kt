@@ -130,7 +130,8 @@ class MainActivity : ComponentActivity() {
             val route by alert.collectAsState()
             val updateRequested by openUpdates.collectAsState()
             val secureJoinLink by incomingSecureJoin.collectAsState()
-            CompositionLocalProvider(LocalReadAloud provides readAloud) {
+            val inlineAudio = remember { mutableStateOf<String?>(null) }
+            CompositionLocalProvider(LocalReadAloud provides readAloud, LocalInlineAudio provides inlineAudio) {
                 P2pApp(model, updates, incoming, route, { alert.value = null }, ::clearShare,
                     updateRequested, { openUpdates.value = false },
                     secureJoinLink, { incomingSecureJoin.value = null })
@@ -619,7 +620,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             runCatching { context.startActivity(Intent.createChooser(view, "Open file")) }
         }
+        val inlineAudio = LocalInlineAudio.current
         fun showAttachment(id: String) {
+            inlineAudio?.value = null
             val record = records.firstOrNull { it.key == id } ?: return
             val data = record.data()
             selected = id
@@ -1064,6 +1067,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             react = { selected = it; modal = "message-reactions" },
                             star = { model.star(it) },
                             galleryFile = model::galleryFile,
+                            requestAttachment = { model.requestDownload(it) },
                             file = ::showAttachment
                         )
                     }
@@ -1188,7 +1192,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                 modal = "add-contact"
                             },
                             share = { sharingChannel = it; modal = "channel-invite" },
-                            legacy = { legacySocial = true }, openLink = ::openLink)
+                            legacy = { legacySocial = true }, preview = ::showLink, openLink = ::openLink)
                     }
                     area == Area.Social -> {
                         Segments(listOf("My Page", "Friends", "Feed"), socialPage) { socialPage = it }
@@ -1276,10 +1280,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                             }
                                             if (data.optString("text").isNotBlank()) {
                                                 val body = data.optString("text")
-                                                LinkedMessageText(body, ::openLink)
-                                                previewLinks(body).forEach { link ->
-                                                    MessageLinkCard(link, { showLink(link) }, { openLink(link) })
-                                                }
+                                                MessageBodyWithPreviews(body, ::showLink, ::openLink)
                                             }
                                             records.filter { item -> item.kind != "message" && item.isThreadMessage() &&
                                                 item.data().optString("post") == post.key }
@@ -1294,7 +1295,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                                             val local = model.galleryFile(attachment)
                                                             ChatAttachment(media, local, attachment.kind == "file-received", open,
                                                                 local?.let { { showDownload(MediaDownload.attachment(attachment)) } },
-                                                                usePlaybackPoster = true)
+                                                                playbackKey = attachment.key, usePlaybackPoster = true)
                                                         }
                                                     }
                                                 }
@@ -2382,7 +2383,7 @@ private fun FullPageScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun Sheet(title: String, dismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+internal fun Sheet(title: String, dismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     ModalBottomSheet(onDismissRequest = dismiss, containerColor = Panel, contentColor = Ink, sheetMaxWidth = 560.dp,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
@@ -2588,7 +2589,8 @@ internal fun ColumnScope.ThreadView(
     send: (String, () -> Unit) -> Unit, preview: (PreviewLink) -> Unit,
     openLink: (PreviewLink) -> Unit, attach: () -> Unit,
     messageMenu: (String) -> Unit, react: (String) -> Unit,
-    star: (String) -> Unit, galleryFile: (Record) -> File?, file: (String) -> Unit
+    star: (String) -> Unit, galleryFile: (Record) -> File?, file: (String) -> Unit,
+    requestAttachment: ((String) -> Unit)? = null
 ) {
     val messages = remember(records, id) {
         records.filter { it.isThreadMessage() && !it.data().optBoolean("locallyDeleted") && !it.data().optBoolean("voicemail") && it.data().optString("thread") == id }
@@ -2727,18 +2729,16 @@ internal fun ColumnScope.ThreadView(
                                         original?.optString("text")?.ifBlank { original.optString("name") } ?: quoteText)
                                 }
                                 if (isAttachment) {
-                                    ChatAttachment(data, galleryFile(message), message.kind == "file-received",
-                                        { file(message.key) }, options, onLongClickLabel = "Attachment options")
-                                    if (data.optString("caption").isNotBlank()) {
-                                        Text(data.optString("caption"), style = contentTextStyle(MaterialTheme.typography.bodyLarge))
-                                    }
-                                } else {
-                                    val body = data.optString("text")
-                                    LinkedMessageText(body, openLink, MaterialTheme.typography.bodyLarge, bubbleColor)
-                                    previewLinks(body).forEach { link ->
-                                        MessageLinkCard(link, { preview(link) }, { openLink(link) })
-                                    }
+                                    val local = galleryFile(message)
+                                    val pendingInline = local == null && message.kind == "file-received" &&
+                                        data.optInt("nativeMessage") > 9 && mediaKind(data.optString("mime"), data.optString("name")) != null
+                                    val open = if (pendingInline && requestAttachment != null) ({ requestAttachment(message.key) })
+                                        else ({ file(message.key) })
+                                    ChatAttachment(data, local, message.kind == "file-received",
+                                        open, options, playbackKey = message.key, onLongClickLabel = "Attachment options")
                                 }
+                                val body = data.optString(if (isAttachment) "caption" else "text")
+                                MessageBodyWithPreviews(body, preview, openLink, bubbleColor)
                                 val reactions = reactionsByMessage[message.key].orEmpty().values
                                     .map(ReactionMark::emoji).distinct().joinToString(" ")
                                 if (reactions.isNotBlank()) {
@@ -2759,31 +2759,8 @@ internal fun ColumnScope.ThreadView(
         }
     }
     if (view == Feed) {
-        if (attachments.isNotEmpty()) {
-            Surface(color = Panel) {
-                Column(Modifier.fillMaxWidth().heightIn(max = if (keyboardVisible || showEmoji) 58.dp else 140.dp)
-                    .padding(horizontal = 12.dp)) {
-                    LazyColumn {
-                        items(attachments.size) { index ->
-                            val item = attachments[index]
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Outlined.AttachFile, null, Modifier.size(17.dp), tint = readableAccent(Panel, Ink))
-                                Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
-                                    Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
-                                    Text(when {
-                                        item.range != null -> "Trim selected"
-                                        item.asFile -> "Original file"
-                                        else -> "Attachment"
-                                    }, fontSize = 11.sp, color = Quiet)
-                                }
-                                if (item.canTrim) P2pTextButton(onClick = { trimAttachment(index) }, enabled = !preparing) { Text("Trim") }
-                                IconButton(onClick = { removeAttachment(index) }, enabled = !preparing) { Icon(Icons.Outlined.Close, "Remove attachment") }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        AttachmentDraftList(attachments, preparing, removeAttachment, trimAttachment,
+            if (keyboardVisible || showEmoji) 58.dp else 140.dp)
         if (quote != null) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 15.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { QuotedMessage(name(quote.data().optString("author")), quote.data().optString("text")) }
@@ -2824,13 +2801,17 @@ internal fun ColumnScope.ThreadView(
 }
 
 @Composable
-private fun ChatAttachment(
+internal fun ChatAttachment(
     data: JSONObject, local: File?, received: Boolean, open: () -> Unit, longPress: (() -> Unit)?,
-    usePlaybackPoster: Boolean = false, onLongClickLabel: String = "Download media"
+    playbackKey: String, usePlaybackPoster: Boolean = false, onLongClickLabel: String = "Download media"
 ) {
     val label = data.optString("name", "Shared file")
     val mime = data.optString("mime")
     val kind = remember(mime, label, local) { mediaKind(mime, label, local) }
+    if (kind == MediaKind.Audio && local != null) {
+        InlineAudioAttachment(local, playbackKey, label, longPress, onLongClickLabel)
+        return
+    }
     val animation = kind?.animationLabel
     val inlineAnimation = local != null && animation != null && !usePlaybackPoster
     val thumbnail = mediaThumbnail(local?.takeUnless { inlineAnimation }, kind)
@@ -2865,7 +2846,6 @@ private fun ChatAttachment(
             contentScale = ContentScale.Fit)
     }
     val playLabel = when (kind) {
-        MediaKind.Audio -> "Play audio"
         MediaKind.Video -> "Play video"
         else -> null
     }

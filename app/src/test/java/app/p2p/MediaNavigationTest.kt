@@ -376,7 +376,7 @@ class MediaNavigationTest {
     }
 
     @Test
-    fun opensDownloadedAudioInsideP2pAndUsesTheSharedDownloadDialog() {
+    fun playsDownloadedAudioInlineAndKeepsTheSharedDownloadDialog() {
         val context = ApplicationProvider.getApplicationContext<P2pApplication>()
         seedCompletedSetup(context)
         val id = newId()
@@ -408,14 +408,19 @@ class MediaNavigationTest {
             compose.waitUntil(5_000) {
                 runCatching { compose.onNodeWithText("Family recording.wav").assertIsDisplayed() }.isSuccess
             }
-            compose.onNodeWithText("Family recording.wav").performClick()
-            compose.onNodeWithContentDescription("Close media").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Play audio").performClick()
+            compose.onNodeWithContentDescription("Close media").assertDoesNotExist()
             compose.onNodeWithContentDescription("File details").assertDoesNotExist()
-            compose.onNodeWithContentDescription("Download media").performClick()
+            compose.waitUntil(5_000) {
+                runCatching { compose.onNodeWithContentDescription("Pause audio").assertIsDisplayed() }.isSuccess
+            }
+            compose.onNodeWithContentDescription("Pause audio").performClick()
+            compose.onNodeWithText("Family recording.wav").performTouchInput { longClick() }
+            compose.onNodeWithText("Download media").performScrollTo().performClick()
             compose.onNodeWithText("Download audio").assertIsDisplayed()
             compose.onNodeWithText("Choose location").assertIsDisplayed()
             compose.onNodeWithText("Cancel").performClick()
-            compose.onNodeWithContentDescription("Close media").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Close media").assertDoesNotExist()
         }
     }
 }

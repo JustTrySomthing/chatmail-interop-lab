@@ -504,15 +504,42 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     internal suspend fun chatmailChannelHistory(id: Int, limit: Int) = withChatmail { core ->
         val channel = requireNotNull(core.channel(id)) { "Waiting for the channel owner to process your join request." }
         core.noticeChannel(channel)
-        core.channelPosts(channel, limit)
+        val history = core.channelPosts(channel, limit)
+        history.copy(posts = history.posts.map(::channelPostMedia))
     }
 
     internal suspend fun chatmailChannelFeed(channels: List<ChatmailChannel>, limit: Int) =
         withChatmail { core ->
             channels.asSequence().filterNot { it.owned }.flatMap { core.channelPosts(it, limit).posts }
                 .sortedWith(compareByDescending<ChannelPost> { it.time }.thenByDescending { it.id })
-                .take(limit).toList()
+                .take(limit).map(::channelPostMedia).toList()
         }
+
+    private fun channelPostMedia(post: ChannelPost): ChannelPost =
+        post.copy(localFile = post.attachment?.let(::availableChatmailFile))
+
+    internal suspend fun requestChannelAttachment(id: Int) = withChatmail { core ->
+        val post = channelAttachment(core, id)
+        val attachment = requireNotNull(post.attachment) { "This post no longer has an attachment." }
+        require(attachment.size <= CHATMAIL_FILE_LIMIT) { "This attachment exceeds the 20 MB limit." }
+        if (post.localFile == null && attachment.downloadState != "InProgress") core.download(id)
+    }
+
+    private fun channelAttachment(core: Chatmail, id: Int): ChannelPost {
+        val row = core.message(id)
+        val channel = requireNotNull(core.channel(row.getInt("chatId"))) { "This channel is unavailable." }
+        return channelPostMedia(requireNotNull(parseChannelPost(row, channel)) { "This post is unavailable." })
+    }
+
+    private fun availableChatmailFile(attachment: ChatmailAttachment): File? {
+        val path = attachment.path ?: return null
+        return runCatching {
+            val parent = File(context.noBackupFilesDir, "chatmail").canonicalFile.toPath()
+            File(path).canonicalFile.takeIf { file ->
+                file.toPath().startsWith(parent) && file.isFile && file.length() in 0..CHATMAIL_FILE_LIMIT
+            }
+        }.getOrNull()
+    }
 
     internal suspend fun createChatmailChannel(name: String) = withChatmail { core ->
         val title = name.trim()
@@ -525,9 +552,12 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         core.channelInvite(requireNotNull(core.channel(id)) { "Channel unavailable." })
     }
 
-    internal suspend fun publishChatmailChannelPost(id: Int, text: String) = withChatmail { core ->
-        core.postToChannel(requireNotNull(core.channel(id)) { "Channel unavailable." }, text)
-    }
+    internal suspend fun publishChatmailChannelPost(id: Int, text: String, attachments: List<AttachmentDraft>) =
+        withContext(Dispatchers.IO) {
+            require(text.isNotBlank() || attachments.isNotEmpty()) { "Add text or media before publishing." }
+            sendChatmailDraft(id, nativeThreadKey(id), text.trim(), null, attachments, channelPost = true)
+            deleteTemporaryDrafts(attachments)
+        }
 
     private suspend fun importSecureJoinInvite(code: String, channelOnly: Boolean): InviteImportState =
         withChatmail(requireNetwork = true, setupQr = code) { core ->
@@ -747,7 +777,6 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         if (batch.isEmpty() && page.first == null && before == null) return emptyList()
         var newMessage = false
         var newAttachment = false
-        val parent = File(context.noBackupFilesDir, "chatmail").canonicalFile.toPath()
         database.withTransaction {
             if (messageId == null && (loaded <= 9 || latest == null)) change(thread) {
                 put("nativeHasOlder", page.hasOlder)
@@ -773,10 +802,10 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                     records.get("peer-profile:$author") == null) {
                     save("peer-profile:$author", "peer-profile", obj("name" to message.senderName), 0L)
                 }
-                val isFile = message.name.isNotBlank() || message.path != null
+                val attachment = message.attachment
                 if (before == null && old == null && message.state == 10) {
                     newMessage = true
-                    newAttachment = newAttachment || isFile
+                    newAttachment = newAttachment || attachment != null
                 }
                 val data = old ?: obj()
                 data.put("nativeMessage", message.id).put("thread", thread).put("author", author)
@@ -791,21 +820,19 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                         .put("delivered", if (message.state == 28) 1 else 0)
                         .put("failed", if (message.state == 24) 1 else 0)
                 }
-                val kind = if (!isFile) "message" else {
+                val kind = if (attachment == null) "message" else {
                     val folder = if (outgoingMessage) outgoing else incoming
                     val existing = File(folder, id)
-                    val source = message.path?.let(::File)?.let { runCatching { it.canonicalFile }.getOrNull() }
-                    if (source != null && source.toPath().startsWith(parent) && source.isFile &&
-                        source.length() <= CHATMAIL_FILE_LIMIT && !existing.isFile) {
+                    val source = if (existing.isFile) null else availableChatmailFile(attachment)
+                    if (source != null) {
                         val staged = File(folder, "$id-chatmail.tmp")
                         try {
                             source.copyTo(staged, overwrite = true)
                             check(staged.renameTo(existing))
                         } finally { staged.delete() }
                     }
-                    data.put("name", message.name.ifBlank { "Attachment" }).put("mime", message.mime)
-                        .put("size", message.size).put("listed", message.viewType == "File")
-                        .put("state", if (existing.isFile) "Complete" else "Available")
+                    val media = attachment.displayData(existing.takeIf(File::isFile))
+                    media.keys().forEach { key -> data.put(key, media.get(key)) }
                     if (outgoingMessage) "file-sent" else "file-received"
                 }
                 cacheNativeRecord(id, kind, data, message.time)
@@ -1999,7 +2026,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val native = record?.data()?.optInt("nativeChat") ?: 0
         if (native > 9) {
             check(record?.data()?.optBoolean("blocked") != true && !groupBlocked(thread)) { "This conversation is blocked." }
-            sendNativeDraft(native, thread, text.trim(), replyTo, attachments, voicemail)
+            sendChatmailDraft(native, thread, text.trim(), replyTo, attachments, voicemail)
             deleteTemporaryDrafts(attachments)
             return
         }
@@ -2027,52 +2054,45 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         deleteTemporaryDrafts(attachments)
     }
 
-    private suspend fun sendNativeDraft(
-        chat: Int, thread: String, text: String, replyTo: String?, attachments: List<AttachmentDraft>, voicemail: Boolean
+    private suspend fun sendChatmailDraft(
+        chat: Int, thread: String, text: String, replyTo: String?, attachments: List<AttachmentDraft>,
+        voicemail: Boolean = false, channelPost: Boolean = false
     ) {
         val quote = replyTo?.let { key ->
             records.get(key)?.data()?.takeIf { it.optString("thread") == thread }?.optInt("nativeMessage")?.takeIf { it > 9 }
         }
-        if (attachments.isEmpty()) {
+        val submission = UUID.nameUUIDFromBytes(obj("thread" to thread, "text" to text, "quote" to quote,
+            "files" to JSONArray(attachments.map(AttachmentDraft::toString))).toString().toByteArray())
+        val checkpoint = "native-draft:$submission"
+        val start = if (attachments.isEmpty()) 0 else records.get(checkpoint)?.data()?.optInt("next") ?: 0
+        val staged = mutableListOf<JSONObject>()
+        try {
+            for (item in attachments.drop(start)) staged.add(stageFile(item.uri, thread, "", item.asFile, draft = item))
             withChatmail { core ->
-                core.nativeSend(chat, text, quote)
-                refreshAfterNativeSend(core, chat, thread)
-            }
-        } else {
-            val submission = UUID.nameUUIDFromBytes(obj("thread" to thread, "text" to text, "quote" to quote,
-                "files" to JSONArray(attachments.map(AttachmentDraft::toString))).toString().toByteArray())
-            val checkpoint = "native-draft:$submission"
-            val start = records.get(checkpoint)?.data()?.optInt("next") ?: 0
-            val staged = mutableListOf<JSONObject>()
-            try {
-                for (item in attachments.drop(start)) staged.add(stageFile(item.uri, thread, "", item.asFile, draft = item))
-                withChatmail { core ->
-                    for ((offset, offer) in staged.withIndex()) {
-                        val index = start + offset
-                        val mime = offer.getString("mime")
-                        val viewType = when {
-                            offer.optBoolean("listed") -> "File"
-                            voicemail && mime.startsWith("audio/") -> "Voice"
-                            mime == "image/gif" -> "Gif"
-                            mime.startsWith("image/") -> "Image"
-                            mime.startsWith("audio/") -> "Audio"
-                            mime.startsWith("video/") -> "Video"
-                            else -> "File"
-                        }
-                        core.nativeSend(chat, if (index == 0) text else "", quote.takeIf { index == 0 },
-                            File(outgoing, offer.getString("id")), offer.getString("name"), viewType)
-                        save(checkpoint, "native-draft", obj("next" to index + 1))
-                    }
-                    records.remove(checkpoint)
-                    refreshAfterNativeSend(core, chat, thread)
+                val channel = if (channelPost) requireNotNull(core.channel(chat)) { "Channel unavailable." } else null
+                if (attachments.isEmpty()) {
+                    if (channel != null) core.postToChannel(channel, text) else core.nativeSend(chat, text, quote)
                 }
-            } finally {
-                staged.forEach { File(outgoing, it.getString("id")).delete() }
-                nextNativeSync = 0L
+                for ((offset, offer) in staged.withIndex()) {
+                    val index = start + offset
+                    val caption = text.takeIf { index == 0 }.orEmpty()
+                    val file = File(outgoing, offer.getString("id"))
+                    val name = offer.getString("name")
+                    val viewType = chatmailAttachmentViewType(offer.getString("mime"), offer.optBoolean("listed"), voicemail)
+                    if (channel != null) core.postToChannel(channel, caption, file, name, viewType)
+                    else core.nativeSend(chat, caption, quote.takeIf { index == 0 }, file, name, viewType)
+                    save(checkpoint, "native-draft", obj("next" to index + 1))
+                }
+                if (attachments.isNotEmpty()) records.remove(checkpoint)
+                if (channel == null) refreshAfterNativeSend(core, chat, thread)
             }
+        } finally {
+            staged.forEach { File(outgoing, it.getString("id")).delete() }
+            if (!channelPost) nextNativeSync = 0L
         }
-        if (records.get("folder:$thread")?.data()?.optString("name") == "Cleared") records.remove("folder:$thread")
-        nextNativeSync = 0L
+        if (!channelPost && records.get("folder:$thread")?.data()?.optString("name") == "Cleared") {
+            records.remove("folder:$thread")
+        }
     }
 
     private suspend fun refreshAfterNativeSend(core: Chatmail, chat: Int, thread: String, message: Int? = null) {
@@ -2251,6 +2271,11 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     internal suspend fun saveMedia(request: MediaDownload, destination: Uri?) = withContext(Dispatchers.IO) {
         val input = when {
             request.attachment != null -> downloadForExport(request.attachment).inputStream()
+            request.channelMessage != null -> withChatmail { core ->
+                requireNotNull(channelAttachment(core, request.channelMessage).localFile) {
+                    "This attachment is unavailable. Download it from the channel first."
+                }.inputStream()
+            }
             request.profilePhoto != null -> checkNotNull(checkedPhoto(request.profilePhoto)) {
                 "This profile photo is no longer available."
             }.inputStream()
@@ -2392,6 +2417,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             (snapshot.optString("state") == "Complete" && File(incoming, id).isFile)) return
         val native = snapshot.optInt("nativeMessage")
         if (native > 9) {
+            if (snapshot.optString("state") == "Downloading") return
             require(snapshot.optLong("size") <= CHATMAIL_FILE_LIMIT) { "This attachment exceeds the 20 MB limit." }
             withChatmail { it.download(native) }
             nextNativeSync = 0L

@@ -159,10 +159,13 @@ internal class Chatmail(directory: File) : AutoCloseable {
         return secureJoinLink(channel.id)
     }
 
-    fun postToChannel(channel: ChatmailChannel, text: String) {
+    fun postToChannel(channel: ChatmailChannel, text: String, file: File? = null,
+                      name: String? = null, viewType: String? = null) {
         check(channel.owned && channel.canPost) { "This channel can’t publish posts yet." }
-        require(text.isNotBlank() && text.length <= INTEROP_TEXT_LIMIT) { "Enter a post of up to $INTEROP_TEXT_LIMIT characters." }
-        sendMessage(channel.id, text)
+        require((text.isNotBlank() || file != null) && text.length <= INTEROP_TEXT_LIMIT) {
+            "Add a file or enter a post of up to $INTEROP_TEXT_LIMIT characters."
+        }
+        sendMessage(channel.id, text, file = file, name = name, viewType = viewType)
     }
 
     fun noticeChannel(channel: ChatmailChannel) {
@@ -358,7 +361,7 @@ internal data class ChatmailChannel(
 )
 internal data class ChannelPost(
     val id: Int, val channelId: Int, val channelName: String, val text: String,
-    val time: Long, val state: Int, val attachmentName: String?
+    val time: Long, val state: Int, val attachment: ChatmailAttachment?, val localFile: File? = null
 )
 internal data class ChannelHistory(val posts: List<ChannelPost>, val hasOlder: Boolean)
 
@@ -376,7 +379,7 @@ internal fun parseChannelPost(message: JSONObject, channel: ChatmailChannel): Ch
     if (!isEncryptedChatmailMessage(message, channel.id)) return null
     val id = message.getInt("id")
     val text = message.optString("text")
-    val attachment = message.optString("fileName").takeUnless { it.isBlank() || it == "null" }
+    val attachment = readChatmailAttachment(message)
     if (text.isBlank() && attachment == null) return null
     return ChannelPost(id, channel.id, channel.name, text,
         message.optLong("timestamp") * 1_000L, message.optInt("state"), attachment)

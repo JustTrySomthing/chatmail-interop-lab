@@ -6,6 +6,8 @@ import android.net.Uri
 import android.view.GestureDetector
 import android.view.MotionEvent
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -21,6 +23,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AudioFile
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -160,9 +164,42 @@ internal fun MediaDialog(
     }
 }
 
+internal val LocalInlineAudio = staticCompositionLocalOf<MutableState<String?>?> { null }
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+internal fun InlineAudioAttachment(
+    file: File, playbackKey: String, label: String, longPress: (() -> Unit)?, longPressLabel: String
+) {
+    val shared = LocalInlineAudio.current
+    val selected = shared ?: remember { mutableStateOf<String?>(null) }
+    DisposableEffect(playbackKey, selected) {
+        onDispose { if (selected.value == playbackKey) selected.value = null }
+    }
+    if (selected.value == playbackKey) {
+        LocalPlayer(file, false, {}, inlineAudioLabel = label, audioOptions = longPress,
+            audioOptionsLabel = longPressLabel)
+    } else {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer) {
+                Box(Modifier.size(48.dp).combinedClickable(onClickLabel = "Play audio", onClick = { selected.value = playbackKey },
+                    onLongClickLabel = longPressLabel, onLongClick = longPress), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.PlayArrow, "Play audio")
+                }
+            }
+            Text(label, Modifier.weight(1f).combinedClickable(onClick = { selected.value = playbackKey },
+                onLongClickLabel = longPressLabel, onLongClick = longPress), maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-private fun LocalPlayer(file: File, video: Boolean, download: () -> Unit) {
+private fun LocalPlayer(
+    file: File, video: Boolean, download: () -> Unit, inlineAudioLabel: String? = null,
+    audioOptions: (() -> Unit)? = null, audioOptionsLabel: String = "Download audio"
+) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var player by remember(file) { mutableStateOf<ExoPlayer?>(null) }
@@ -192,9 +229,14 @@ private fun LocalPlayer(file: File, video: Boolean, download: () -> Unit) {
         }
     }
     if (failed) {
-        Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(Modifier.padding(if (inlineAudioLabel == null) 24.dp else 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            inlineAudioLabel?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             Text("This file couldn’t be played on this device.")
-            P2pTextButton(onClick = { failed = false; attempt++ }) { Text("Try again") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                P2pTextButton(onClick = { failed = false; attempt++ }) { Text("Try again") }
+                audioOptions?.let { P2pTextButton(onClick = it) { Text(audioOptionsLabel) } }
+            }
         }
     } else {
         player?.let { instance ->
@@ -223,13 +265,14 @@ private fun LocalPlayer(file: File, video: Boolean, download: () -> Unit) {
                     }.apply { setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING) }
                 }, modifier = Modifier.fillMaxSize().semantics { onLongClick("Download video") { save(); true } },
                     update = { it.player = instance }, onRelease = { it.player = null })
-            } else AudioControls(instance)
+            } else AudioControls(instance, inlineAudioLabel, audioOptions, audioOptionsLabel)
         }
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun AudioControls(player: Player) {
+private fun AudioControls(player: Player, inlineLabel: String?, options: (() -> Unit)?, optionsLabel: String) {
     var position by remember(player) { mutableLongStateOf(0L) }
     var duration by remember(player) { mutableLongStateOf(0L) }
     var playing by remember(player) { mutableStateOf(false) }
@@ -242,10 +285,15 @@ private fun AudioControls(player: Player) {
             delay(200)
         }
     }
-    Column(Modifier.widthIn(max = 480.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(Icons.Outlined.AudioFile, null, Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(24.dp))
-        val fraction = requested ?: (position.toDouble() / duration.coerceAtLeast(1)).toFloat().coerceIn(0f, 1f)
+    val fraction = requested ?: (position.toDouble() / duration.coerceAtLeast(1)).toFloat().coerceIn(0f, 1f)
+    val toggle = {
+        if (playing) player.pause() else {
+            if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+            player.play()
+        }
+        playing = player.playWhenReady
+    }
+    val progress: @Composable () -> Unit = {
         Slider(value = fraction, enabled = duration > 0L && player.isCurrentMediaItemSeekable,
             onValueChange = { requested = it },
             onValueChangeFinished = {
@@ -253,16 +301,35 @@ private fun AudioControls(player: Player) {
                 requested = null
             })
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(playbackTime((duration * fraction.toDouble()).toLong()))
-            Text(playbackTime(duration))
+            Text(playbackTime((duration * fraction.toDouble()).toLong()), style = MaterialTheme.typography.labelMedium)
+            Text(playbackTime(duration), style = MaterialTheme.typography.labelMedium)
         }
-        Button(onClick = {
-            if (playing) player.pause() else {
-                if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
-                player.play()
+    }
+    if (inlineLabel == null) {
+        Column(Modifier.widthIn(max = 480.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Outlined.AudioFile, null, Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(24.dp))
+            progress()
+            Button(onClick = toggle) { Text(if (playing) "Pause" else "Play") }
+        }
+    } else {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            val action = if (playing) "Pause audio" else "Play audio"
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer, contentColor = MaterialTheme.colorScheme.onSecondaryContainer) {
+                Box(Modifier.size(48.dp).combinedClickable(onClickLabel = action, onClick = toggle,
+                    onLongClickLabel = optionsLabel, onLongClick = options), contentAlignment = Alignment.Center) {
+                    Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, action)
+                }
             }
-            playing = player.playWhenReady
-        }) { Text(if (playing) "Pause" else "Play") }
+            Column(Modifier.weight(1f)) {
+                Text(inlineLabel, Modifier.combinedClickable(onClick = toggle,
+                    onLongClickLabel = optionsLabel, onLongClick = options),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                progress()
+            }
+        }
     }
 }
 

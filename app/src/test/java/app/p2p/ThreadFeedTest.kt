@@ -67,7 +67,7 @@ class ThreadFeedTest {
         showFeed(records, file = { opened.add(it) }, react = { reacted.add(it) }).use {
             compose.onNodeWithContentDescription("Play video").performClick()
             compose.onNodeWithContentDescription("Play audio").performClick()
-            assertEquals(listOf(video.key, audio.key), opened)
+            assertEquals(listOf(video.key), opened)
             compose.onAllNodesWithContentDescription("React to attachment")[0].performClick()
             assertEquals(listOf(video.key), reacted)
             compose.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
@@ -77,10 +77,24 @@ class ThreadFeedTest {
             compose.onNodeWithText("Gallery").performClick()
             compose.onAllNodesWithContentDescription("Star attachment")[1].performClick()
             compose.onNodeWithContentDescription("Unstar attachment").assertIsDisplayed()
-            assertEquals(listOf(video.key, audio.key), opened)
+            assertEquals(listOf(video.key), opened)
             compose.onNodeWithText("Starred").performClick()
             compose.onNodeWithText("Recording.wav").assertIsDisplayed()
             compose.onNodeWithText("Message 1").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun attachmentCaptionsKeepTheirTextAndRenderLinkCards() {
+        val url = "https://example.org/route"
+        val attachment = Record("clip", "file-received", obj(
+            "thread" to "test-thread", "author" to "avery", "name" to "Clip.mp4",
+            "mime" to "video/mp4", "state" to "Available", "caption" to "Route details $url"
+        ).toString())
+        showFeed(mutableStateOf(listOf(attachment))).use {
+            compose.onNodeWithText("Route details").assertIsDisplayed()
+            compose.onNodeWithText("example.org").assertIsDisplayed()
+            compose.onNodeWithText(url, substring = true).assertDoesNotExist()
         }
     }
 

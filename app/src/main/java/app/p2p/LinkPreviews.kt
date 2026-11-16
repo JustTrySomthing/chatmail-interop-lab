@@ -96,6 +96,23 @@ internal fun LinkedMessageText(
     Text(annotated, style = contentTextStyle(style))
 }
 
+@Composable
+internal fun MessageBodyWithPreviews(
+    body: String, preview: (PreviewLink) -> Unit, open: (PreviewLink) -> Unit,
+    background: Color = MaterialTheme.colorScheme.surface
+) {
+    val links = remember(body) { previewLinks(body) }
+    val caption = remember(body, links) {
+        val rendered = links.mapTo(mutableSetOf(), PreviewLink::url)
+        webLink.replace(body) { match ->
+            val raw = match.value.trimEnd('.', ',', '!', '?', ')', ']', ';', ':')
+            if (parsePreviewLink(raw)?.url?.let(rendered::contains) == true) "" else match.value
+        }.trim()
+    }
+    if (caption.isNotBlank()) LinkedMessageText(caption, open, background = background)
+    links.forEach { link -> MessageLinkCard(link, { preview(link) }, { open(link) }) }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun MessageLinkCard(link: PreviewLink, preview: () -> Unit, open: () -> Unit) {

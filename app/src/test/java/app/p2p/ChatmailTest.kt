@@ -112,8 +112,13 @@ class ChatmailTest {
         val channel = ChatmailChannel(14, "Trail notes", false, false, 0)
         val message = obj("id" to 51, "kind" to "message", "chatId" to 14, "showPadlock" to true,
             "timestamp" to 900L, "text" to "The trail is open", "fileName" to "trail.png")
-        assertEquals(ChannelPost(51, 14, "Trail notes", "The trail is open", 900_000L, 0, "trail.png"),
+        val media = ChatmailAttachment(null, "trail.png", "", 0, "", "")
+        assertEquals(ChannelPost(51, 14, "Trail notes", "The trail is open", 900_000L, 0, media),
             parseChannelPost(message, channel))
+        message.put("fileMime", "image/png").put("downloadState", "InProgress").put("text", "")
+        val attachment = requireNotNull(parseChannelPost(message, channel)?.attachment)
+        assertEquals("image/png", attachment.mime)
+        assertEquals("Downloading", attachment.displayData(null).getString("state"))
         assertNull(parseChannelPost(message.put("isInfo", true), channel))
         assertNull(parseChannelPost(message.put("isInfo", false).put("showPadlock", false), channel))
         assertNull(parseChannelPost(message.put("showPadlock", true).put("chatId", 12), channel))
@@ -159,9 +164,10 @@ class ChatmailTest {
         val message = requireNotNull(readNativeMessage(raw, 12))
         assertEquals(28, message.quote)
         assertEquals("Alex", message.quoteAuthor)
-        assertEquals("clip.mp4", message.name)
-        assertEquals("video/mp4", message.mime)
-        assertEquals(1024L, message.size)
+        val media = requireNotNull(message.attachment)
+        assertEquals("clip.mp4", media.name)
+        assertEquals("video/mp4", media.mime)
+        assertEquals(1024L, media.size)
         assertEquals(1234000L, message.time)
         assertEquals(mapOf(1 to listOf("👍"), 20 to listOf("👋", "✨")), message.reactions)
         assertNull(readNativeMessage(raw, 13))

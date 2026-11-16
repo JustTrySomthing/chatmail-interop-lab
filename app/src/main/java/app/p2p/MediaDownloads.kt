@@ -27,7 +27,8 @@ internal data class MediaDownload(
     val mime: String,
     val attachment: String? = null,
     val profilePhoto: String? = null,
-    val thumbnail: String? = null
+    val thumbnail: String? = null,
+    val channelMessage: Int? = null
 ) : Serializable {
     val filename: String
         get() {

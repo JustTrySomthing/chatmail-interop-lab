@@ -41,7 +41,7 @@ Use fresh profiles and record the client versions and networks used. SecureJoin 
 
 ## Channels and Read Aloud
 
-**Channels → Feed** shows recent posts from joined channels, newest first. **Following** opens an individual channel or joins a standard Chatmail broadcast from a QR code, an image, or an invite link. **My Channel** creates one channel per profile, shares its invite, and publishes text. Existing Social content is reachable through **Previous Social posts**. Channel attachments currently show their filenames.
+**Channels → Feed** shows recent posts from joined channels, newest first. **Following** opens an individual channel or joins a standard Chatmail broadcast from a QR code, an image, or an invite link. **My Channel** creates one channel per profile and shares its invite. Use **Add media** to publish images, audio, or video with an optional caption. Relay Lab uses standard Chatmail posts and sends each selected attachment as its own post, with the caption on the first. Images and video show previews, links show cards, and audio plays directly in the channel, chat, or group. Existing Social content is reachable through **Previous Social posts**.
 
 Read Aloud uses the included offline voices and existing speech animation for messages, previous Social posts, and channel posts.
 

@@ -1,5 +1,8 @@
 package app.p2p
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -10,9 +13,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -28,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -50,16 +56,32 @@ internal fun ChannelBoard(
     join: () -> Unit,
     share: (ChatmailChannel) -> Unit,
     legacy: () -> Unit,
+    preview: (PreviewLink) -> Unit,
     openLink: (PreviewLink) -> Unit
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val saveMedia = LocalMediaDownload.current
+    val inlineAudio = LocalInlineAudio.current
     var channels by remember { mutableStateOf<List<ChatmailChannel>?>(null) }
     var posts by remember(page, selected) { mutableStateOf<List<ChannelPost>>(emptyList()) }
     var error by remember(page, selected) { mutableStateOf<String?>(null) }
     var actionError by remember(page, selected) { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var draft by remember(page, selected) { mutableStateOf("") }
+    var attachments by remember(page, selected) { mutableStateOf<List<AttachmentDraft>>(emptyList()) }
+    var trimIndex by remember(page, selected) { mutableStateOf<Int?>(null) }
+    var previewing by remember(page, selected) { mutableStateOf<ChannelPost?>(null) }
+    val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val drafts = uris.distinct().map { uri ->
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            describeAttachment(context, uri, asFile = false)
+        }
+        attachments = (attachments + drafts).distinctBy(AttachmentDraft::uri)
+    }
     var revision by remember { mutableIntStateOf(0) }
     var limit by remember(selected) { mutableIntStateOf(50) }
     var hasOlder by remember(selected) { mutableStateOf(false) }
@@ -102,11 +124,43 @@ internal fun ChannelBoard(
         }
     }
 
+    fun openAttachment(post: ChannelPost) {
+        if (post.localFile == null) {
+            submit { model.requestChannelAttachment(post.id) }
+        } else if (post.mediaPage() != null) {
+            inlineAudio?.value = null
+            previewing = post
+        } else {
+            post.download()?.let { saveMedia?.invoke(it) }
+        }
+    }
+
+    trimIndex?.let { index ->
+        attachments.getOrNull(index)?.let { item ->
+            Sheet("Trim attachment", { trimIndex = null }) {
+                TrimAttachmentPanel(item) { range ->
+                    attachments = attachments.mapIndexed { position, draft ->
+                        if (position == index) draft.copy(range = range) else draft
+                    }
+                    trimIndex = null
+                }
+            }
+        }
+    }
+    previewing?.let { post ->
+        post.mediaPage()?.let { media ->
+            MediaDialog(listOf(media), media.id, close = { previewing = null }, feedback = null) {
+                post.download()?.let { saveMedia?.invoke(it) }
+            }
+        }
+    }
+
     Segments(listOf("Feed", "Following", "My Channel"), page, select = selectPage)
     val matches = posts.filter { search.isBlank() || it.channelName.contains(search, true) || it.text.contains(search, true) }
     LazyColumn(contentPadding = PaddingValues(16.dp, 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (error != null) item { Text(error.orEmpty(), color = MaterialTheme.colorScheme.error) }
         if (channels == null && error == null) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        if (actionError != null) item { Text(actionError.orEmpty(), color = MaterialTheme.colorScheme.error) }
         if (selected != null) item {
             P2pTextButton(onClick = { selectChannel(null) }) { Text("Back to $page") }
         }
@@ -124,21 +178,42 @@ internal fun ChannelBoard(
                         OutlinedTextField(draft, { draft = it.take(INTEROP_TEXT_LIMIT) },
                             modifier = Modifier.fillMaxWidth(), label = { Text("Write a post") },
                             maxLines = 5, enabled = !busy)
-                        Button(shape = P2pButtonShape,
-                            enabled = current.canPost && draft.isNotBlank() && !busy, onClick = {
-                                val text = draft
-                                submit {
-                                    model.publishChatmailChannelPost(current.id, text)
-                                    draft = ""
-                                }
-                            }) { Text("Publish") }
+                        AttachmentDraftList(attachments, busy,
+                            removeAttachment = { index -> attachments = attachments.filterIndexed { position, _ -> position != index } },
+                            trimAttachment = {
+                                inlineAudio?.value = null
+                                trimIndex = it
+                            })
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            P2pOutlinedButton(
+                                enabled = current.canPost && !busy,
+                                onClick = { mediaPicker.launch(arrayOf("image/*", "video/*", "audio/*")) }
+                            ) {
+                                Icon(Icons.Outlined.AttachFile, null)
+                                Text("Add media")
+                            }
+                            Button(shape = P2pButtonShape,
+                                enabled = current.canPost && (draft.isNotBlank() || attachments.isNotEmpty()) && !busy,
+                                onClick = {
+                                    val text = draft
+                                    val media = attachments
+                                    submit {
+                                        model.publishChatmailChannelPost(current.id, text, media)
+                                        draft = ""
+                                        attachments = emptyList()
+                                    }
+                                }) { Text("Publish") }
+                        }
+                        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
-                    if (actionError != null) Text(actionError.orEmpty(), color = MaterialTheme.colorScheme.error)
                 }
                 if (matches.isEmpty() && current != null && error == null) item {
                     EmptyTabMessage(if (search.isBlank()) "No posts yet" else "No matching posts")
                 }
-                items(matches, key = { it.id }) { ChannelPostCard(it, current?.owned == true, null, openLink) }
+                items(matches, key = { it.id }) { post ->
+                    ChannelPostCard(post, current?.owned == true, null, preview, openLink, { openAttachment(post) })
+                }
                 if (hasOlder) item { P2pTextButton(onClick = { limit += 50 }) { Text("Load older posts") } }
             }
             viewingFeed -> {
@@ -146,7 +221,7 @@ internal fun ChannelBoard(
                     EmptyTabMessage(if (search.isBlank()) "No posts from channels you follow" else "No matching posts")
                 }
                 items(matches, key = { it.id }) { post ->
-                    ChannelPostCard(post, false, { selectChannel(post.channelId) }, openLink)
+                    ChannelPostCard(post, false, { selectChannel(post.channelId) }, preview, openLink, { openAttachment(post) })
                 }
             }
             page == "Following" -> {
@@ -168,7 +243,6 @@ internal fun ChannelBoard(
                             selectChannel(id)
                         }
                     }) { Text("Create channel") }
-                    if (actionError != null) Text(actionError.orEmpty(), color = MaterialTheme.colorScheme.error)
                 } else items(owned, key = { it.id }) { channel -> ChannelRow(channel) { selectChannel(channel.id) } }
             }
         }
@@ -204,7 +278,11 @@ private fun ChannelRow(channel: ChatmailChannel, open: () -> Unit) {
 }
 
 @Composable
-private fun ChannelPostCard(post: ChannelPost, owned: Boolean, open: (() -> Unit)?, openLink: (PreviewLink) -> Unit) {
+private fun ChannelPostCard(
+    post: ChannelPost, owned: Boolean, open: (() -> Unit)?, preview: (PreviewLink) -> Unit,
+    openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit
+) {
+    val save = LocalMediaDownload.current
     val colors = MaterialTheme.colorScheme
     val date = remember(post.time) {
         post.time.takeIf { it > 0 }?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it)) }
@@ -221,10 +299,26 @@ private fun ChannelPostCard(post: ChannelPost, owned: Boolean, open: (() -> Unit
                 }
                 ReadAloudButton("channel-post:${post.id}", post.text, "post")
             }
-            if (post.text.isNotBlank()) LinkedMessageText(post.text, openLink, background = colors.surfaceVariant)
-            post.attachmentName?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            MessageBodyWithPreviews(post.text, preview, openLink, colors.surfaceVariant)
+            post.attachment?.let { attachment ->
+                val download = post.download()
+                ChatAttachment(attachment.displayData(post.localFile), post.localFile, !owned,
+                    openAttachment, if (post.localFile == null || download == null || save == null) null else ({ save(download) }),
+                    playbackKey = "channel:${post.id}", usePlaybackPoster = true)
+            }
             if (owned && post.state == 20) Text("Queued", style = MaterialTheme.typography.labelMedium)
             if (owned && post.state == 24) Text("Send failed", color = colors.error, style = MaterialTheme.typography.labelMedium)
         }
     }
+}
+
+private fun ChannelPost.download(): MediaDownload? = attachment?.let {
+    MediaDownload(it.name, it.mime, channelMessage = id)
+}
+
+private fun ChannelPost.mediaPage(): MediaPage? {
+    val file = localFile ?: return null
+    val media = attachment ?: return null
+    val kind = mediaKind(media.mime, media.name, file) ?: return null
+    return MediaPage(id.toString(), file, media.name, kind)
 }
