@@ -115,7 +115,9 @@ class NavigationSmokeTest {
 
     @Test
     fun opensAllFourAreasAndTheirPrimaryControls() {
-        compose.onNodeWithText("Inbox").assertIsDisplayed()
+        val inbox = compose.onNodeWithText("Inbox")
+        compose.waitUntil(5_000) { inbox.isDisplayed() }
+        inbox.assertIsDisplayed()
         compose.onNodeWithText("Archive").assertIsDisplayed()
         compose.onNodeWithText("Trash").assertIsDisplayed()
         compose.onNodeWithText("No messages").assertIsDisplayed()

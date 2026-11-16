@@ -92,6 +92,7 @@ class LocalAlertsTest {
         shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
         val notifications = shadowOf(app.getSystemService(NotificationManager::class.java))
         val alerts = LocalAlerts(app)
+        UpdateChecks.prefs(app).edit().putBoolean("automatic", true).apply()
         val update = UpdateRelease(UpdateVersion(0, 7, 23, 99), "preview.apk", 120, "0".repeat(64), true)
         fun postAll() {
             for (area in AlertArea.entries) alerts.show(area, newId(), "Pat", area.label)

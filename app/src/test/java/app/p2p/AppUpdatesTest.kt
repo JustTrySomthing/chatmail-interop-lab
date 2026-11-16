@@ -42,10 +42,10 @@ class AppUpdatesTest {
     }
 
     @Test
-    fun freshInstallChecksForUpdatesByDefault() {
+    fun freshRelayLabInstallKeepsAutomaticUpdatesOff() {
         val prefs = UpdateChecks.prefs(RuntimeEnvironment.getApplication())
-        assertTrue(UpdateChecks.due(prefs, 1, true, now))
-        assertTrue(UpdateChecks.shouldPrompt(prefs, release("9.0.0"), now))
+        assertFalse(UpdateChecks.due(prefs, 1, true, now))
+        assertFalse(UpdateChecks.shouldPrompt(prefs, release("9.0.0"), now))
     }
 
     @Test
