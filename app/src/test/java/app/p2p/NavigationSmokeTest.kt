@@ -101,6 +101,17 @@ class NavigationSmokeTest {
     }
 
     @Test
+    fun newChatmailGroupHasAnOptionalDescription() {
+        val groups = compose.onAllNodesWithText("Groups")[0]
+        compose.waitUntil(5_000) { groups.isDisplayed() }
+        groups.performClick()
+        compose.onNodeWithText("Create a group").performSemanticsAction(SemanticsActions.OnClick)
+        val description = compose.onNode(hasSetTextAction() and hasText("Description (optional)"))
+        description.assertIsDisplayed().performTextInput("Local trail updates")
+        compose.onNodeWithText("Local trail updates").assertIsDisplayed()
+    }
+
+    @Test
     fun myChannelsOffersCreationFromItsOwnTab() {
         val channels = compose.onAllNodesWithText("Channels")[0]
         compose.waitUntil(5_000) { channels.isDisplayed() }

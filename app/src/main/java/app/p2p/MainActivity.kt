@@ -699,6 +699,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 postDraft = ""
                 postMedia = arrayListOf()
                 if (modal == "post") modal = null
+            } else if (result.sheet == "group-new" || result.sheet == "group-edit") {
+                if (modal == result.sheet) result.recipient?.let(::goThread)
             } else {
                 chosen = arrayListOf()
                 if (modal == "send" && result.recipient != null) {
@@ -960,11 +962,19 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         if (id == null) Text(area.label, fontWeight = FontWeight.SemiBold, fontSize = 25.sp)
                         else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             val title = name(id)
-                            Column(Modifier.weight(1f)) {
+                            val hasGroupInfo = group?.data()?.optInt("nativeChat")?.let { it > 9 } == true
+                            val groupInfo = if (hasGroupInfo) {
+                                Modifier.clickable(onClickLabel = "View group info") { modal = "group-info" }
+                            } else Modifier
+                            Column(Modifier.weight(1f).then(groupInfo)) {
                                 Text(title, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, maxLines = 1,
                                     overflow = TextOverflow.Ellipsis)
-                                if (group != null) Text(group.data().strings("members").size.toString() + " members",
-                                    color = Quiet, fontSize = 12.sp, maxLines = 1)
+                                if (group != null) Row(verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    if (hasGroupInfo) Icon(Icons.Outlined.Info, null, Modifier.size(14.dp), tint = Quiet)
+                                    Text(group.data().strings("members").size.toString() + " members",
+                                        color = Quiet, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                         }
                     },
@@ -1762,6 +1772,21 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         onAction = { goThread(contact.key) })
                 }
             }
+            "group-info" -> groups.firstOrNull { it.key == thread }?.let { group ->
+                val chat = group.data().optInt("nativeChat")
+                if (chat > 9) Sheet(name(group.key), { modal = null }) {
+                    val description = rememberGroupDescription(model, chat)
+                    Text("Description", style = MaterialTheme.typography.titleMedium)
+                    description.value?.let {
+                        if (it.isEmpty()) Text("No description", color = Quiet)
+                        else LinkedMessageText(it, ::openLink)
+                    }
+                    GroupDescriptionFeedback(description)
+                    if (peer.isNotBlank() && group.data().optString("owner") == peer) {
+                        P2pTextButton(onClick = { selected = group.key; modal = "group-edit" }) { Text("Edit group") }
+                    }
+                }
+            }
             "group-new", "group-edit" -> {
                 val editing = modal == "group-edit"
                 val group = groups.firstOrNull { editing && it.key == selected }
@@ -1779,8 +1804,18 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     }
                 }
                 val choices = if (useChatmail) nativeMembers else contacts.filterNot { it.data().has("nativeContact") }
-                GroupSheet(if (editing) "Edit group" else "New group", choices, group, { modal = null }) { title, members ->
-                    if (useChatmail) model.saveNativeGroup(chat, title, members, ::goThread)
+                val groupSubmission = submission?.takeIf { it.sheet == modal }
+                val busy = groupSubmission?.finished == false
+                val description = if (chat == null) GroupDescriptionState("") else rememberGroupDescription(model, chat)
+                GroupSheet(if (editing) "Edit group" else "New group", choices, group,
+                    description = description.takeIf { useChatmail }, busy = busy,
+                    error = groupSubmission?.error, dismiss = {
+                        if (!busy) {
+                            groupSubmission?.let(model::clearSubmission)
+                            modal = null
+                        }
+                    }) { title, details, members ->
+                    if (useChatmail) model.saveNativeGroup(chat, title, details, members)
                     else if (group != null) { model.updateGroup(group.key, title, members); modal = null }
                 }
             }
@@ -2583,25 +2618,72 @@ private fun InputDialog(
     }, dismissButton = { P2pTextButton(onClick = dismiss) { Text("Cancel") } })
 }
 
+private data class GroupDescriptionState(
+    val value: String? = null, val error: String? = null, val retry: (() -> Unit)? = null
+)
+
 @Composable
-private fun GroupSheet(title: String, contacts: List<Record>, group: Record?, dismiss: () -> Unit, save: (String, Set<String>) -> Unit) {
+private fun rememberGroupDescription(model: P2pModel, chat: Int): GroupDescriptionState {
+    var attempt by remember(chat) { mutableIntStateOf(0) }
+    val description by produceState(GroupDescriptionState(), model, chat, attempt) {
+        value = GroupDescriptionState()
+        var details: String? = null
+        val error = chatAction { details = model.chatmailDescription(chat) }
+        value = GroupDescriptionState(details, error) { attempt++ }
+    }
+    return description
+}
+
+@Composable
+private fun GroupDescriptionFeedback(description: GroupDescriptionState) {
+    if (description.error != null) {
+        Text(description.error, color = MaterialTheme.colorScheme.error)
+        description.retry?.let { P2pTextButton(onClick = it) { Text("Retry") } }
+    } else if (description.value == null) {
+        LinearProgressIndicator(Modifier.fillMaxWidth())
+    }
+}
+
+@Composable
+private fun GroupSheet(
+    title: String, contacts: List<Record>, group: Record?,
+    description: GroupDescriptionState?, busy: Boolean, error: String?, dismiss: () -> Unit,
+    save: (String, String?, Set<String>) -> Unit
+) {
     var name by rememberSaveable(group?.key) { mutableStateOf(group?.data()?.optString("name").orEmpty()) }
-    val members = remember(group?.key) { mutableStateListOf<String>().apply { addAll(group?.data()?.strings("members").orEmpty()) } }
+    var draft by rememberSaveable(group?.key) { mutableStateOf<String?>(null) }
+    var members by rememberSaveable(group?.key) {
+        mutableStateOf(ArrayList(group?.data()?.strings("members").orEmpty()))
+    }
+    fun toggleMember(id: String) {
+        members = ArrayList(if (id in members) members - id else members + id)
+    }
+    val details = draft ?: description?.value.orEmpty()
     Sheet(title, dismiss) {
         OutlinedTextField(name, { name = it }, label = { Text("Group name") }, modifier = Modifier.fillMaxWidth(),
-            singleLine = true, shape = RoundedFieldShape)
+            singleLine = true, shape = RoundedFieldShape, enabled = !busy)
+        if (description != null) {
+            OutlinedTextField(details, { if (it.length <= INTEROP_TEXT_LIMIT) draft = it },
+                label = { Text("Description (optional)") }, modifier = Modifier.fillMaxWidth(),
+                minLines = 2, maxLines = 5, shape = RoundedFieldShape, enabled = !busy && description.value != null)
+            GroupDescriptionFeedback(description)
+        }
         if (contacts.isEmpty()) Text("Add contacts before creating a group.", color = Quiet)
         contacts.filter { !it.data().optBoolean("blocked") }.forEach { contact ->
-            Row(Modifier.fillMaxWidth().clickable {
-                if (!members.remove(contact.key)) members.add(contact.key)
-            }.padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = contact.key in members, onCheckedChange = {
-                    if (it) members.add(contact.key) else members.remove(contact.key)
-                })
+            Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { toggleMember(contact.key) }
+                .padding(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = contact.key in members, enabled = !busy, onCheckedChange = { toggleMember(contact.key) })
                 Text(contact.data().optString("name"))
             }
         }
-        Button(onClick = { save(name, members.toSet()) }, shape = P2pButtonShape, enabled = name.isNotBlank() && (group != null || contacts.any { it.key in members })) {
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+        Button(onClick = {
+            val editedDescription = draft?.takeUnless { it.trim() == description?.value?.trim() }
+            save(name, editedDescription, members.toSet())
+        }, shape = P2pButtonShape,
+            enabled = !busy && name.isNotBlank() && (description == null || description.value != null) &&
+                (group != null || contacts.any { it.key in members })) {
             Text(if (group == null) "Create group" else "Save changes")
         }
     }

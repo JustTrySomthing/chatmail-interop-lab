@@ -497,21 +497,24 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    internal fun saveNativeGroup(chat: Int?, name: String, members: Set<String>, saved: (String) -> Unit) = work {
-        val title = name.trim()
-        require(title.isNotBlank() && title.length <= 80) { "Enter a group name of up to 80 characters." }
-        val ids = members.filter { it.startsWith("chatmail-peer:") }
-            .mapNotNull { it.substringAfter(':').toIntOrNull()?.takeIf { id -> id > 9 } }.toSet()
-        require(chat != null || ids.isNotEmpty()) { "Choose at least one contact." }
-        val key = withChatmail { core ->
-            val id = if (chat == null) core.nativeCreateGroup(title, ids)
-                else chat.also { core.nativeUpdateGroup(it, title, ids) }
-            core.nativeThread(id)?.let { cacheNativeThread(it) }
-            nextNativeSync = 0L
-            nativeThreadKey(id)
+    internal suspend fun chatmailDescription(id: Int) = withChatmail { it.chatDescription(id) }
+
+    internal fun saveNativeGroup(chat: Int?, name: String, description: String?, members: Set<String>) =
+        submitSheet(SheetSubmission(if (chat == null) "group-new" else "group-edit")) {
+            val title = name.trim()
+            require(title.isNotBlank() && title.length <= 80) { "Enter a group name of up to 80 characters." }
+            val details = description?.let(::checkedChatDescription)
+            val ids = members.filter { it.startsWith("chatmail-peer:") }
+                .mapNotNull { it.substringAfter(':').toIntOrNull()?.takeIf { id -> id > 9 } }.toSet()
+            require(chat != null || ids.isNotEmpty()) { "Choose at least one contact." }
+            withChatmail { core ->
+                val id = if (chat == null) core.nativeCreateGroup(title, details.orEmpty(), ids)
+                    else chat.also { core.nativeUpdateGroup(it, title, details, ids) }
+                core.nativeThread(id)?.let { cacheNativeThread(it) }
+                nextNativeSync = 0L
+                nativeThreadKey(id)
+            }
         }
-        withContext(Dispatchers.Main.immediate) { saved(key) }
-    }
 
     internal suspend fun nativeGroupInvite(chat: Int): String = withChatmail { it.nativeGroupInvite(chat) }
 
@@ -562,13 +565,14 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     internal suspend fun createChatmailChannel(name: String) =
         withChatmail { it.createChannel(checkedChannelName(name)) }
 
-    internal suspend fun chatmailChannelDescription(id: Int) = withChatmail { it.channelDescription(id) }
-
     internal suspend fun updateChatmailChannel(id: Int, name: String, description: String) =
         withChatmail {
-            require(description.length <= INTEROP_TEXT_LIMIT) { "The channel description is too long." }
-            it.updateChannel(id, checkedChannelName(name), description.trim())
+            it.updateChannel(id, checkedChannelName(name), checkedChatDescription(description))
         }
+
+    private fun checkedChatDescription(description: String): String = description.trim().also {
+        require(it.length <= INTEROP_TEXT_LIMIT) { "The description is too long." }
+    }
 
     internal suspend fun pinChatmailChannel(id: Int, pinned: Boolean) =
         withChatmail { it.pinChannel(id, pinned) }
@@ -2191,18 +2195,20 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         if (value.finished) submission.compareAndSet(value, null)
     }
 
-    private fun submitSheet(request: SheetSubmission, action: suspend () -> Unit): Job? {
+    private fun submitSheet(request: SheetSubmission, action: suspend () -> String?): Job? {
         val previous = submission.value
         if (previous?.finished == false || !submission.compareAndSet(previous, request)) return null
         return work {
             try {
-                action()
-                submission.value = request.copy(finished = true)
+                val recipient = action()
+                submission.value = request.copy(finished = true, recipient = recipient ?: request.recipient)
             } catch (error: CancellationException) {
                 submission.compareAndSet(request, null)
                 throw error
             } catch (error: Exception) {
                 submission.value = request.copy(finished = true, error = error.message ?: "Couldn’t complete that action")
+            } catch (_: LinkageError) {
+                submission.value = request.copy(finished = true, error = "Chatmail couldn’t start on this device.")
             }
         }
     }
@@ -2229,6 +2235,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             attachments.forEach { File(outgoing, it.getString("id")).delete() }
             throw error
         }
+        null
     }
 
     fun socialAction(post: String, value: String, reaction: Boolean) = work {
@@ -2324,6 +2331,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     internal fun sendFiles(thread: String, uris: List<Uri>) = submitSheet(SheetSubmission("send", thread)) {
         require(uris.isNotEmpty()) { "Choose a file to share." }
         commitDraft(thread, "", null, uris.distinct().map { describeAttachment(context, it, true) })
+        thread
     }
 
     private suspend fun mayDownload(to: String, offer: JSONObject): Boolean {

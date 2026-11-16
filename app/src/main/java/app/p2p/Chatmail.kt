@@ -165,12 +165,16 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     fun createChannel(name: String): Int = (call("create_broadcast", name) as Number).toInt()
 
-    fun channelDescription(id: Int): String = call("get_chat_description", id) as String
+    fun chatDescription(id: Int): String = call("get_chat_description", id) as String
+
+    private fun updateChatDescription(id: Int, description: String) {
+        if (description != chatDescription(id)) call("set_chat_description", id, description)
+    }
 
     fun updateChannel(id: Int, name: String, description: String) {
         val channel = requireOwnedChannel(id)
         if (name != channel.name) call("set_chat_name", id, name)
-        if (description != channelDescription(id)) call("set_chat_description", id, description)
+        updateChatDescription(id, description)
     }
 
     fun pinChannel(id: Int, pinned: Boolean) {
@@ -276,10 +280,11 @@ internal class Chatmail(directory: File) : AutoCloseable {
         call("accept_chat", id)
     }
 
-    fun nativeCreateGroup(name: String, members: Set<Int>): Int {
+    fun nativeCreateGroup(name: String, description: String, members: Set<Int>): Int {
         val id = (call("create_group_chat", name, false) as Number).toInt()
         try {
             members.forEach { call("add_contact_to_chat", id, it) }
+            if (description.isNotEmpty()) updateChatDescription(id, description)
         } catch (failure: Exception) {
             runCatching { call("delete_chat", id) }
             throw failure
@@ -287,11 +292,12 @@ internal class Chatmail(directory: File) : AutoCloseable {
         return id
     }
 
-    fun nativeUpdateGroup(id: Int, name: String, members: Set<Int>) {
+    fun nativeUpdateGroup(id: Int, name: String, description: String?, members: Set<Int>) {
         val group = requireNotNull(nativeThread(id)?.takeIf { it.group && it.canSend })
         if (group.name != name) call("set_chat_name", id, name)
         (members - group.members.toSet()).forEach { call("add_contact_to_chat", id, it) }
         (group.members.toSet() - members).forEach { call("remove_contact_from_chat", id, it) }
+        if (description != null) updateChatDescription(id, description)
     }
 
     fun isConfigured(): Boolean = call("is_configured") == true
@@ -374,6 +380,17 @@ internal class Chatmail(directory: File) : AutoCloseable {
             }
         }
     }
+}
+
+internal suspend fun chatAction(action: suspend () -> Unit): String? = try {
+    action()
+    null
+} catch (cancelled: kotlinx.coroutines.CancellationException) {
+    throw cancelled
+} catch (error: Exception) {
+    error.message ?: "Couldn’t complete that action."
+} catch (_: LinkageError) {
+    "Chatmail couldn’t start on this device."
 }
 
 private fun JSONArray.intValues(): List<Int> = (0 until length()).map(::getInt)

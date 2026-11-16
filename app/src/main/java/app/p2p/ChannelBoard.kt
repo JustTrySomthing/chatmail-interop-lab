@@ -64,7 +64,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import java.text.DateFormat
 import java.util.Date
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -119,13 +118,13 @@ internal fun ChannelBoard(
     val editing = owned.firstOrNull { it.id == editingId }
     val description by produceState("", active, revision) {
         value = ""
-        if (active != null) channelAction { value = model.chatmailChannelDescription(active) }
+        if (active != null) chatAction { value = model.chatmailDescription(active) }
     }
     val viewingFeed = page == "Feed" && selected == null
     LaunchedEffect(model, lifecycle, page, selected, active, limit, revision) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                error = channelAction {
+                error = chatAction {
                     val catalog = model.chatmailChannels()
                     channels = catalog
                     when {
@@ -147,7 +146,7 @@ internal fun ChannelBoard(
         actionError = null
         scope.launch {
             try {
-                actionError = channelAction(action)
+                actionError = chatAction(action)
                 if (actionError == null) revision++
             } finally {
                 busy = false
@@ -366,17 +365,6 @@ internal fun ChannelBoard(
     }
 }
 
-private suspend fun channelAction(action: suspend () -> Unit): String? = try {
-    action()
-    null
-} catch (cancelled: CancellationException) {
-    throw cancelled
-} catch (error: Exception) {
-    error.message ?: "Couldn’t complete the channel action."
-} catch (_: LinkageError) {
-    "Chatmail couldn’t start on this device."
-}
-
 @Composable
 private fun ChannelEditor(
     channel: ChatmailChannel?, model: P2pModel, busy: Boolean, error: String?,
@@ -389,7 +377,7 @@ private fun ChannelEditor(
     LaunchedEffect(channel?.id, attempt) {
         if (channel != null && description == null) {
             loadError = null
-            loadError = channelAction { description = model.chatmailChannelDescription(channel.id) }
+            loadError = chatAction { description = model.chatmailDescription(channel.id) }
         }
     }
     Sheet(if (channel == null) "Create a Channel" else "Edit channel", dismiss) {
