@@ -18,9 +18,8 @@ class ChatmailTest {
     fun compactChatmailInviteSurvivesPastingAndMakesAQr() {
         val signed = obj("payload" to """{"name":"Alyssa ☀","chatmail":"https://i.delta.chat/#sample"}""",
             "signature" to "sample", "public" to "sample").toString()
-        val code = chatmailInviteCode(signed)
-        assertTrue(InviteCode.hasPrefix(code))
-        assertEquals(code, InviteCode.compact(code))
+        val code = signedInviteFixture(signed.toByteArray())
+        assertTrue(isSupportedInviteCode(code))
         assertEquals(signed, chatmailInviteBytes(code.chunked(31).joinToString("\n")).toString(Charsets.UTF_8))
         val qr = requireNotNull(InviteImage.make(code))
         val scaled = android.graphics.Bitmap.createScaledBitmap(qr, qr.width * 5, qr.height * 5, false)
@@ -38,15 +37,15 @@ class ChatmailTest {
         val fingerprint = "ABCD".repeat(10)
         val fields = "a=relay%40example.org&n=Relay&i=invite&s=auth"
 
-        assertTrue(isContactInviteCode("  https://i.delta.chat/#$fingerprint&$fields  "))
-        assertTrue(isContactInviteCode("https://i.delta.chat#$fingerprint&$fields"))
-        assertTrue(isContactInviteCode("OPENPGP4FPR:$fingerprint#$fields"))
-        assertTrue(isContactInviteCode("openpgp4fpr:$fingerprint#$fields"))
-        assertTrue(isContactInviteCode("p2p3:legacy"))
+        assertTrue(isSupportedInviteCode("  https://i.delta.chat/#$fingerprint&$fields  "))
+        assertTrue(isSupportedInviteCode("https://i.delta.chat#$fingerprint&$fields"))
+        assertTrue(isSupportedInviteCode("OPENPGP4FPR:$fingerprint#$fields"))
+        assertTrue(isSupportedInviteCode("openpgp4fpr:$fingerprint#$fields"))
+        assertTrue(isSupportedInviteCode("p2p3:legacy"))
         assertFalse(isSecureJoinInvite("p2p3:legacy"))
-        assertFalse(isContactInviteCode("https://i.delta.chat.evil.example/#$fingerprint&$fields"))
-        assertFalse(isContactInviteCode("https://i.delta.chat/#"))
-        assertFalse(isContactInviteCode("DCACCOUNT:https://example.org/new"))
+        assertFalse(isSupportedInviteCode("https://i.delta.chat.evil.example/#$fingerprint&$fields"))
+        assertFalse(isSupportedInviteCode("https://i.delta.chat/#"))
+        assertFalse(isSupportedInviteCode("DCACCOUNT:https://example.org/new"))
     }
 
     @Test
@@ -70,8 +69,8 @@ class ChatmailTest {
             "grant" to encode(random.nextBytes(360)), "token" to encode(random.nextBytes(24)),
             "expires" to 1_800_000_000_000L, "name" to "Alyssa ☀",
             "chatmail" to "https://i.delta.chat/#" + encode(random.nextBytes(130)))
-        val code = chatmailInviteCode(obj("payload" to payload.toString(),
-            "signature" to random.nextBytes(64).hex(), "public" to random.nextBytes(36).hex()).toString())
+        val code = signedInviteFixture(obj("payload" to payload.toString(),
+            "signature" to random.nextBytes(64).hex(), "public" to random.nextBytes(36).hex()).toString().toByteArray())
         val qr = requireNotNull(InviteImage.make(code))
         try {
             val width = 1280

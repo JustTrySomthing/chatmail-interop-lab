@@ -1,14 +1,10 @@
 package app.p2p
 
-import android.net.nsd.NsdServiceInfo
-
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import java.net.InetAddress
-import kotlin.random.Random
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -81,43 +77,6 @@ class MediaRoutingTest {
             youtubeEmbedUrl("dQw4w9WgXcQ"))
         assertNull(youtubeEmbedUrl("example.com"))
         assertNull(youtubeEmbedUrl("\"><script>"))
-    }
-
-    @Test
-    fun reconstructsNearbyInvitesAndRejectsMissingPartsAndUnusableAddresses() {
-        val code = "p2p1:" + encode(Random(19).nextBytes(750))
-        val attributes = nearbyTxt(code).mapValues { it.value.toByteArray(Charsets.US_ASCII) }
-        assertTrue(attributes.values.all { it.size <= 180 })
-        assertTrue(attributes.entries.sumOf { (key, value) -> key.length + value.size + 2 } < 1300)
-        assertEquals(code, nearbyCode(attributes))
-        assertNull(nearbyCode(attributes - "i1"))
-        assertNull(nearbyCode(attributes + ("i0" to "x".repeat(180).toByteArray())))
-        assertNull(nearbyCode(attributes + ("n" to "100".toByteArray())))
-        assertEquals("/ip4/192.168.0.10/tcp/41736/p2p/verifiedPeer",
-            nearbyRoute(InetAddress.getByName("192.168.0.10"), PORT, "verifiedPeer"))
-        assertNull(nearbyRoute(InetAddress.getByName("127.0.0.1"), PORT, "verifiedPeer"))
-        assertNull(nearbyRoute(InetAddress.getByName("fe80::1"), PORT, "verifiedPeer"))
-    }
-
-    @Test
-    fun fitsAFullSignedNearbyInviteInAndroidsTxtRecord() {
-        val random = Random(37)
-        val owner = "12D3KooW" + encode(random.nextBytes(33))
-        val device = "12D3KooW" + encode(random.nextBytes(33))
-        fun envelope(key: String, value: String) = obj(
-            "public" to random.nextBytes(36).hex(), "signature" to random.nextBytes(64).hex(), key to value
-        )
-        val grant = envelope("body", obj("purpose" to "p2p-device-v1", "account" to owner,
-            "device" to device, "revision" to 1_777_777_777_000L).toString())
-        val name = CharArray(60) { random.nextInt(0x4e00, 0x9fff).toChar() }.concatToString()
-        val body = obj("v" to 2, "peer" to owner, "grant" to grant.toString(),
-            "token" to encode(random.nextBytes(24)), "expires" to 1_777_777_777_000L, "name" to name,
-            "seeds" to jsonArray(emptyList()), "routes" to jsonArray(emptyList()))
-        val code = "p2p1:" + encode(envelope("payload", body.toString()).toString().toByteArray())
-        assertTrue(code.length > 1300)
-        val service = NsdServiceInfo()
-        nearbyTxt(code).forEach(service::setAttribute)
-        assertEquals(code, nearbyCode(service.attributes))
     }
 
     @Test

@@ -1573,10 +1573,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         val status = inviteImport.message ?: pending?.let { inviteRequestStatus(it, clock) }
                         status?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                             color = if (inviteImport.failed) MaterialTheme.colorScheme.error else Quiet) }
-                        if (inviteImport.secureJoinStarted) {
+                        inviteImport.joinedChat?.let { joined ->
                             P2pTextButton(onClick = {
                                 goArea(Area.Chats)
-                                nativeConversation = inviteImport.joinedChat
+                                nativeConversation = joined
                                 modal = "chatmail-chats"
                                 model.clearInviteImport()
                             }) { Text("Open chat") }
@@ -2400,7 +2400,7 @@ private fun ColumnScope.NativeContactInvite(model: P2pModel, profile: String, ph
 }
 
 @Composable
-private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo: String, expiresAt: Long? = null,
+private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo: String,
                                         channel: Boolean = false) {
     val context = LocalContext.current
     val bitmap = remember(code) { InviteImage.make(code) }
@@ -2424,11 +2424,6 @@ private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo:
                     else -> "Scan to chat with $profile"
                 },
                     style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-                if (expiresAt != null) {
-                    Text("Expires at " + shortTime(expiresAt), Modifier.padding(top = 4.dp),
-                        color = Color.DarkGray, style = MaterialTheme.typography.bodySmall,
-                        textAlign = TextAlign.Center)
-                }
             }
         }
         if (enlarged) InviteQrDialog(bitmap) { enlarged = false }
@@ -2443,7 +2438,7 @@ private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo:
                 putBoolean("android.content.extra.IS_SENSITIVE", true)
             }
             context.getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(clip)
-        }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { FittedLabel(if (isSecureJoinInvite(code)) "Copy link" else "Copy code") }
+        }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { FittedLabel("Copy link") }
         Button(onClick = {
             val intent = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, code)
             context.startActivity(Intent.createChooser(intent, if (channel) "Share channel invite" else "Share contact invite"))

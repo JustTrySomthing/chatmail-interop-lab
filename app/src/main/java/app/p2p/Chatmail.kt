@@ -5,7 +5,6 @@ import org.json.JSONObject
 import java.io.File
 
 internal const val CHATMAIL_FILE_LIMIT = 20_000_000L
-internal const val CHATMAIL_INVITE_PREFIX = "p2p3:"
 internal const val CHATMAIL_SUBMITTED = "Sent via Chatmail"
 internal const val CHATMAIL_REQUEST_QUEUED = "Queued for Chatmail delivery"
 internal const val CHATMAIL_REQUEST_SENT = "Sent via Chatmail · waiting for their device"
@@ -80,9 +79,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     fun connectivity(): Int = (call("get_connectivity") as Number).toInt()
 
-    fun invite(): String = call("get_chat_securejoin_qr_code", null) as String
-
-    fun secureJoinInvite(): String = invite().also {
+    fun secureJoinInvite(): String = (call("get_chat_securejoin_qr_code", null) as String).also {
         check(isSecureJoinInvite(it)) { "Chatmail returned an invalid contact invite." }
     }
 
@@ -319,8 +316,7 @@ internal fun decodeChatmailPacket(text: String): JSONObject? {
 internal fun isChatmailInviteLink(value: String): Boolean =
     value.startsWith("https://i.delta.chat/#") && value.substringAfter('#').isNotBlank()
 
-// This recognizes envelopes only. Chatmail Core validates the invite and distinguishes
-// contact invites from groups, account setup, and invitations from the current account.
+// Chatmail Core validates the QR data and identifies the invite type.
 internal fun isSecureJoinInvite(value: String): Boolean {
     if (value.length >= 32_768) return false
     val code = value.trim()
@@ -329,18 +325,8 @@ internal fun isSecureJoinInvite(value: String): Boolean {
         (code.startsWith("openpgp4fpr:", ignoreCase = true) && code.substringAfter(':').isNotBlank())
 }
 
-internal fun isContactInviteCode(value: String): Boolean =
-    InviteCode.hasPrefix(value.trim()) || isSecureJoinInvite(value)
-
-internal fun chatmailInviteCode(signed: String): String =
-    CHATMAIL_INVITE_PREFIX + InviteCode.compact("p2p1:" + encode(signed.toByteArray())).substringAfter(':')
-
-internal fun chatmailInviteBytes(code: String): ByteArray {
-    require(code.length < 32_768) { "This invite code is too long." }
-    val normalized = code.filterNot(Char::isWhitespace)
-    require(normalized.startsWith(CHATMAIL_INVITE_PREFIX)) { "Ask for a fresh P2P invite from the Chatmail version." }
-    return InviteCode.signedBytes("p2p2:" + normalized.substringAfter(':'))
-}
+internal fun isSupportedInviteCode(value: String): Boolean =
+    value.trimStart().startsWith(CHATMAIL_INVITE_PREFIX) || isSecureJoinInvite(value)
 
 internal fun validChatmailReceipt(type: String, status: String): Boolean =
     if (type == "hello") status in setOf("waiting", "paired", "rejected")
@@ -362,7 +348,7 @@ internal fun chatmailRoute(queued: JSONObject, contact: JSONObject?): Int {
     if (queued.has("chatmailChat")) return queued.optInt("chatmailChat")
     return when (payload.optString("type")) {
         "hello", "download", "downloadUnavailable" -> 0
-        // 0.7.0 approvals inferred the route from the contact record.
+        // Previously saved approvals can omit the explicit Chatmail route.
         "paired" -> contact?.takeIf { matchesInviteToken(it, payload.optString("token")) }?.optInt("chatmailChat") ?: 0
         else -> contact?.optInt("chatmailChat") ?: 0
     }

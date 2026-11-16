@@ -32,13 +32,10 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val PORT = 41736
-private const val INVITE_WINDOW = 3_600_000L
-
-internal data class InviteCreationState(val busy: Boolean = false, val invite: OutgoingInvite? = null, val error: String? = null)
 
 internal data class InviteImportState(
     val busy: Boolean = false, val message: String? = null, val failed: Boolean = false, val peer: String? = null,
-    val secureJoinStarted: Boolean = false, val joinedChannel: Int? = null, val joinedChat: Int? = null
+    val joinedChannel: Int? = null, val joinedChat: Int? = null
 )
 internal const val INVITE_CONNECTING = "Waiting to reach the other device"
 internal const val INVITE_APPROVAL = "Waiting for their approval"
@@ -189,8 +186,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun talkIce(): String = withContext(Dispatchers.IO) {
-        // The configured Chatmail profile supplies its ICE servers. Nearby contacts can
-        // still negotiate a local connection if the relay has no ICE configuration.
+        // Existing direct calls can still negotiate locally when the relay supplies no ICE servers.
         val name = requireChatmailName()
         chatmailLock.withLock {
             try {
@@ -226,8 +222,6 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private val chatmailState = MutableStateFlow("Set your display name to start Chatmail")
     internal val chatmailStatus = chatmailState.asStateFlow()
 
-    private val inviteCreationState = MutableStateFlow(InviteCreationState())
-    internal val inviteCreation = inviteCreationState.asStateFlow()
     private val inviteImportState = MutableStateFlow(InviteImportState())
     internal val inviteImport = inviteImportState.asStateFlow()
     private val listenerState = MutableStateFlow<Set<String>>(emptySet())
@@ -534,7 +528,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             check(chat > 9) { "Chatmail couldn’t open this conversation." }
             if (channel) InviteImportState(joinedChannel = chat)
             else InviteImportState(message = "SecureJoin started. Keep both apps online while they verify the connection.",
-                secureJoinStarted = true, joinedChat = chat)
+                joinedChat = chat)
         }
     }
 
@@ -1302,106 +1296,18 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         return advertisedRoutes(addresses, id, limit)
     }
 
-    internal fun clearCreatedInvite() {
-        val current = inviteCreationState.value
-        if (!current.busy) inviteCreationState.compareAndSet(current, InviteCreationState())
-    }
-
-    internal fun createInternetInvite(reuse: Boolean = true) {
-        val current = inviteCreationState.value
-        if (current.busy || !inviteCreationState.compareAndSet(current, InviteCreationState(busy = true))) return
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                if (reuse) {
-                    val now = System.currentTimeMillis()
-                    val saved = records.all("invite-out").lastOrNull { record ->
-                        val data = record.data()
-                        data.optBoolean("autoAccept") && data.optBoolean("chatmail") &&
-                            data.optLong("expires") > now && data.optString("code").isNotBlank()
-                    }
-                    if (saved != null) {
-                        inviteCreationState.value = InviteCreationState(invite = OutgoingInvite(saved.key, saved.data().getString("code")))
-                        return@launch
-                    }
-                }
-                awaitInviteAccount()
-                awaitInviteNetwork()
-                val created = recoveryLock.withLock {
-                    check(!recoveryQueued.get()) { "P2P is restoring your identity. Try again in a moment." }
-                    val account = checkNotNull(credentials) { "P2P is still starting. Try again in a moment." }
-                    val name = requireChatmailName()
-                    val qr = withTimeoutOrNull(12_000L) {
-                        chatmailLock.withLock { connectedChatmail(name).invite() }
-                    } ?: error("Chatmail is still connecting. Try again in a moment.")
-                    check(isChatmailInviteLink(qr)) { "Chatmail returned an invalid contact invite." }
-                    val token = randomToken()
-                    val expires = System.currentTimeMillis() + INVITE_WINDOW
-                    val key = "invite:" + token
-                    val body = obj("v" to 3, "peer" to account.grant.account, "grant" to account.grant.encoded,
-                        "token" to token, "expires" to expires, "name" to name, "chatmail" to qr).toString()
-                    val signed = JSONObject(NativeEngine.signWith(account.deviceSecret, body)).put("payload", body)
-                    val code = chatmailInviteCode(signed.toString())
-                    save(key, "invite-out", obj("expires" to expires, "chatmail" to true, "code" to code,
-                        "autoAccept" to true))
-                    OutgoingInvite(key, code)
-                }
-                inviteCreationState.value = InviteCreationState(invite = created)
-            } catch (error: CancellationException) {
-                inviteCreationState.value = InviteCreationState()
-                throw error
-            } catch (error: Exception) {
-                inviteCreationState.value = InviteCreationState(error = error.message ?: "Couldn’t create the invite. Try again.")
-            } catch (_: LinkageError) {
-                inviteCreationState.value = InviteCreationState(error = "Chatmail couldn’t start on this device.")
-            }
-        }
-    }
-
-    internal fun createNearbyInvite(show: (OutgoingInvite) -> Unit) = work {
-        val account = credentials ?: error("P2P is starting. Try again in a moment.")
-        val token = randomToken()
-        val now = System.currentTimeMillis()
-        val expiry = now + NEARBY_WINDOW
-        val key = "invite:" + token
-        val seeds = org.json.JSONArray()
-        val routes = emptyList<String>()
-        val name = ownName()
-        val invite = obj("v" to 2, "seeds" to seeds, "peer" to account.grant.account,
-            "grant" to account.grant.encoded, "token" to token, "expires" to expiry,
-            "name" to name, "routes" to jsonArray(routes))
-        val payload = invite.toString()
-        val signed = JSONObject(NativeEngine.signWith(account.deviceSecret, payload)).put("payload", payload)
-        val code = "p2p1:" + encode(signed.toString().toByteArray(Charsets.UTF_8))
-        database.withTransaction {
-            save(key, "invite-out", obj("expires" to expiry, "nearby" to true))
-        }
-        viewModelScope.launch { show(OutgoingInvite(key, code)) }
-    }
-
-    internal fun cancelInvite(key: String, keepPending: Boolean = false) = work {
-        val closed = database.withTransaction {
-            val offer = records.get(key)?.takeIf { it.kind == "invite-out" } ?: return@withTransaction null
-            val token = offer.key.substringAfter("invite:")
-            val requests = requestsForInvite(token)
-            if (keepPending && requests.isNotEmpty()) return@withTransaction null
-            closeInvite(token, requests, notifyClosed = true)
-        } ?: return@work
-        clearInviteAlerts(closed)
-        if (!keepPending) notice.value = "Invitation canceled"
-    }
-
     private suspend fun requestsForInvite(token: String) =
         records.all("invite-in").filter { it.data().optString("token") == token }
 
     private suspend fun closeInvite(
-        token: String, requests: List<Record>, acceptedPeer: String? = null, notifyClosed: Boolean = false
+        token: String, requests: List<Record>, acceptedPeer: String? = null
     ): List<Record> {
         records.remove("invite:" + token)
         for (request in requests) {
             val data = request.data()
             val remote = data.getString("peer")
             val chat = data.optInt("chatmailChat")
-            if (notifyClosed && chat > 0 && remote != acceptedPeer) {
+            if (chat > 0 && remote != acceptedPeer) {
                 queue(remote, obj("type" to "inviteDeclined", "id" to newId(), "token" to token), chat)
             }
             records.remove(request.key)
@@ -1439,14 +1345,13 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         if (!current.busy) inviteImportState.compareAndSet(current, InviteImportState())
     }
 
-    private fun submitInvite(read: suspend () -> String, nearby: NearbyContact? = null, channelOnly: Boolean = false) {
+    private fun submitInvite(read: suspend () -> String, channelOnly: Boolean = false) {
         val previous = inviteImportState.value
         if (previous.busy || !inviteImportState.compareAndSet(previous, InviteImportState(busy = true))) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val code = read()
                 inviteImportState.value = when {
-                    nearby != null -> InviteImportState(message = importContactInvite(code, nearby))
                     isSecureJoinInvite(code) -> importSecureJoinInvite(code.trim(), channelOnly)
                     channelOnly -> error("This isn’t a channel invite.")
                     else -> importChatmailInvite(code)
@@ -1468,109 +1373,16 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val text = runCatching { InviteImage.read(context, uri) }.getOrElse {
             error("Couldn’t read the QR code. Try a close-up image with the full code visible, or paste the invite.")
         }
-        require(isContactInviteCode(text)) { "This QR code isn’t a contact invite." }
+        require(isSupportedInviteCode(text)) { "This QR code isn’t a supported invite." }
         text
     })
 
     fun importInvite(text: String, channelOnly: Boolean = false) = submitInvite(read = { text }, channelOnly = channelOnly)
 
     fun importScannedInvite(text: String, channelOnly: Boolean = false) = submitInvite(channelOnly = channelOnly, read = {
-        require(isContactInviteCode(text)) { "This QR code isn’t a contact invite." }
+        require(isSupportedInviteCode(text)) { "This QR code isn’t a supported invite." }
         text
     })
-
-    internal fun importNearbyInvite(candidate: NearbyContact) = submitInvite(read = { candidate.code }, nearby = candidate)
-
-    private fun verifyInvite(text: String): Pair<JSONObject, DeviceGrant> {
-        val bytes = InviteCode.signedBytes(text)
-        val signed: JSONObject
-        val payload: String
-        val invite: JSONObject
-        try {
-            signed = JSONObject(String(bytes, Charsets.UTF_8))
-            payload = signed.getString("payload")
-            invite = JSONObject(payload)
-        } catch (_: org.json.JSONException) {
-            throw IllegalArgumentException("The invite code is incomplete or damaged. Copy the full code again.")
-        }
-        val id = invite.optString("peer")
-        check(credentials != null) { "P2P is still starting. Try again in a moment." }
-        require(id != peer.value) { "This is your own invite. Use the invite from the other device." }
-        val grant = devices.checked(invite.optString("grant")) ?: error("Invalid contact credential")
-        require(grant.account == id && NativeEngine.verify(payload, grant.device, signed.optString("public"), signed.optString("signature"))) {
-            "This invitation could not be verified"
-        }
-        val token = invite.optString("token")
-        require(invite.optInt("v") == 2 && isPeer(id) && token.matches(Regex("[A-Za-z0-9_-]{32}"))) {
-            "Invalid contact invite"
-        }
-        require(invite.optLong("expires") > System.currentTimeMillis()) { "This invite expired. Ask for a fresh invite." }
-        return invite to grant
-    }
-
-    internal fun nearbyInviteName(code: String): String? = runCatching {
-        val (invite, grant) = verifyInvite(code)
-        if (items.value.orEmpty().any { it.key == grant.account && it.kind == "contact" }) null
-        else invite.optString("name", "New contact").take(60)
-    }.getOrNull()
-
-    private suspend fun importContactInvite(text: String, nearby: NearbyContact): String {
-        val (invite, grant) = verifyInvite(text)
-        val id = grant.account
-        val token = invite.getString("token")
-        require(devices.accept(grant)) { "This invitation is from a replaced device. Ask for a fresh invite." }
-        if (records.get(id)?.kind == "contact") {
-            return "This contact is already added."
-        }
-        val addresses = nearby.addresses.mapNotNull { nearbyRoute(it, nearby.port, grant.device) }
-        require(addresses.isNotEmpty()) { "This device has no reachable local address" }
-        val name = invite.optString("name", "New contact").take(60)
-        val expires = invite.optLong("expires")
-        val seeds = invite.optJSONArray("seeds")
-        val skipped = outboxLock.withLock {
-            database.withTransaction {
-                if (records.get(id)?.kind == "contact") return@withTransaction "This contact is already added."
-                val incoming = records.get("request:" + id)?.takeIf { it.kind == "invite-in" }?.data()
-                if (incoming != null && (records.get("invite:" + incoming.optString("token"))
-                        ?.data()?.optLong("expires") ?: 0) > System.currentTimeMillis()) {
-                    return@withTransaction "This person already sent you a request. Accept it in Contacts."
-                }
-                val queuedInvites = records.all("outbox").filter { record ->
-                    val data = record.data()
-                    data.optString("to") == id && data.optJSONObject("payload")?.optString("type") == "hello"
-                }
-                val requestKey = "request:" + id
-                val previous = records.get(requestKey)?.takeIf { it.kind == "invite-pending" }?.data()
-                if (previous != null && previous.optString("token") == token &&
-                    isActiveInviteRequest(previous, System.currentTimeMillis()) &&
-                    queuedInvites.any { it.data().optJSONObject("payload")?.optString("token") == token }) {
-                    val combined = (addresses + previous.strings("routes")).distinct().take(12)
-                    if (combined != previous.strings("routes")) {
-                        change(requestKey) { put("routes", jsonArray(combined)) }
-                    }
-                    return@withTransaction "This contact request is already queued."
-                }
-                queuedInvites.forEach { record ->
-                    pending.remove(record.key)
-                    retryAfter.remove(record.key)
-                    records.remove(record.key)
-                }
-                save(requestKey, "invite-pending", obj("peer" to id, "token" to token, "name" to name,
-                    "expires" to expires, "routes" to jsonArray(addresses), "state" to INVITE_CONNECTING,
-                    "hasDiscoveryPeers" to ((seeds?.length() ?: 0) > 0)))
-                queue(id, obj("type" to "hello", "id" to newId(), "token" to token, "name" to ownName(),
-                    "expires" to expires, "routes" to jsonArray(localAddresses())))
-                null
-            }
-        }
-        if (skipped != null) return skipped
-        if (seeds != null) repeat(minOf(seeds.length(), 3)) { index ->
-            val seed = seeds.optJSONObject(index) ?: return@repeat
-            offerSeed(seed)
-        }
-        route(id, addresses)
-        return "Contact request queued. Keep P2P open on both devices and accept the request on the other device."
-    }
 
     fun acceptInvite(key: String) = work {
         val (request, closed) = database.withTransaction {
@@ -1607,7 +1419,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             }
         } ?: contact)
         val requestToken = current.getString("token")
-        val closed = closeInvite(requestToken, requestsForInvite(requestToken), acceptedPeer = id, notifyClosed = true)
+        val closed = closeInvite(requestToken, requestsForInvite(requestToken), acceptedPeer = id)
         queue(id, obj("type" to "paired", "id" to newId(), "name" to ownName(),
             "token" to requestToken, "approvedAt" to approvedAt), current.optInt("chatmailChat"))
         return closed
@@ -1617,7 +1429,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val closed = database.withTransaction {
             val request = records.get(key)?.takeIf { it.kind == "invite-in" }?.data() ?: return@withTransaction null
             val token = request.getString("token")
-            closeInvite(token, requestsForInvite(token), notifyClosed = true)
+            closeInvite(token, requestsForInvite(token))
         } ?: return@work
         clearInviteAlerts(closed)
     }

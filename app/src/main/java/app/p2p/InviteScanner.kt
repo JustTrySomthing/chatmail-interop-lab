@@ -73,7 +73,7 @@ internal fun InviteScanner(
                     if (active.get() && now - lastScan >= 180L) {
                         lastScan = now
                         val value = runCatching { readCameraQr(frame) }.getOrNull()
-                        if (value != null && !isContactInviteCode(value)) {
+                        if (value != null && !isSupportedInviteCode(value)) {
                             main.execute { if (!disposed.get() && active.get()) wrongCode = true }
                         } else if (value != null && active.compareAndSet(true, false)) {
                             main.execute {

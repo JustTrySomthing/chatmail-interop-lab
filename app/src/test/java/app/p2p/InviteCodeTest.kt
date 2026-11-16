@@ -69,33 +69,29 @@ class InviteCodeTest {
         }
         append("]}")
     }.toByteArray()
-    private val legacy = "p2p1:" + encode(signed)
+    private val code = signedInviteFixture(signed)
 
     @Test
-    fun supportsLegacyWrappedPasteAndCompactQrWithoutChangingSignedBytes() {
-        val wrapped = "  " + legacy.chunked(80).joinToString("\n  ") + "\n"
-        assertArrayEquals(signed, InviteCode.signedBytes(wrapped))
-        val compact = InviteCode.compact(legacy)
-        assertTrue(compact.startsWith("p2p2:"))
-        assertTrue(compact.length < legacy.length)
-        assertArrayEquals(signed, InviteCode.signedBytes(compact))
+    fun preservesSignedChatmailBytesAfterWrappedPaste() {
+        val wrapped = "  " + code.chunked(80).joinToString("\n  ") + "\n"
+        assertArrayEquals(signed, chatmailInviteBytes(wrapped))
     }
 
     @Test
     fun rejectsBadInputsAndBoundedDecompression() {
-        for (bad in listOf("12D3KooWPublicAddress", "p2p1:..", "p2p2:AAAA", "p2p1:" + "A".repeat(16_384))) {
-            assertThrows(IllegalArgumentException::class.java) { InviteCode.signedBytes(bad) }
+        for (bad in listOf("12D3KooWPublicAddress", "p2p1:..", "p2p3:AAAA", "p2p3:" + "A".repeat(16_384))) {
+            assertThrows(IllegalArgumentException::class.java) { chatmailInviteBytes(bad) }
         }
         val compressed = ByteArrayOutputStream()
         GZIPOutputStream(compressed).use { it.write(ByteArray(20_000)) }
         assertThrows(IllegalArgumentException::class.java) {
-            InviteCode.signedBytes("p2p2:" + encode(compressed.toByteArray()))
+            chatmailInviteBytes(CHATMAIL_INVITE_PREFIX + encode(compressed.toByteArray()))
         }
     }
 
     @Test
     fun readsCompactQrInALargerTiltedImage() {
-        val qr = requireNotNull(InviteImage.make(legacy))
+        val qr = requireNotNull(InviteImage.make(code))
         val photo = Bitmap.createBitmap(1500, 1400, Bitmap.Config.ARGB_8888)
         try {
             Canvas(photo).apply {
@@ -103,10 +99,16 @@ class InviteCodeTest {
                 rotate(7f, 750f, 700f)
                 drawBitmap(qr, null, android.graphics.Rect(250, 200, 1250, 1200), null)
             }
-            assertArrayEquals(signed, InviteCode.signedBytes(InviteImage.readBitmap(photo)))
+            assertArrayEquals(signed, chatmailInviteBytes(InviteImage.readBitmap(photo)))
         } finally {
             qr.recycle()
             photo.recycle()
         }
     }
+}
+
+internal fun signedInviteFixture(signed: ByteArray): String {
+    val output = ByteArrayOutputStream()
+    GZIPOutputStream(output).use { it.write(signed) }
+    return CHATMAIL_INVITE_PREFIX + encode(output.toByteArray())
 }
