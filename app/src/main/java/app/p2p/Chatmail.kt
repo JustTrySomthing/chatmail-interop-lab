@@ -30,6 +30,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
         throw error
     }
     private var displayName: String? = null
+    private var profileRevision: Long? = null
     private var running = false
 
     private fun rpc(method: String, vararg params: Any?): Any {
@@ -43,7 +44,20 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     private fun call(method: String, vararg params: Any?): Any = rpc(method, account, *params)
 
-    fun connect(name: String) {
+    fun profileNeedsSync(revision: Long): Boolean = profileRevision != revision
+
+    fun applyProfile(revision: Long, bio: String?, avatar: File?, updateAvatar: Boolean) {
+        if (profileRevision == revision) return
+        val stored = call("get_config", "ui.relay_lab_profile_revision")
+        if (stored != revision.toString()) {
+            if (bio != null) call("set_config", "selfstatus", bio)
+            if (updateAvatar) call("set_config", "selfavatar", avatar?.absolutePath)
+            call("set_config", "ui.relay_lab_profile_revision", revision.toString())
+        }
+        profileRevision = revision
+    }
+
+    fun connect(name: String, setupQr: String? = null) {
         if (displayName != name) {
             // P2P consumes signed protocol messages and needs their complete text.
             call("batch_set_config", obj("displayname" to name, "download_limit" to "0", "bot" to "1",
@@ -51,7 +65,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
             displayName = name
         }
         if (!running) {
-            if (call("is_configured") != true) call("init_transports", null)
+            if (call("is_configured") != true) call("init_transports", setupQr)
             call("start_io")
             running = true
         }
@@ -117,10 +131,33 @@ internal class Chatmail(directory: File) : AutoCloseable {
         return details.optBoolean("isEncrypted") && details.optBoolean("canSend")
     }
 
+    fun addRelay(code: String) {
+        require(inviteKind(code) in setOf("account", "login")) { "Use a Chatmail relay or login QR code." }
+        call("add_transport_from_qr", code)
+    }
+
+    fun contacts(): List<ChatmailContact> {
+        val entries = call("get_contacts", 0, null) as JSONArray
+        return (0 until entries.length()).mapNotNull { entries.optJSONObject(it)?.let(::parseChatmailContact) }
+    }
+
+    fun openContact(id: Int): Int {
+        require(id > 9 && parseChatmailContact(call("get_contact", id) as JSONObject) != null) {
+            "This Chatmail contact is unavailable."
+        }
+        return (call("create_chat_by_contact_id", id) as Number).toInt()
+    }
+
+    fun acceptContactRequest(chat: InteropChat) {
+        if (chat.request) call("accept_chat", chat.id)
+    }
+
     fun isConfigured(): Boolean = call("is_configured") == true
 
     fun interoperableChatIds(): List<Int> =
         (call("get_chatlist_entries", null, null, null) as JSONArray).intValues().filter { it > 9 }
+
+    fun chatContactId(id: Int): Int? = interopPeerId(call("get_full_chat_by_id", id) as JSONObject)
 
     fun interoperableChat(id: Int): InteropChat? {
         val chat = call("get_full_chat_by_id", id) as JSONObject
@@ -230,7 +267,20 @@ internal fun parseChannelPost(message: JSONObject, channel: ChatmailChannel): Ch
         message.optLong("timestamp") * 1_000L, message.optInt("state"), attachment)
 }
 
-internal data class InteropChat(val id: Int, val contactId: Int, val name: String, val canSend: Boolean)
+internal data class ChatmailContact(val id: Int, val name: String, val bio: String = "", val photoPath: String? = null)
+
+internal fun parseChatmailContact(data: JSONObject): ChatmailContact? {
+    val id = data.optInt("id")
+    if (id <= 9 || !data.optBoolean("isKeyContact") || data.optBoolean("isBlocked")) return null
+    val name = data.optString("displayName").ifBlank { "Chatmail contact" }
+    return ChatmailContact(id, name, data.optString("status"),
+        data.optString("profileImage").takeUnless { data.isNull("profileImage") || it.isBlank() })
+}
+
+internal data class InteropChat(
+    val id: Int, val contactId: Int, val name: String, val canSend: Boolean,
+    val bio: String = "", val photoPath: String? = null, val request: Boolean = false
+)
 internal data class InteropText(val id: Int, val text: String, val outgoing: Boolean, val state: Int)
 internal data class InteropHistory(val messages: List<InteropText>, val hasOlder: Boolean)
 
@@ -241,11 +291,11 @@ internal fun interopPeerId(chat: JSONObject): Int? {
 }
 
 internal fun parseInteropChat(chat: JSONObject, contact: JSONObject, peer: Int): InteropChat? {
-    if (contact.optInt("id") != peer || contact.optBoolean("isBlocked") ||
-        !contact.optBoolean("isKeyContact")) return null
-    val name = contact.optString("displayName").ifBlank { chat.optString("name") }.ifBlank { "Chatmail contact" }
-    return InteropChat(chat.getInt("id"), peer, name,
-        chat.optBoolean("canSend") && !chat.optBoolean("isContactRequest") && contact.optBoolean("e2eeAvail"))
+    val profile = parseChatmailContact(contact)?.takeIf { it.id == peer } ?: return null
+    val request = chat.optBoolean("isContactRequest")
+    return InteropChat(chat.getInt("id"), peer, profile.name,
+        chat.optBoolean("canSend") && !request && contact.optBoolean("e2eeAvail"),
+        profile.bio, profile.photoPath, request)
 }
 
 internal fun parseInteropText(message: JSONObject, chat: InteropChat): InteropText? {

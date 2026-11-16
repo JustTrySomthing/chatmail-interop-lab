@@ -112,7 +112,9 @@ class MainActivity : ComponentActivity() {
 
     private fun acceptSecureJoinLink(intent: Intent?) {
         if (intent?.action == Intent.ACTION_VIEW) {
-            incomingSecureJoin.value = intent.dataString?.takeIf(::isSecureJoinInvite)
+            val invite = intent.dataString?.takeIf(::isSecureJoinInvite)
+            incomingSecureJoin.value = invite
+            if (invite != null) model.hintInitialChatmailInvite(invite)
         }
     }
 
@@ -216,7 +218,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         val peer by model.peer.collectAsState()
         val notice by model.notice.collectAsState()
         val inviteImport by model.inviteImport.collectAsState()
-        val inviteCreation by model.inviteCreation.collectAsState()
         val listeners by model.listeners.collectAsState()
         val chatmailStatus by model.chatmailStatus.collectAsState()
         val submission by model.sheetSubmission.collectAsState()
@@ -265,9 +266,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         var threadQuery by rememberSaveable(thread) { mutableStateOf("") }
         var quote by rememberSaveable { mutableStateOf<String?>(null) }
         var modal by rememberSaveable { mutableStateOf<String?>(null) }
-        var inviteKey by rememberSaveable { mutableStateOf("") }
         var addContactTab by rememberSaveable { mutableStateOf("Send invite") }
         var pastedInvite by remember { mutableStateOf("") }
+        var nativeConversation by rememberSaveable { mutableStateOf<Int?>(null) }
         var trackedInvitePeer by rememberSaveable { mutableStateOf<String?>(null) }
         fun showAddContact(pendingPeer: String? = null) {
             channelInviteOnly = false
@@ -275,9 +276,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             pastedInvite = ""
             trackedInvitePeer = pendingPeer
             addContactTab = if (pendingPeer == null) "Send invite" else "Accept invite"
-            inviteKey = ""
             modal = "add-contact"
-            if (pendingPeer == null) model.createInternetInvite()
         }
         var selected by rememberSaveable { mutableStateOf<String?>(null) }
         var reminderArea by rememberSaveable { mutableStateOf<AlertArea?>(null) }
@@ -741,11 +740,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             if (modal == "scan-invite" && !inviteImport.busy && !inviteImport.failed &&
                 (inviteImport.message != null || inviteImport.peer != null)) modal = "add-contact"
         }
-        LaunchedEffect(inviteCreation.invite) {
-            val created = inviteCreation.invite ?: return@LaunchedEffect
-            if (modal == "add-contact") inviteKey = created.key
-            model.clearCreatedInvite()
-        }
         if (modal == "setup") {
             Box(Modifier.fillMaxSize()) {
                 FirstRunSetup(profile, model::setName, back = { modal = "settings" }) { modal = "settings" }
@@ -824,8 +818,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             }
                         }
                         val matchingContacts = contacts.filter { threadSearchMatches(contactQuery, name(it.key), emptyList()) }
-                        if (matchingContacts.isEmpty()) {
-                            EmptyTabMessage(if (contactQuery.isBlank()) "No contacts yet" else "No matching contacts")
+                        NativeContactRows(model, contactQuery, showEmpty = matchingContacts.isEmpty()) { id ->
+                            nativeConversation = id
+                            modal = "chatmail-chats"
                         }
                         val contactAction = if (area == Area.Talk) ContactAction.Call else ContactAction.Message
                         matchingContacts.forEach { contact ->
@@ -840,7 +835,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         }
                     }
                     FullPageRoute.Chatmail -> {
-                        InteropChats(model)
+                        InteropChats(model, nativeConversation)
                     }
                     FullPageRoute.Settings -> {
                         SettingsGrid(settingsQuery) { destination ->
@@ -867,7 +862,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         }) { Text("Copy address") }
                     }
                     FullPageRoute.Backup -> {
-                        Text("Save your P2P address, contacts, chats, and attachments stored on this phone in a password-protected file.")
+                        Text("Save your earlier P2P address, contacts, chats, and attachments. This backup excludes Chatmail conversations and channels.")
                         Button(shape = P2pButtonShape, onClick = { modal = "save-password" }, enabled = !backupBusy,
                             modifier = Modifier.fillMaxWidth()) { Text("Create backup") }
                         Button(shape = P2pButtonShape, onClick = { openRecovery.launch(arrayOf("*/*")) }, enabled = !backupBusy,
@@ -923,6 +918,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             }
                         }
                         P2pRow("Display name", profile, Icons.Outlined.Badge) { modal = "display-name" }
+                        P2pRow("Bio", profileData?.optString("bio").orEmpty(), Icons.Outlined.Edit) { modal = "profile-bio" }
+                        P2pRow("Add Chatmail relay", "Use a relay or login QR link", Icons.Outlined.Link) { modal = "chatmail-relay" }
                     }
                 }
             }
@@ -1052,7 +1049,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             { modal = if (isGroup) "group-new" else "chat-new" },
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp))
                         if (!isGroup && folder == "Inbox") {
-                            P2pOutlinedButton(onClick = { modal = "chatmail-chats" },
+                            P2pOutlinedButton(onClick = { nativeConversation = null; modal = "chatmail-chats" },
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                                 Text("Chatmail chats")
                             }
@@ -1538,53 +1535,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             "add-contact" -> Sheet(if (channelInviteOnly) "Join channel" else "Add contact", { modal = null }) {
                 if (!channelInviteOnly) Segments(listOf("Send invite", "Accept invite"), addContactTab, prominent = true) { tab ->
                     addContactTab = tab
-                    if (tab == "Send invite" && inviteKey.isEmpty() && !inviteCreation.busy) model.createInternetInvite()
                 }
                 if (addContactTab == "Send invite") {
-                    P2pOutlinedButton(onClick = { modal = "secure-join-invite" }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Invite someone on Delta Chat or ArcaneChat")
-                    }
-                    val clock by produceState(System.currentTimeMillis(), inviteKey) {
-                        while (true) {
-                            kotlinx.coroutines.delay(1_000)
-                            value = System.currentTimeMillis()
-                        }
-                    }
-                    val token = inviteKey.substringAfter("invite:")
-                    val connected = contacts.firstOrNull {
-                        val data = it.data()
-                        matchesInviteToken(data, token) && !data.optBoolean("blocked")
-                    }
-                    val offer = records.firstOrNull { it.key == inviteKey && it.kind == "invite-out" }?.data()
-                    val code = offer?.optString("code").orEmpty()
-                    when {
-                        inviteCreation.busy -> {
-                            Text("Creating your invite…")
-                            LinearProgressIndicator(Modifier.fillMaxWidth())
-                        }
-                        connected != null -> {
-                            LaunchedEffect(connected.key) {
-                                kotlinx.coroutines.delay(800)
-                                modal = null
-                                snack.showSnackbar("Invite accepted · " + name(connected.key))
-                            }
-                            Text("Invite accepted · " + name(connected.key), style = MaterialTheme.typography.titleMedium)
-                            Button(onClick = { goArea(Area.Chats); goThread(connected.key) }) { Text("Message") }
-                            P2pTextButton(onClick = { inviteKey = ""; model.createInternetInvite() }) { Text("New invite") }
-                        }
-                        code.isNotBlank() && offer != null && offer.optLong("expires") > clock -> {
-                            ShareContactInvite(code, profile, profileData?.optString("photo").orEmpty(), offer.optLong("expires"))
-                            P2pTextButton(onClick = {
-                                model.cancelInvite(inviteKey)
-                                inviteKey = ""
-                            }) { Text("Cancel invite") }
-                        }
-                        else -> {
-                            inviteCreation.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                            if (inviteKey.isNotEmpty()) Text("This invite has expired.", color = Quiet)
-                            Button(onClick = { inviteKey = ""; model.createInternetInvite(reuse = false) }) { Text("Create invite") }
-                        }
-                    }
+                    NativeContactInvite(model, profile, profileData?.optString("photo").orEmpty())
                 } else {
                     val acceptedPeer = inviteImport.peer ?: trackedInvitePeer
                     val pending = records.firstOrNull { it.key == "request:" + acceptedPeer && it.kind == "invite-pending" }?.data()
@@ -1621,9 +1574,12 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         status?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                             color = if (inviteImport.failed) MaterialTheme.colorScheme.error else Quiet) }
                         if (inviteImport.secureJoinStarted) {
-                            P2pTextButton(onClick = { goArea(Area.Chats); modal = "chatmail-chats" }) {
-                                Text("Open Chatmail chats")
-                            }
+                            P2pTextButton(onClick = {
+                                goArea(Area.Chats)
+                                nativeConversation = inviteImport.joinedChat
+                                modal = "chatmail-chats"
+                                model.clearInviteImport()
+                            }) { Text("Open chat") }
                         }
                         Text(if (channelInviteOnly) "Scan a channel QR code, choose a saved QR image, or paste an invite link."
                             else "Scan a Relay Lab, Delta Chat, or ArcaneChat invite, choose a saved QR image, or paste an invite link or code.")
@@ -1677,37 +1633,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         else -> LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
                 }
-            }
-            "secure-join-invite" -> Sheet("Chatmail invite", { modal = "add-contact" }) {
-                var code by remember { mutableStateOf<String?>(null) }
-                var failure by remember { mutableStateOf<String?>(null) }
-                var attempt by remember { mutableIntStateOf(0) }
-                LaunchedEffect(attempt) {
-                    failure = null
-                    try {
-                        code = model.createSecureJoinInvite()
-                    } catch (error: kotlinx.coroutines.CancellationException) {
-                        throw error
-                    } catch (error: Exception) {
-                        failure = error.message ?: "Couldn’t create the Chatmail invite."
-                    } catch (_: LinkageError) {
-                        failure = "Chatmail couldn’t start on this device."
-                    }
-                }
-                val invite = code
-                val error = failure
-                when {
-                    invite != null -> {
-                        Text("Ask your contact to scan this QR code or open the link in Delta Chat or ArcaneChat.")
-                        ShareContactInvite(invite, profile, profileData?.optString("photo").orEmpty())
-                    }
-                    error != null -> {
-                        Text(error, color = MaterialTheme.colorScheme.error)
-                        Button(onClick = { attempt++ }) { Text("Retry") }
-                    }
-                    else -> LinearProgressIndicator(Modifier.fillMaxWidth())
-                }
-                P2pTextButton(onClick = { modal = "add-contact" }) { Text("Back to Add contact") }
             }
             "link-preview" -> {
                 val link = linkUrl?.let(::parsePreviewLink)
@@ -1782,6 +1707,14 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 recoveryUri = null
                 modal = "backup"
             }
+            "profile-bio" -> InputDialog("Bio", "Bio", "Save", profileData?.optString("bio").orEmpty(),
+                { modal = "profile" }, contentInput = true) { bio ->
+                model.setBio(bio) { modal = "profile" }
+            }
+            "chatmail-relay" -> InputDialog("Add Chatmail relay", "Relay or login link", "Add relay", "",
+                { modal = "profile" }, password = true) { qr ->
+                if (qr.isNotBlank()) model.addChatmailRelay(qr) { modal = "profile" }
+            }
             "display-name" -> InputDialog("Display name", "Name", "Save", profile, { modal = "profile" }) {
                 model.setName(it) { modal = "profile" }
             }
@@ -1797,12 +1730,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             }
             "chat-new" -> Sheet("New chat", { modal = null }) {
                 val available = contacts.filterNot { blocked(it.key) }
-                if (available.isEmpty()) {
-                    EmptyTabMessage("No contacts to message")
-                    if (contacts.isEmpty()) {
-                        PageActionButton("Add contact", { modal = "contacts" }, Modifier.fillMaxWidth())
-                    }
+                NativeContactRows(model, "", showEmpty = available.isEmpty()) { id ->
+                    nativeConversation = id
+                    modal = "chatmail-chats"
                 }
+                PageActionButton("Add contact", { showAddContact() }, Modifier.fillMaxWidth())
                 available.forEach { contact ->
                     ContactActionRow(name(contact.key), photo(contact.key), ContactAction.Message,
                         onAction = { goThread(contact.key) })
@@ -2436,6 +2368,34 @@ private fun Sheet(title: String, dismiss: () -> Unit, content: @Composable Colum
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ColumnScope.NativeContactInvite(model: P2pModel, profile: String, photo: String) {
+    var attempt by remember { mutableIntStateOf(0) }
+    var code by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(attempt) {
+        error = null
+        try {
+            code = model.createSecureJoinInvite()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            error = failure.message ?: "Couldn’t create the contact invite."
+        } catch (_: LinkageError) {
+            error = "Chatmail couldn’t start on this device."
+        }
+    }
+    val invite = code
+    when {
+        invite != null -> ShareContactInvite(invite, profile, photo)
+        error != null -> {
+            Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
+            P2pTextButton(onClick = { attempt++ }) { Text("Retry") }
+        }
+        else -> LinearProgressIndicator(Modifier.fillMaxWidth())
     }
 }
 

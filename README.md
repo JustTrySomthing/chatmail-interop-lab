@@ -20,7 +20,7 @@ Start with standard Chatmail QR invites and encrypted one-to-one messages. Check
 
 ## SecureJoin invite experiment
 
-In Contacts → Add contact, use **Invite someone on Delta Chat or ArcaneChat** to show the standard Chatmail QR code, copy the link, or share it. To use a contact invite from either client, choose **Accept invite**, then scan its QR code, select a saved QR image, or paste the link. If Android opens the link with Relay Lab, the link is prefilled and **Connect** starts the handshake. On Android versions that open the web link in a browser by default, copy the link into Relay Lab.
+In **Contacts → Add contact → Send invite**, show the standard Chatmail QR, copy its link, or share it. Use **Accept invite** to scan a QR, select a saved image, or paste a link. When Android routes a link to Relay Lab, it is prefilled for confirmation. Older signed invitations can still be accepted. Chatmail contacts appear in Contacts and New chat, and pending requests can be accepted from their Chatmail conversation.
 
 Use fresh profiles and record the app version and network for each direction. “SecureJoin started” means Chatmail Core accepted the invite and started processing it. Open **Chats → Chatmail chats** to see encrypted one-to-one conversations, including conversations started from an invite you shared. Relay Lab enables sending once Chatmail reports the contact key is available and the chat can send. Chatmail Core stores the conversation and handles delivery and offline queuing. Call signaling is pending.
 
@@ -39,3 +39,10 @@ Read Aloud uses the included offline voices and existing speech animation for re
 | --- | --- | --- |
 | Delta Chat | Device test pending | Device test pending |
 | ArcaneChat | Device test pending | Device test pending |
+
+
+## Chatmail profiles
+
+Settings → Your profile sends the display name, profile photo and bio through Chatmail Core. Contact photos and bios are displayed from the Core contact records. A first-run contact link can supply relay candidates. Adding a relay or login link to an active profile uses Chatmail Core's transport QR interface.
+
+The earlier P2P backup contains P2P data. It leaves an existing Chatmail profile intact when restored. Native Chatmail profile import, second-device QR transfer, and encrypted group invite workflows still require implementation and testing.

@@ -38,7 +38,7 @@ internal data class InviteCreationState(val busy: Boolean = false, val invite: O
 
 internal data class InviteImportState(
     val busy: Boolean = false, val message: String? = null, val failed: Boolean = false, val peer: String? = null,
-    val secureJoinStarted: Boolean = false, val joinedChannel: Int? = null
+    val secureJoinStarted: Boolean = false, val joinedChannel: Int? = null, val joinedChat: Int? = null
 )
 internal const val INVITE_CONNECTING = "Waiting to reach the other device"
 internal const val INVITE_APPROVAL = "Waiting for their approval"
@@ -389,12 +389,35 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         records.get("profile")?.data()?.optString("name")?.takeIf(String::isNotBlank)
             ?: error("Set your display name in Settings to use Chatmail.")
 
-    private fun connectedChatmail(name: String): Chatmail {
+    @Volatile private var initialChatmailInvite: String? = null
+
+    internal fun hintInitialChatmailInvite(invite: String) {
+        initialChatmailInvite = invite
+    }
+
+    private suspend fun connectedChatmail(name: String, setupQr: String? = null): Chatmail {
         val current = selectedNetwork?.network
             ?: error("Connect to the internet to set up Chatmail.")
         val service = chatmail ?: Chatmail(File(context.noBackupFilesDir, "chatmail")).also { chatmail = it }
         if (chatmailNetwork != current) service.disconnect()
-        service.connect(name)
+        val profile = records.get("profile")?.data()
+        if (profile != null && service.profileNeedsSync(profile.optLong("revision"))) {
+            val photo = profile.optString("photo").takeIf(String::isNotBlank)?.let(::checkedPhoto)
+            val avatar = photo?.let { File.createTempFile("chatmail-avatar-", ".jpg", context.cacheDir) }
+            try {
+                if (photo != null) avatar?.writeBytes(photo)
+                service.applyProfile(profile.optLong("revision"), profile.takeIf { it.has("bio") }?.optString("bio"),
+                    avatar, profile.has("photo") && (avatar != null || profile.optString("photo").isEmpty()))
+            } finally {
+                avatar?.delete()
+            }
+        }
+        val onboardingHint = initialChatmailInvite
+        val candidate = setupQr ?: onboardingHint?.takeIf { raw ->
+            runCatching { service.inviteKind(raw) in setOf("askVerifyContact", "askJoinBroadcast") }.getOrDefault(false)
+        }
+        service.connect(name, candidate)
+        if (onboardingHint == initialChatmailInvite) initialChatmailInvite = null
         chatmailNetwork = current
         return service
     }
@@ -447,6 +470,23 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         service.sendInteropText(requireInteropChat(service, id), text)
     }
 
+    internal suspend fun nativeContacts(): List<ChatmailContact> = withInteropChatmail { core ->
+        val legacyContactIds = signedChatmailIds().filter { it > 9 }
+            .mapNotNull { runCatching { core.chatContactId(it) }.getOrNull() }.toSet()
+        core.contacts().filterNot { it.id in legacyContactIds }
+    }
+
+    internal suspend fun openNativeContact(contact: Int): Int = withInteropChatmail { it.openContact(contact) }
+
+    internal suspend fun acceptNativeContactRequest(id: Int) = withInteropChatmail { core ->
+        core.acceptContactRequest(requireInteropChat(core, id))
+    }
+
+    internal fun addChatmailRelay(code: String, saved: () -> Unit) = work {
+        withInteropChatmail { it.addRelay(code.trim()) }
+        withContext(Dispatchers.Main) { saved() }
+    }
+
     internal suspend fun chatmailChannels() = withInteropChatmail(Chatmail::channels)
 
     internal suspend fun chatmailChannelHistory(id: Int, limit: Int) = withInteropChatmail { core ->
@@ -484,7 +524,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val name = requireChatmailName()
         return chatmailLock.withLock {
             check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
-            val core = connectedChatmail(name)
+            val core = connectedChatmail(name, code)
             val kind = core.inviteKind(code)
             val channel = kind == "askJoinBroadcast"
             require(channel || (!channelOnly && kind == "askVerifyContact")) {
@@ -494,7 +534,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             check(chat > 9) { "Chatmail couldn’t open this conversation." }
             if (channel) InviteImportState(joinedChannel = chat)
             else InviteImportState(message = "SecureJoin started. Keep both apps online while they verify the connection.",
-                secureJoinStarted = true)
+                secureJoinStarted = true, joinedChat = chat)
         }
     }
 
@@ -1163,9 +1203,6 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val replacement = DeviceAccount.read(bundle.getString("credentials"))
         check(replacement.grant.account == bundle.getString("peer")) { "Invalid saved backup data" }
         val rows = recoveryRows(bundle)
-        check(File(context.noBackupFilesDir, "chatmail").deleteRecursively()) {
-            "Couldn’t reset the previous Chatmail profile"
-        }
         for (item in backedUpMedia(rows)) {
             val staged = File(backupStaging, item.id)
             if (staged.isFile) {
@@ -1590,6 +1627,12 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     fun setName(name: String, saved: () -> Unit = {}) = work {
         require(name.trim().isNotEmpty()) { "Enter a display name" }
         updateProfile { put("name", name.trim().take(60)) }
+        withContext(Dispatchers.Main) { saved() }
+    }
+
+    fun setBio(bio: String, saved: () -> Unit = {}) = work {
+        require(bio.length <= 500) { "Enter a bio of up to 500 characters." }
+        updateProfile { put("bio", bio.trim()) }
         withContext(Dispatchers.Main) { saved() }
     }
 

@@ -121,6 +121,16 @@ class ChatmailTest {
     }
 
     @Test
+    fun readsNativeContactPhotoAndBioAndExcludesBlockedContacts() {
+        val row = obj("id" to 20, "isKeyContact" to true, "displayName" to "Sam",
+            "status" to "Trail runner", "profileImage" to "/profiles/avatar.jpg")
+        assertEquals(ChatmailContact(20, "Sam", "Trail runner", "/profiles/avatar.jpg"), parseChatmailContact(row))
+        row.put("profileImage", org.json.JSONObject.NULL)
+        assertEquals(ChatmailContact(20, "Sam", "Trail runner"), parseChatmailContact(row))
+        assertNull(parseChatmailContact(row.put("isBlocked", true)))
+    }
+
+    @Test
     fun interopTextRequiresAnEncryptedSingleChatAndAReadyKey() {
         val chat = obj("id" to 12, "chatType" to "Single", "isEncrypted" to true,
             "contactIds" to org.json.JSONArray(listOf(1, 20)), "canSend" to true)

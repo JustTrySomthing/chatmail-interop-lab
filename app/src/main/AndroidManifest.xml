@@ -32,6 +32,9 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="openpgp4fpr" />
                 <data android:scheme="OPENPGP4FPR" />
+                <data android:scheme="OpenPGP4FPR" />
+                <data android:scheme="OpenPGP4Fpr" />
+                <data android:scheme="OpenPGP4fpr" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

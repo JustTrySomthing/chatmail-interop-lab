@@ -309,15 +309,7 @@ class MediaNavigationTest {
     fun opensSendAndAcceptInTheSameAddContactSheet() {
         val context = ApplicationProvider.getApplicationContext<P2pApplication>()
         seedCompletedSetup(context)
-        val code = chatmailInviteCode("""{"payload":"example"}""")
-        withTestRecords(context) { rows ->
-            val now = System.currentTimeMillis()
-            rows.put(Record("invite:" + newId(), "invite-out",
-                obj("expires" to now + 60_000L, "chatmail" to true, "autoAccept" to true, "code" to code).toString()))
-            rows.put(Record("invite:" + newId(), "invite-out",
-                obj("expires" to now - 1_000L, "chatmail" to true, "autoAccept" to true, "code" to code).toString()))
-        }
-        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+        ActivityScenario.launch(MainActivity::class.java).use {
             compose.waitUntil(5_000) {
                 runCatching { compose.onNodeWithText("Inbox").assertIsDisplayed() }.isSuccess
             }
@@ -325,22 +317,8 @@ class MediaNavigationTest {
             val add = compose.onNodeWithText("Add contact")
             compose.waitUntil(5_000) { runCatching { add.assertIsDisplayed() }.isSuccess }
             add.performClick()
-            compose.waitUntil(5_000) {
-                runCatching { compose.onNodeWithContentDescription("Contact invite QR code").assertIsDisplayed() }.isSuccess
-            }
-            compose.onNodeWithText("Scan to chat with Test User").assertExists()
-            compose.onNodeWithText(code, substring = true).assertDoesNotExist()
-            compose.onNodeWithText("Copy code").performScrollTo().performClick()
-            val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
-            org.junit.Assert.assertEquals(code, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
-            compose.onNodeWithText("Share").performScrollTo().performClick()
-            scenario.onActivity { activity ->
-                val chooser = org.robolectric.Shadows.shadowOf(activity).nextStartedActivity
-                org.junit.Assert.assertEquals(android.content.Intent.ACTION_CHOOSER, chooser.action)
-                val shared = chooser.getParcelableExtra(android.content.Intent.EXTRA_INTENT, android.content.Intent::class.java)
-                org.junit.Assert.assertEquals(android.content.Intent.ACTION_SEND, shared?.action)
-                org.junit.Assert.assertEquals(code, shared?.getStringExtra(android.content.Intent.EXTRA_TEXT))
-            }
+            compose.onNodeWithText("Send invite").assertIsDisplayed()
+            compose.onNodeWithText("Copy code").assertDoesNotExist()
             compose.onNodeWithText("Accept invite").performSemanticsAction(SemanticsActions.OnClick)
             compose.onNodeWithText("Scan QR code").assertIsDisplayed()
             compose.onNodeWithText("Choose QR image").assertIsDisplayed()
