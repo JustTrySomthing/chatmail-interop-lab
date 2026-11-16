@@ -1,10 +1,10 @@
 {
-  "version": "0.7.23-rc45",
-  "version_code": 81,
+  "version": "0.7.23-rc46",
+  "version_code": 82,
   "sha256": {
     ".gitignore": "57752bc83258c3f60383f01be18a07066ff22025f89f995f19878ee0664e740b",
     "README.md": "948587a2b5eb18364614821b5a07e70d5c8e5de3075ead88d66d16010138103a",
-    "app/build.gradle.kts": "af26a68160d7dad669a29d7417bec2e28136a3097adf4d7cf24191f6d298daa1",
+    "app/build.gradle.kts": "186ac61d145d60d14679883168a4aa05df107066d2182247917cdce6d3f2fa86",
     "app/proguard-rules.pro": "5c4bb565ceea112dfd25a087e5dbac2d4dcc1cd2f3a724d5b9031c836b39818b",
     "app/src/main/AndroidManifest.xml": "76ac1e5a9f4516a1a637661ad9a73b050c5beb731f8cd445ad655b9ca733133f",
     "app/src/main/assets/emoji.json": "513c7f8a8e07661e0aa16d27eea8a36dd813258f832e71d6f86f9411ff81dd94",
