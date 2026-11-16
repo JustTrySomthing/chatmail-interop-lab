@@ -18,13 +18,17 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Use `P2P_INTE
 
 In **Contacts → Add contact → Send invite**, show your SecureJoin QR code, copy its link, or share it. **Accept invite** can scan a code, read a saved image, or paste a link. Android links that open in Relay Lab are prefilled for confirmation. Existing signed P2P invitations remain readable.
 
-Chatmail contacts appear in **Contacts** and **New chat**. Open a conversation to accept its contact request. **Chats → Chatmail chats** shows encrypted one-to-one conversations. Chatmail Core manages contact keys, delivery, and offline queuing.
+Chatmail contacts appear in **Contacts** and **New chat**. Open a conversation to accept its contact request. **Chats** shows encrypted one-to-one conversations, and **Groups** creates and opens encrypted Chatmail groups. To share a group’s SecureJoin QR code or link, open the group and tap the invite icon. The receiving client can scan the QR code or open the link.
+
+Chatmail Core handles message delivery, offline queuing, encrypted attachments, quotes, reactions, and group membership. Relay Lab still renders its own message bubbles, reaction animations, media controls, thumbnails, and web previews. Relay Lab trims and compresses media on the device before submitting it as a standard attachment.
+
+Verified Chatmail mappings let earlier one-to-one conversations use Core while retaining their local history. Groups created with the earlier P2P protocol keep their original transport and history. Create a group in the current **Groups** screen to use it across clients.
 
 **Settings → Your profile** updates the name, photo, and bio in Chatmail Core. A first-run contact link can supply relay candidates, and an active profile can add a relay or login link. The P2P backup preserves earlier P2P data. Its restore leaves the Chatmail database in place.
 
 ## Device test status
 
-Use fresh profiles and record the client versions and networks used. SecureJoin can continue after the app starts the handshake. Chatmail profile transfer and encrypted group invites are pending.
+Use fresh profiles and record the client versions and networks used. SecureJoin can continue after the app starts the handshake. The table records device testing separately from build and unit checks. Group invitations, membership changes, and exchange of text, replies, files, and reactions still need cross-client device tests.
 
 | Client | Relay Lab sends invite | Relay Lab accepts invite | Relay Lab sends text | Relay Lab receives text |
 | --- | --- | --- | --- | --- |
@@ -35,7 +39,7 @@ Use fresh profiles and record the client versions and networks used. SecureJoin 
 
 **Channels → Feed** shows recent posts from joined channels, newest first. **Following** opens an individual channel or joins a standard Chatmail broadcast from a QR code, an image, or an invite link. **My Channel** creates one channel per profile, shares its invite, and publishes text. Existing Social content is reachable through **Previous Social posts**. Channel attachments currently show their filenames.
 
-Read Aloud uses the included offline voices and existing speech animation for regular messages, previous Social posts, Chatmail messages, and channel posts.
+Read Aloud uses the included offline voices and existing speech animation for messages, previous Social posts, and channel posts.
 
 | Client | Relay Lab joins and receives posts | Client joins Relay Lab and receives posts |
 | --- | --- | --- |

@@ -268,7 +268,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         var modal by rememberSaveable { mutableStateOf<String?>(null) }
         var addContactTab by rememberSaveable { mutableStateOf("Send invite") }
         var pastedInvite by remember { mutableStateOf("") }
-        var nativeConversation by rememberSaveable { mutableStateOf<Int?>(null) }
         var trackedInvitePeer by rememberSaveable { mutableStateOf<String?>(null) }
         fun showAddContact(pendingPeer: String? = null) {
             channelInviteOnly = false
@@ -780,7 +779,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         }
         fun closeFullPage() {
             if (fullPage == FullPageRoute.Updates) updates.dismissPrompt()
-            modal = if (fullPage in setOf(FullPageRoute.Settings, FullPageRoute.Contacts, FullPageRoute.Chatmail)) null else "settings"
+            modal = if (fullPage in setOf(FullPageRoute.Settings, FullPageRoute.Contacts)) null else "settings"
         }
         BackHandler(thread != null || modal != null || (area == Area.Social && (legacySocial || channelId != null))) {
             when {
@@ -825,10 +824,14 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                 }
                             }
                         }
-                        val matchingContacts = contacts.filter { threadSearchMatches(contactQuery, name(it.key), emptyList()) }
+                        val matchingContacts = contacts.filter {
+                            !it.data().has("nativeContact") && threadSearchMatches(contactQuery, name(it.key), emptyList())
+                        }
                         NativeContactRows(model, contactQuery, showEmpty = matchingContacts.isEmpty()) { id ->
-                            nativeConversation = id
-                            modal = "chatmail-chats"
+                            if (area == Area.Talk) {
+                                modal = null
+                                requestTalkMic(TalkMicAction.Call, "chatmail:$id")
+                            } else messageContact(nativeThreadKey(id))
                         }
                         val contactAction = if (area == Area.Talk) ContactAction.Call else ContactAction.Message
                         matchingContacts.forEach { contact ->
@@ -842,12 +845,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             )
                         }
                     }
-                    FullPageRoute.Chatmail -> {
-                        InteropChats(model, nativeConversation) { chat ->
-                            modal = null
-                            requestTalkMic(TalkMicAction.Call, "chatmail:$chat")
-                        }
-                    }
+
                     FullPageRoute.Settings -> {
                         SettingsGrid(settingsQuery) { destination ->
                             modal = destination
@@ -972,6 +970,12 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") }
                     },
                     actions = {
+                        if (group?.data()?.let { it.has("nativeChat") && it.optBoolean("nativeCanSend") &&
+                                !it.optBoolean("contactRequest") } == true) {
+                            IconButton(onClick = { modal = "group-invite" }) {
+                                Icon(Icons.Outlined.Link, "Invite to group")
+                            }
+                        }
                         AppToolbarActions(appMuted, model::setAppNotificationsMuted,
                             if (id == null) "Search" else "Search conversation",
                             { modal = if (id == null) "area-search" else "thread-search" },
@@ -1022,6 +1026,14 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                 }
                             }
                         }
+                        val conversation = records.firstOrNull { it.key == id }?.data()
+                        if (conversation?.optBoolean("contactRequest") == true) {
+                            val chat = conversation.getInt("nativeChat")
+                            Button(onClick = { model.acceptNativeThread(id, chat) },
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                                Text("Accept chat")
+                            }
+                        }
                         ThreadView(
                             id = id, view = threadView, records = records, peer = peer,
                             find = threadQuery, searchOpen = modal == "thread-search",
@@ -1029,6 +1041,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             quote = records.firstOrNull { it.key == quote && it.kind == "message" },
                             clearQuote = { quote = null },
                             attachments = mediaDrafts[id].orEmpty(), preparing = submitting || sendingDraft,
+                            loadOlder = if (conversation?.optBoolean("nativeHasOlder") == true)
+                                ({ model.loadOlderNativeMessages(id) }) else null,
+                            canCompose = conversation?.let {
+                                !it.has("nativeChat") || (it.optBoolean("nativeCanSend") && !it.optBoolean("contactRequest"))
+                            } ?: true,
                             removeAttachment = { removeDraft(id, it) },
                             trimAttachment = { trimIndex = it; modal = "trim-attachment" },
                             send = { text, done ->
@@ -1059,12 +1076,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         PageActionButton(if (isGroup) "Create a group" else "Start a chat",
                             { modal = if (isGroup) "group-new" else "chat-new" },
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp))
-                        if (!isGroup && folder == "Inbox") {
-                            P2pOutlinedButton(onClick = { nativeConversation = null; modal = "chatmail-chats" },
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                                Text("Chatmail chats")
-                            }
-                        }
                         val searchable = if (search.isBlank()) emptyMap() else records.filter {
                             it.kind in listOf("message", "file-received", "file-sent")
                         }.groupBy { it.data().optString("thread") }
@@ -1348,7 +1359,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
 
         when (if (showTalkCall || fullPage != null) null else modal) {
             "call-contacts" -> Sheet("Call", { modal = null }) {
-                val available = contacts.filterNot { blocked(it.key) }
+                val available = contacts.filterNot { blocked(it.key) || it.data().has("nativeContact") }
                 SearchField(search, { search = it }, "Search contacts")
                 NativeContactRows(model, search, showEmpty = available.isEmpty()) { chat ->
                     modal = null
@@ -1589,9 +1600,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             color = if (inviteImport.failed) MaterialTheme.colorScheme.error else Quiet) }
                         inviteImport.joinedChat?.let { joined ->
                             P2pTextButton(onClick = {
-                                goArea(Area.Chats)
-                                nativeConversation = joined
-                                modal = "chatmail-chats"
+                                goArea(if (inviteImport.joinedGroup) Area.Groups else Area.Chats)
+                                goThread(nativeThreadKey(joined))
                                 model.clearInviteImport()
                             }) { Text("Open chat") }
                         }
@@ -1622,6 +1632,14 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             enabled = pastedInvite.isNotBlank() && !inviteImport.busy,
                             modifier = Modifier.fillMaxWidth()) { Text(if (channelInviteOnly) "Join channel" else "Connect") }
 
+                    }
+                }
+            }
+            "group-invite" -> groups.firstOrNull { it.key == thread }?.let { group ->
+                Sheet("Group invite", { modal = null }) {
+                    val chat = group.data().getInt("nativeChat")
+                    NativeSecureJoinCard(name(group.key), photo(group.key), group = true) {
+                        model.nativeGroupInvite(chat)
                     }
                 }
             }
@@ -1743,10 +1761,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 Button(onClick = { modal = "add-contact" }) { Text(if (channelInviteOnly) "Back to join channel" else "Back to accept invite") }
             }
             "chat-new" -> Sheet("New chat", { modal = null }) {
-                val available = contacts.filterNot { blocked(it.key) }
+                val available = contacts.filterNot { blocked(it.key) || it.data().has("nativeContact") }
                 NativeContactRows(model, "", showEmpty = available.isEmpty()) { id ->
-                    nativeConversation = id
-                    modal = "chatmail-chats"
+                    messageContact(nativeThreadKey(id))
                 }
                 PageActionButton("Add contact", { showAddContact() }, Modifier.fillMaxWidth())
                 available.forEach { contact ->
@@ -1756,10 +1773,24 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             }
             "group-new", "group-edit" -> {
                 val editing = modal == "group-edit"
-                val group = groups.firstOrNull { it.key == selected }
-                GroupSheet(if (editing) "Edit group" else "New group", contacts, group, { modal = null }) { title, members ->
-                    if (editing && group != null) { model.updateGroup(group.key, title, members); modal = null }
-                    else model.createGroup(title, members) { id -> goThread(id) }
+                val group = groups.firstOrNull { editing && it.key == selected }
+                val chat = group?.data()?.optInt("nativeChat")?.takeIf { it > 9 }
+                val useChatmail = !editing || chat != null
+                val nativeMembers by produceState(emptyList<Record>(), useChatmail, chat) {
+                    if (useChatmail) {
+                        try {
+                            value = model.nativeGroupContacts()
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            value = emptyList()
+                        }
+                    }
+                }
+                val choices = if (useChatmail) nativeMembers else contacts.filterNot { it.data().has("nativeContact") }
+                GroupSheet(if (editing) "Edit group" else "New group", choices, group, { modal = null }) { title, members ->
+                    if (useChatmail) model.saveNativeGroup(chat, title, members, ::goThread)
+                    else if (group != null) { model.updateGroup(group.key, title, members); modal = null }
                 }
             }
             "friend-new" -> Sheet("Add friend", { modal = null }) {
@@ -2292,7 +2323,6 @@ internal fun EmptyTabMessage(message: String, modifier: Modifier = Modifier) {
 
 private enum class FullPageRoute(val route: String, val title: String) {
     Contacts("contacts", "Contacts"),
-    Chatmail("chatmail-chats", "Chatmail chats"),
     Settings("settings", "Settings"),
     Updates("updates", "P2P updates"),
     Notifications("notifications", "Notifications"),
@@ -2387,24 +2417,30 @@ private fun Sheet(title: String, dismiss: () -> Unit, content: @Composable Colum
 
 @Composable
 private fun ColumnScope.NativeContactInvite(model: P2pModel, profile: String, photo: String) {
+    NativeSecureJoinCard(profile, photo) { model.createSecureJoinInvite() }
+}
+
+@Composable
+private fun ColumnScope.NativeSecureJoinCard(profile: String, photo: String, group: Boolean = false,
+                                             createInvite: suspend () -> String) {
     var attempt by remember { mutableIntStateOf(0) }
     var code by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(attempt) {
         error = null
         try {
-            code = model.createSecureJoinInvite()
+            code = createInvite()
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            error = failure.message ?: "Couldn’t create the contact invite."
+            error = failure.message ?: "Couldn’t create the invite."
         } catch (_: LinkageError) {
             error = "Chatmail couldn’t start on this device."
         }
     }
     val invite = code
     when {
-        invite != null -> ShareContactInvite(invite, profile, photo)
+        invite != null -> ShareContactInvite(invite, profile, photo, group = group)
         error != null -> {
             Text(error.orEmpty(), color = MaterialTheme.colorScheme.error)
             P2pTextButton(onClick = { attempt++ }) { Text("Retry") }
@@ -2415,7 +2451,12 @@ private fun ColumnScope.NativeContactInvite(model: P2pModel, profile: String, ph
 
 @Composable
 private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo: String,
-                                        channel: Boolean = false) {
+                                        channel: Boolean = false, group: Boolean = false) {
+    val kind = when {
+        channel -> "Channel"
+        group -> "Group"
+        else -> "Contact"
+    }
     val context = LocalContext.current
     val bitmap = remember(code) { InviteImage.make(code) }
     val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
@@ -2430,10 +2471,11 @@ private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo:
         ) {
             Column(Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Avatar(profile, photo = photo, size = 38.dp, save = null)
-                InviteQr(bitmap, if (channel) "Channel invite QR code" else "Contact invite QR code", Modifier.fillMaxWidth().aspectRatio(1f)
+                InviteQr(bitmap, "$kind invite QR code", Modifier.fillMaxWidth().aspectRatio(1f)
                     .clickable(onClickLabel = "Enlarge QR code") { enlarged = true })
                 Text(when {
                     channel -> "Scan to follow $profile"
+                    group -> "Scan to join $profile"
                     profile.isBlank() -> "Scan to start a chat"
                     else -> "Scan to chat with $profile"
                 },
@@ -2447,7 +2489,7 @@ private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo:
     Row(Modifier.align(Alignment.CenterHorizontally).widthIn(max = cardWidth).fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         P2pOutlinedButton(onClick = {
-            val clip = android.content.ClipData.newPlainText(if (channel) "Channel invite" else "Contact invite", code)
+            val clip = android.content.ClipData.newPlainText("$kind invite", code)
             clip.description.extras = android.os.PersistableBundle().apply {
                 putBoolean("android.content.extra.IS_SENSITIVE", true)
             }
@@ -2455,7 +2497,7 @@ private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo:
         }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { FittedLabel("Copy link") }
         Button(onClick = {
             val intent = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, code)
-            context.startActivity(Intent.createChooser(intent, if (channel) "Share channel invite" else "Share contact invite"))
+            context.startActivity(Intent.createChooser(intent, "Share ${kind.lowercase()} invite"))
         }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { FittedLabel("Share") }
     }
 }
@@ -2550,7 +2592,7 @@ private fun GroupSheet(title: String, contacts: List<Record>, group: Record?, di
                 Text(contact.data().optString("name"))
             }
         }
-        Button(onClick = { save(name, members.toSet()) }, shape = P2pButtonShape, enabled = name.isNotBlank() && members.isNotEmpty()) {
+        Button(onClick = { save(name, members.toSet()) }, shape = P2pButtonShape, enabled = name.isNotBlank() && (group != null || contacts.any { it.key in members })) {
             Text(if (group == null) "Create group" else "Save changes")
         }
     }
@@ -2562,7 +2604,7 @@ internal fun ColumnScope.ThreadView(
     id: String, view: String, records: List<Record>, peer: String, find: String, searchOpen: Boolean,
     name: (String) -> String, photo: (String) -> String,
     onView: (String) -> Unit, quote: Record?, clearQuote: () -> Unit,
-    attachments: List<AttachmentDraft>, preparing: Boolean, removeAttachment: (Int) -> Unit, trimAttachment: (Int) -> Unit,
+    attachments: List<AttachmentDraft>, preparing: Boolean, canCompose: Boolean, loadOlder: (() -> Unit)?, removeAttachment: (Int) -> Unit, trimAttachment: (Int) -> Unit,
     send: (String, () -> Unit) -> Unit, preview: (PreviewLink) -> Unit,
     openLink: (PreviewLink) -> Unit, attach: () -> Unit,
     messageMenu: (String) -> Unit, react: (String) -> Unit,
@@ -2599,7 +2641,7 @@ internal fun ColumnScope.ThreadView(
     val keyboardVisible = WindowInsets.ime.getBottom(density) > 0
     val ownCard = Edge
     LaunchedEffect(searchOpen) { if (searchOpen) emojiPicker = false }
-    val showEmoji = view == Feed && !searchOpen && emojiPicker && !keyboardVisible
+    val showEmoji = canCompose && view == Feed && !searchOpen && emojiPicker && !keyboardVisible
     BackHandler(showEmoji) { emojiPicker = false }
     if (!keyboardVisible || LocalConfiguration.current.screenHeightDp >= 480 || view != Feed) {
         Segments(listOf(Feed, "Gallery", "Starred"), view, prominent = true) { next ->
@@ -2607,6 +2649,9 @@ internal fun ColumnScope.ThreadView(
             focus.clearFocus()
             onView(next)
         }
+    }
+    if (loadOlder != null && view == Feed) {
+        P2pTextButton(onClick = loadOlder, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Load older messages") }
     }
     Box(Modifier.fillMaxWidth().weight(1f)) {
         if (visible.isEmpty()) {
@@ -2693,6 +2738,14 @@ internal fun ColumnScope.ThreadView(
                                     }
                                 }
                                 if (status.isNotBlank()) Text(status, fontSize = 12.sp)
+                                val reference = data.optString("replyTo")
+                                val quoteText = data.optString("quoteText")
+                                if (reference.isNotEmpty() || quoteText.isNotEmpty()) {
+                                    val original = messages.firstOrNull { it.key == reference }?.data()
+                                    QuotedMessage(original?.let { name(it.optString("author")) }
+                                        ?: data.optString("quoteAuthor").ifBlank { "Earlier message" },
+                                        original?.optString("text")?.ifBlank { original.optString("name") } ?: quoteText)
+                                }
                                 if (isAttachment) {
                                     ChatAttachment(data, galleryFile(message), message.kind == "file-received",
                                         { file(message.key) }, options, onLongClickLabel = "Attachment options")
@@ -2700,12 +2753,6 @@ internal fun ColumnScope.ThreadView(
                                         Text(data.optString("caption"), style = contentTextStyle(MaterialTheme.typography.bodyLarge))
                                     }
                                 } else {
-                                    val reference = data.optString("replyTo")
-                                    if (reference.isNotEmpty()) {
-                                        val original = messages.firstOrNull { it.key == reference && it.kind == "message" }?.data()
-                                        QuotedMessage(original?.let { name(it.optString("author")) } ?: "Earlier message",
-                                            original?.optString("text").orEmpty())
-                                    }
                                     val body = data.optString("text")
                                     LinkedMessageText(body, openLink, MaterialTheme.typography.bodyLarge, bubbleColor)
                                     previewLinks(body).forEach { link ->
@@ -2767,24 +2814,24 @@ internal fun ColumnScope.ThreadView(
             Modifier.fillMaxWidth().background(Panel).padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = attach, enabled = !preparing) { Icon(Icons.Outlined.AttachFile, "Add attachment", tint = readableAccent(Panel, Ink)) }
+            IconButton(onClick = attach, enabled = canCompose && !preparing) { Icon(Icons.Outlined.AttachFile, "Add attachment", tint = readableAccent(Panel, Ink)) }
             IconButton(onClick = {
                 if (emojiPicker) emojiPicker = false else {
                     keyboard?.hide()
                     focus.clearFocus()
                     emojiPicker = true
                 }
-            }) { Icon(Icons.Outlined.EmojiEmotions, "Emoji picker", tint = readableAccent(Panel, Ink)) }
+            }, enabled = canCompose) { Icon(Icons.Outlined.EmojiEmotions, "Emoji picker", tint = readableAccent(Panel, Ink)) }
             OutlinedTextField(draft, { draft = it }, modifier = Modifier.weight(1f).onFocusChanged {
                 if (it.isFocused) emojiPicker = false
-            }, maxLines = if (LocalConfiguration.current.screenHeightDp < 480) 2 else 4,
+            }, enabled = canCompose, maxLines = if (LocalConfiguration.current.screenHeightDp < 480) 2 else 4,
                 placeholder = { FittedLabel("Message", fontWeight = FontWeight.Normal, size = 16) },
                 textStyle = contentTextStyle(MaterialTheme.typography.bodyLarge), shape = RoundedCornerShape(19.dp))
             Spacer(Modifier.width(6.dp))
             FilledIconButton(onClick = {
                 val submitted = draft.text
                 send(submitted) { if (draft.text == submitted) draft = TextFieldValue() }
-            }, enabled = !preparing && (draft.text.isNotBlank() || attachments.isNotEmpty())) {
+            }, enabled = canCompose && !preparing && (draft.text.isNotBlank() || attachments.isNotEmpty())) {
                 Icon(Icons.AutoMirrored.Outlined.Send, "Send")
             }
         }

@@ -146,23 +146,39 @@ class ChatmailTest {
     }
 
     @Test
-    fun interopHistoryShowsOnlyStandardEncryptedTextFromTheConversation() {
-        val chat = InteropChat(12, 20, "Delta peer", true)
+    fun nativeHistoryRetainsStandardAttachmentsQuotesAndReactions() {
+        val reactions = obj("reactionsByContact" to obj("1" to org.json.JSONArray(listOf("👍")),
+            "20" to org.json.JSONArray(listOf("👋", "✨"))))
+        val quote = obj("text" to "Earlier", "chatId" to 12, "messageId" to 28, "authorDisplayName" to "Alex")
         val raw = obj("kind" to "message", "id" to 30, "chatId" to 12,
-            "fromId" to 20, "showPadlock" to true, "viewType" to "Text", "text" to "Hello 👋")
-        assertEquals(InteropText(30, "Hello 👋", false, 0), parseInteropText(raw, chat))
-        assertTrue(requireNotNull(parseInteropText(raw.put("fromId", 1), chat)).outgoing)
-        assertNull(parseInteropText(raw.put("fromId", 21), chat))
-        raw.put("fromId", 20)
-        assertNull(parseInteropText(raw.put("showPadlock", false), chat))
-        raw.put("showPadlock", true)
-        assertNull(parseInteropText(raw.put("chatId", 13), chat))
-        raw.put("chatId", 12)
-        assertNull(parseInteropText(raw.put("viewType", "Image"), chat))
-        raw.put("viewType", "Text")
-        assertNull(parseInteropText(raw.put("isInfo", true), chat))
-        raw.put("isInfo", false)
-        assertNull(parseInteropText(raw.put("text", "P2P/1 malformed"), chat))
+            "fromId" to 20, "showPadlock" to true, "viewType" to "Video", "text" to "Clip",
+            "timestamp" to 1234, "fileName" to "clip.mp4", "fileMime" to "video/mp4",
+            "fileBytes" to 1024, "quote" to quote, "reactions" to reactions)
+        val message = requireNotNull(readNativeMessage(raw, 12))
+        assertEquals(28, message.quote)
+        assertEquals("Alex", message.quoteAuthor)
+        assertEquals("clip.mp4", message.name)
+        assertEquals("video/mp4", message.mime)
+        assertEquals(1024L, message.size)
+        assertEquals(1234000L, message.time)
+        assertEquals(mapOf(1 to listOf("👍"), 20 to listOf("👋", "✨")), message.reactions)
+        assertNull(readNativeMessage(raw, 13))
+        assertNull(readNativeMessage(raw.put("showPadlock", false), 12))
+        assertNull(readNativeMessage(raw.put("showPadlock", true).put("isInfo", true), 12))
+        assertNull(readNativeMessage(raw.put("isInfo", false).put("text", "P2P/1 old envelope"), 12))
+    }
+
+    @Test
+    fun nativeGroupsRetainOnlyCoreMembersAndHaveSeparateChatAndMessageKeys() {
+        val raw = obj("id" to 12, "name" to "Trip", "chatType" to "Group", "isEncrypted" to true,
+            "contactIds" to org.json.JSONArray(listOf(1, 20, 34)), "canSend" to true)
+        val group = requireNotNull(readNativeThread(raw))
+        assertTrue(group.group)
+        assertTrue(group.canSend)
+        assertEquals(listOf(20, 34), group.members)
+        assertFalse(nativeThreadKey(12) == nativeMessageKey(12))
+        assertTrue(isId(nativeThreadKey(12)))
+        assertNull(readNativeThread(raw.put("isEncrypted", false)))
     }
 
     @Test

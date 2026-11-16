@@ -9,6 +9,8 @@ internal const val CHATMAIL_SUBMITTED = "Sent via Chatmail"
 internal const val CHATMAIL_REQUEST_QUEUED = "Queued for Chatmail delivery"
 internal const val CHATMAIL_REQUEST_SENT = "Sent via Chatmail · waiting for their device"
 private const val PACKET_PREFIX = "P2P/1 "
+private val MESSAGE_EVENTS = setOf("IncomingMsg", "MsgsChanged", "MsgsNoticed", "MsgDelivered", "MsgFailed",
+    "MsgRead", "ChatModified", "ChatlistChanged", "ReactionsChanged")
 
 internal object ChatmailNative {
     init { System.loadLibrary("p2p_chatmail") }
@@ -35,6 +37,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
     private var displayName: String? = null
     private var profileRevision: Long? = null
     private var running = false
+    private var lastReadCursor: Int? = null
 
     private fun rpc(method: String, vararg params: Any?): Any {
         val request = obj("jsonrpc" to "2.0", "id" to 1, "method" to method, "params" to JSONArray(params.toList()))
@@ -47,7 +50,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     private fun call(method: String, vararg params: Any?): Any = rpc(method, account, *params)
 
-    fun listenForCalls(onEvent: (ChatmailCallEvent) -> Unit) {
+    fun listenForEvents(onMessagesChanged: () -> Unit, onCall: (ChatmailCallEvent) -> Unit) {
         synchronized(eventLock) {
             if (readingEvents || closing) return
             readingEvents = true
@@ -56,22 +59,26 @@ internal class Chatmail(directory: File) : AutoCloseable {
             try {
                 while (synchronized(eventLock) { !closing }) {
                     val batch = rpc("get_next_event_batch") as JSONArray
+                    var messagesChanged = false
                     for (index in 0 until batch.length()) {
                         val row = batch.optJSONObject(index) ?: continue
                         if (row.optInt("contextId") != account) continue
-                        val event = row.optJSONObject("event")?.let(::readChatmailCallEvent) ?: continue
-                        if (synchronized(eventLock) { !closing }) onEvent(event)
+                        val event = row.optJSONObject("event") ?: continue
+                        if (synchronized(eventLock) { closing }) break
+                        messagesChanged = messagesChanged || event.optString("kind") in MESSAGE_EVENTS
+                        readChatmailCallEvent(event)?.let(onCall)
                     }
+                    if (messagesChanged && synchronized(eventLock) { !closing }) onMessagesChanged()
                 }
             } catch (error: Exception) {
-                android.util.Log.w("RelayLabCall", "Chatmail call event reader stopped", error)
+                android.util.Log.w("RelayLabChatmail", "Chatmail event reader stopped", error)
             } finally {
                 synchronized(eventLock) {
                     readingEvents = false
                     if (closeReady) ChatmailNative.close(handle)
                 }
             }
-        }, "Chatmail call events").apply { isDaemon = true }.start()
+        }, "Chatmail events").apply { isDaemon = true }.start()
     }
 
     fun placeCall(chat: Int, offer: String): Int = (call("place_outgoing_call", chat, offer, false) as Number).toInt()
@@ -182,8 +189,76 @@ internal class Chatmail(directory: File) : AutoCloseable {
         return (call("create_chat_by_contact_id", id) as Number).toInt()
     }
 
-    fun acceptContactRequest(chat: InteropChat) {
-        if (chat.request) call("accept_chat", chat.id)
+    fun nativeThread(id: Int): NativeThread? = readNativeThread(call("get_full_chat_by_id", id) as JSONObject)
+
+    fun nativeThreadIds(): List<Int> =
+        (interoperableChatIds() + (call("get_chatlist_entries", 1, null, null) as JSONArray).intValues())
+            .filter { it > 9 }.distinct()
+
+    fun nativeHistory(chat: Int, limit: Int, before: Int?, after: Int?): NativeHistory {
+        val all = (call("get_message_ids", chat, false, false) as JSONArray).intValues()
+        val end = before?.let(all::indexOf)?.takeIf { it >= 0 } ?: all.size
+        val recentStart = (end - limit).coerceAtLeast(0)
+        val previous = after?.let(all::indexOf)?.takeIf { it in 0 until end }
+        val start = if (previous == null) recentStart else minOf(recentStart, previous + 1)
+        val ids = all.subList(start, end)
+        val rows = ids.chunked(100).flatMap { page ->
+            val batch = messages(page)
+            page.mapNotNull { batch.optJSONObject(it.toString())?.let { row -> readNativeMessage(row, chat) } }
+        }
+        return NativeHistory(rows, ids.firstOrNull(), ids.lastOrNull(), start > 0)
+    }
+
+    fun nativeSend(chat: Int, text: String, quote: Int?, file: File? = null,
+                   name: String? = null, viewType: String? = null): Int {
+        check(nativeThread(chat)?.let { it.canSend && !it.request } == true) { "This encrypted conversation cannot send yet." }
+        val data = obj("text" to text)
+        if (quote != null) data.put("quotedMessageId", quote)
+        if (file != null) data.put("file", file.absolutePath).put("filename", name).put("viewtype", viewType)
+        return (call("send_msg", chat, data) as Number).toInt()
+    }
+
+    fun nativeMessage(chat: Int, id: Int): NativeMessage? =
+        messages(listOf(id)).optJSONObject(id.toString())?.let { readNativeMessage(it, chat) }
+
+    fun nativeReact(id: Int, emoji: String) { call("send_reaction", id, JSONArray(listOf(emoji))) }
+
+    fun nativeGroupInvite(chat: Int): String {
+        check(nativeThread(chat)?.let { it.group && it.canSend && !it.request } == true) {
+            "This group can’t share an invite."
+        }
+        return call("get_chat_securejoin_qr_code", chat) as String
+    }
+
+    fun nativeArchive(chat: Int, archived: Boolean) {
+        call("set_chat_visibility", chat, if (archived) "Archived" else "Normal")
+    }
+
+    fun nativeRead(ids: List<Int>) {
+        if (ids.isNotEmpty()) call("markseen_msgs", JSONArray(ids))
+    }
+
+    fun nativeAccept(id: Int) {
+        require(nativeThread(id)?.request == true) { "This request is no longer pending." }
+        call("accept_chat", id)
+    }
+
+    fun nativeCreateGroup(name: String, members: Set<Int>): Int {
+        val id = (call("create_group_chat", name, false) as Number).toInt()
+        try {
+            members.forEach { call("add_contact_to_chat", id, it) }
+        } catch (failure: Exception) {
+            runCatching { call("delete_chat", id) }
+            throw failure
+        }
+        return id
+    }
+
+    fun nativeUpdateGroup(id: Int, name: String, members: Set<Int>) {
+        val group = requireNotNull(nativeThread(id)?.takeIf { it.group && it.canSend })
+        if (group.name != name) call("set_chat_name", id, name)
+        (members - group.members.toSet()).forEach { call("add_contact_to_chat", id, it) }
+        (group.members.toSet() - members).forEach { call("remove_contact_from_chat", id, it) }
     }
 
     fun isConfigured(): Boolean = call("is_configured") == true
@@ -198,25 +273,6 @@ internal class Chatmail(directory: File) : AutoCloseable {
         val peer = interopPeerId(chat) ?: return null
         return parseInteropChat(chat, call("get_contact", peer) as JSONObject, peer)
     }
-
-    fun interoperableMessages(chat: InteropChat, limit: Int): InteropHistory {
-        val ids = (call("get_message_ids", chat.id, false, false) as JSONArray).intValues()
-        val recent = ids.takeLast(limit)
-        val batch = messages(recent)
-        return InteropHistory(recent.mapNotNull { id ->
-            batch.optJSONObject(id.toString())?.let { parseInteropText(it, chat) }
-        }, ids.size > limit)
-    }
-
-    fun sendInteropText(chat: InteropChat, text: String): Int {
-        check(chat.canSend) { "Wait for the encrypted connection before sending." }
-        require(text.isNotBlank() && text.length <= INTEROP_TEXT_LIMIT && !text.startsWith(PACKET_PREFIX)) {
-            "Enter a message of up to $INTEROP_TEXT_LIMIT characters."
-        }
-        return (call("send_msg", chat.id, obj("text" to text)) as Number).toInt()
-    }
-
-    private var lastReadCursor: Int? = null
 
     fun unread(after: Int): List<Int> {
         if (lastReadCursor != after) {
@@ -323,8 +379,6 @@ internal data class InteropChat(
     val id: Int, val contactId: Int, val name: String, val canSend: Boolean,
     val bio: String = "", val photoPath: String? = null, val request: Boolean = false
 )
-internal data class InteropText(val id: Int, val text: String, val outgoing: Boolean, val state: Int)
-internal data class InteropHistory(val messages: List<InteropText>, val hasOlder: Boolean)
 
 internal fun interopPeerId(chat: JSONObject): Int? {
     if (chat.optInt("id") <= 9 || chat.optString("chatType") != "Single" ||
@@ -338,17 +392,6 @@ internal fun parseInteropChat(chat: JSONObject, contact: JSONObject, peer: Int):
     return InteropChat(chat.getInt("id"), peer, profile.name,
         chat.optBoolean("canSend") && !request && contact.optBoolean("e2eeAvail"),
         profile.bio, profile.photoPath, request)
-}
-
-internal fun parseInteropText(message: JSONObject, chat: InteropChat): InteropText? {
-    val sender = message.optInt("fromId")
-    if (message.optString("kind") != "message" || message.optInt("chatId") != chat.id ||
-        message.optInt("id") <= 9 || (sender != 1 && sender != chat.contactId) ||
-        !message.optBoolean("showPadlock") || message.optBoolean("isInfo") ||
-        message.optString("viewType") != "Text") return null
-    val text = message.optString("text")
-    if (text.isBlank() || text.startsWith(PACKET_PREFIX)) return null
-    return InteropText(message.getInt("id"), text, sender == 1, message.optInt("state"))
 }
 
 internal fun decodeChatmailPacket(text: String): JSONObject? {
