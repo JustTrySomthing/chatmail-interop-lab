@@ -37,7 +37,8 @@ private const val INVITE_WINDOW = 3_600_000L
 internal data class InviteCreationState(val busy: Boolean = false, val invite: OutgoingInvite? = null, val error: String? = null)
 
 internal data class InviteImportState(
-    val busy: Boolean = false, val message: String? = null, val failed: Boolean = false, val peer: String? = null
+    val busy: Boolean = false, val message: String? = null, val failed: Boolean = false, val peer: String? = null,
+    val secureJoinStarted: Boolean = false
 )
 internal const val INVITE_CONNECTING = "Waiting to reach the other device"
 internal const val INVITE_APPROVAL = "Waiting for their approval"
@@ -408,6 +409,44 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private suspend fun <T> withInteropChatmail(action: suspend (Chatmail) -> T): T =
+        withContext(Dispatchers.IO) {
+            awaitInviteAccount()
+            val name = requireChatmailName()
+            chatmailLock.withLock {
+                check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
+                val directory = File(context.noBackupFilesDir, "chatmail")
+                val service = if (selectedNetwork != null) connectedChatmail(name)
+                else chatmail ?: directory.takeIf(File::isDirectory)?.let { Chatmail(it).also { opened -> chatmail = opened } }
+                check(service != null && service.isConfigured()) { "Connect to the internet to set up Chatmail." }
+                action(service)
+            }
+        }
+
+    private suspend fun signedChatmailIds(): Set<Int> =
+        listOf("contact", "invite-in", "invite-pending").flatMap { records.all(it) }
+            .mapTo(mutableSetOf()) { it.data().optInt("chatmailChat") }
+
+    internal suspend fun interoperableChats(): List<InteropChat> = withInteropChatmail { service ->
+        val signed = signedChatmailIds()
+        service.interoperableChatIds().filterNot { it in signed }.mapNotNull(service::interoperableChat)
+    }
+
+    private suspend fun requireInteropChat(service: Chatmail, id: Int): InteropChat {
+        require(id > 9 && id !in signedChatmailIds()) { "This Chatmail conversation is unavailable here." }
+        return requireNotNull(service.interoperableChat(id)) { "This Chatmail conversation is unavailable here." }
+    }
+
+    internal suspend fun interoperableConversation(id: Int, limit: Int): Pair<InteropChat, InteropHistory> =
+        withInteropChatmail { service ->
+            val chat = requireInteropChat(service, id)
+            chat to service.interoperableMessages(chat, limit)
+        }
+
+    internal suspend fun sendInteropText(id: Int, text: String) = withInteropChatmail { service ->
+        service.sendInteropText(requireInteropChat(service, id), text)
+    }
+
     private suspend fun importSecureJoinInvite(code: String): InviteImportState {
         awaitInviteAccount()
         awaitInviteNetwork()
@@ -416,7 +455,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
             val chat = connectedChatmail(name).join(code)
             check(chat > 9) { "Chatmail couldn’t open this conversation." }
-            InviteImportState(message = "SecureJoin started. Keep both apps online while they verify the connection.")
+            InviteImportState(message = "SecureJoin started. Keep both apps online while they verify the connection.",
+                secureJoinStarted = true)
         }
     }
 

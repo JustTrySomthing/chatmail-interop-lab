@@ -94,6 +94,42 @@ class ChatmailTest {
     }
 
     @Test
+    fun interopTextRequiresAnEncryptedSingleChatAndAReadyKey() {
+        val chat = obj("id" to 12, "chatType" to "Single", "isEncrypted" to true,
+            "contactIds" to org.json.JSONArray(listOf(1, 20)), "canSend" to true)
+        val contact = obj("id" to 20, "displayName" to "Delta peer", "isKeyContact" to true, "e2eeAvail" to true)
+        val peer = requireNotNull(interopPeerId(chat))
+        assertEquals(20, peer)
+        assertEquals(InteropChat(12, 20, "Delta peer", true), parseInteropChat(chat, contact, peer))
+        assertFalse(requireNotNull(parseInteropChat(chat, contact.put("e2eeAvail", false), peer)).canSend)
+        contact.put("e2eeAvail", true)
+        assertFalse(requireNotNull(parseInteropChat(chat.put("isContactRequest", true), contact, peer)).canSend)
+        assertNull(parseInteropChat(chat, contact.put("isBlocked", true), peer))
+        assertNull(interopPeerId(chat.put("chatType", "Group")))
+        assertNull(interopPeerId(chat.put("chatType", "Single").put("isEncrypted", false)))
+    }
+
+    @Test
+    fun interopHistoryShowsOnlyStandardEncryptedTextFromTheConversation() {
+        val chat = InteropChat(12, 20, "Delta peer", true)
+        val raw = obj("kind" to "message", "id" to 30, "chatId" to 12,
+            "fromId" to 20, "showPadlock" to true, "viewType" to "Text", "text" to "Hello 👋")
+        assertEquals(InteropText(30, "Hello 👋", false, 0), parseInteropText(raw, chat))
+        assertTrue(requireNotNull(parseInteropText(raw.put("fromId", 1), chat)).outgoing)
+        assertNull(parseInteropText(raw.put("fromId", 21), chat))
+        raw.put("fromId", 20)
+        assertNull(parseInteropText(raw.put("showPadlock", false), chat))
+        raw.put("showPadlock", true)
+        assertNull(parseInteropText(raw.put("chatId", 13), chat))
+        raw.put("chatId", 12)
+        assertNull(parseInteropText(raw.put("viewType", "Image"), chat))
+        raw.put("viewType", "Text")
+        assertNull(parseInteropText(raw.put("isInfo", true), chat))
+        raw.put("isInfo", false)
+        assertNull(parseInteropText(raw.put("text", "P2P/1 malformed"), chat))
+    }
+
+    @Test
     fun relayAcceptanceAndDeviceDeliveryHaveDifferentStatuses() {
         val message = obj("targets" to 1, "chatmailSubmitted" to true)
         assertEquals(CHATMAIL_SUBMITTED, messageDeliveryStatus(message))

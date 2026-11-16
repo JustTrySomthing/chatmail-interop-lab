@@ -749,7 +749,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         }
         fun closeFullPage() {
             if (fullPage == FullPageRoute.Updates) updates.dismissPrompt()
-            modal = if (fullPage in setOf(FullPageRoute.Settings, FullPageRoute.Contacts)) null else "settings"
+            modal = if (fullPage in setOf(FullPageRoute.Settings, FullPageRoute.Contacts, FullPageRoute.Chatmail)) null else "settings"
         }
         BackHandler(thread != null || modal != null) {
             when {
@@ -807,6 +807,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                 onAction = { if (contactAction == ContactAction.Call) callContact(id) else messageContact(id) }
                             )
                         }
+                    }
+                    FullPageRoute.Chatmail -> {
+                        InteropChats(model)
                     }
                     FullPageRoute.Settings -> {
                         SettingsGrid(settingsQuery) { destination ->
@@ -1017,6 +1020,12 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         PageActionButton(if (isGroup) "Create a group" else "Start a chat",
                             { modal = if (isGroup) "group-new" else "chat-new" },
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp))
+                        if (!isGroup && folder == "Inbox") {
+                            P2pOutlinedButton(onClick = { modal = "chatmail-chats" },
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                                Text("Chatmail chats")
+                            }
+                        }
                         val searchable = if (search.isBlank()) emptyMap() else records.filter {
                             it.kind in listOf("message", "file-received", "file-sent")
                         }.groupBy { it.data().optString("thread") }
@@ -1565,6 +1574,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         val status = inviteImport.message ?: pending?.let { inviteRequestStatus(it, clock) }
                         status?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                             color = if (inviteImport.failed) MaterialTheme.colorScheme.error else Quiet) }
+                        if (inviteImport.secureJoinStarted) {
+                            P2pTextButton(onClick = { goArea(Area.Chats); modal = "chatmail-chats" }) {
+                                Text("Open Chatmail chats")
+                            }
+                        }
                         Text("Scan a Relay Lab, Delta Chat, or ArcaneChat invite, choose a saved QR image, or paste an invite link or code.")
                         Button(onClick = ::openScanner, enabled = !inviteImport.busy, modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Outlined.QrCodeScanner, null)
@@ -2262,6 +2276,7 @@ internal fun EmptyTabMessage(message: String, modifier: Modifier = Modifier) {
 
 private enum class FullPageRoute(val route: String, val title: String) {
     Contacts("contacts", "Contacts"),
+    Chatmail("chatmail-chats", "Chatmail chats"),
     Settings("settings", "Settings"),
     Updates("updates", "P2P updates"),
     Notifications("notifications", "Notifications"),

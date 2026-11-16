@@ -83,6 +83,34 @@ internal class Chatmail(directory: File) : AutoCloseable {
         return details.optBoolean("isEncrypted") && details.optBoolean("canSend")
     }
 
+    fun isConfigured(): Boolean = call("is_configured") == true
+
+    fun interoperableChatIds(): List<Int> =
+        (call("get_chatlist_entries", null, null, null) as JSONArray).intValues().filter { it > 9 }
+
+    fun interoperableChat(id: Int): InteropChat? {
+        val chat = call("get_full_chat_by_id", id) as JSONObject
+        val peer = interopPeerId(chat) ?: return null
+        return parseInteropChat(chat, call("get_contact", peer) as JSONObject, peer)
+    }
+
+    fun interoperableMessages(chat: InteropChat, limit: Int): InteropHistory {
+        val ids = (call("get_message_ids", chat.id, false, false) as JSONArray).intValues()
+        val recent = ids.takeLast(limit)
+        val batch = messages(recent)
+        return InteropHistory(recent.mapNotNull { id ->
+            batch.optJSONObject(id.toString())?.let { parseInteropText(it, chat) }
+        }, ids.size > limit)
+    }
+
+    fun sendInteropText(chat: InteropChat, text: String): Int {
+        check(chat.canSend) { "Wait for the encrypted connection before sending." }
+        require(text.isNotBlank() && text.length <= INTEROP_TEXT_LIMIT && !text.startsWith(PACKET_PREFIX)) {
+            "Enter a message of up to $INTEROP_TEXT_LIMIT characters."
+        }
+        return (call("send_msg", chat.id, obj("text" to text)) as Number).toInt()
+    }
+
     private var lastReadCursor: Int? = null
 
     fun unread(after: Int): List<Int> {
@@ -132,6 +160,39 @@ internal class Chatmail(directory: File) : AutoCloseable {
             ChatmailNative.close(handle)
         }
     }
+}
+
+private fun JSONArray.intValues(): List<Int> = (0 until length()).map(::getInt)
+
+internal const val INTEROP_TEXT_LIMIT = 12_000
+
+internal data class InteropChat(val id: Int, val contactId: Int, val name: String, val canSend: Boolean)
+internal data class InteropText(val id: Int, val text: String, val outgoing: Boolean, val state: Int)
+internal data class InteropHistory(val messages: List<InteropText>, val hasOlder: Boolean)
+
+internal fun interopPeerId(chat: JSONObject): Int? {
+    if (chat.optInt("id") <= 9 || chat.optString("chatType") != "Single" ||
+        !chat.optBoolean("isEncrypted") || chat.optBoolean("isDeviceChat") || chat.optBoolean("isSelfTalk")) return null
+    return chat.optJSONArray("contactIds")?.intValues()?.filter { it > 9 }?.singleOrNull()
+}
+
+internal fun parseInteropChat(chat: JSONObject, contact: JSONObject, peer: Int): InteropChat? {
+    if (contact.optInt("id") != peer || contact.optBoolean("isBlocked") ||
+        !contact.optBoolean("isKeyContact")) return null
+    val name = contact.optString("displayName").ifBlank { chat.optString("name") }.ifBlank { "Chatmail contact" }
+    return InteropChat(chat.getInt("id"), peer, name,
+        chat.optBoolean("canSend") && !chat.optBoolean("isContactRequest") && contact.optBoolean("e2eeAvail"))
+}
+
+internal fun parseInteropText(message: JSONObject, chat: InteropChat): InteropText? {
+    val sender = message.optInt("fromId")
+    if (message.optString("kind") != "message" || message.optInt("chatId") != chat.id ||
+        message.optInt("id") <= 9 || (sender != 1 && sender != chat.contactId) ||
+        !message.optBoolean("showPadlock") || message.optBoolean("isInfo") ||
+        message.optString("viewType") != "Text") return null
+    val text = message.optString("text")
+    if (text.isBlank() || text.startsWith(PACKET_PREFIX)) return null
+    return InteropText(message.getInt("id"), text, sender == 1, message.optInt("state"))
 }
 
 internal fun decodeChatmailPacket(text: String): JSONObject? {

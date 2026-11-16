@@ -22,9 +22,9 @@ Start with standard Chatmail QR invites and encrypted one-to-one messages. Check
 
 In Contacts → Add contact, use **Invite someone on Delta Chat or ArcaneChat** to show the standard Chatmail QR code, copy the link, or share it. To use a contact invite from either client, choose **Accept invite**, then scan its QR code, select a saved QR image, or paste the link. If Android opens the link with Relay Lab, the link is prefilled and **Connect** starts the handshake. On Android versions that open the web link in a browser by default, copy the link into Relay Lab.
 
-Use fresh profiles and record the app version and network for each direction. “SecureJoin started” means Chatmail Core accepted the invite and started processing it. Contact and verification status in Relay Lab's chat list, plain encrypted text, and call signaling are pending.
+Use fresh profiles and record the app version and network for each direction. “SecureJoin started” means Chatmail Core accepted the invite and started processing it. Open **Chats → Chatmail chats** to see encrypted one-to-one conversations, including conversations started from an invite you shared. Relay Lab enables sending once Chatmail reports the contact key is available and the chat can send. Chatmail Core stores the conversation and handles delivery and offline queuing. Call signaling is pending.
 
-| Client | Relay Lab sends invite | Relay Lab accepts invite |
-| --- | --- | --- |
-| Delta Chat | Device test pending | Device test pending |
-| ArcaneChat | Device test pending | Device test pending |
+| Client | Relay Lab sends invite | Relay Lab accepts invite | Relay Lab sends text | Relay Lab receives text |
+| --- | --- | --- | --- | --- |
+| Delta Chat | Device test pending | Device test pending | Device test pending | Device test pending |
+| ArcaneChat | Device test pending | Device test pending | Device test pending | Device test pending |
