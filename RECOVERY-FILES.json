@@ -4,7 +4,7 @@
   "sha256": {
     ".github/workflows/import-rc45.yml": "ed3c39812b2df1cfe1f43459d1cb5b6e0be09c6873564390195bb8dd5e36ef7f",
     ".gitignore": "57752bc83258c3f60383f01be18a07066ff22025f89f995f19878ee0664e740b",
-    "README.md": "69fefcb6727ffefa34c743c65e084b8f86d797631a9a9a042b7d31c886acba06",
+    "README.md": "bf972854fab593c09fd153bdb52f68fd54e9bb1d53f595e2933736b89ac8fed2",
     "app/build.gradle.kts": "e03be2110e3b6045872258492d1e5d7fa50122661efe4e6ea7a00e67e3e685b7",
     "app/proguard-rules.pro": "671e7ae509c35ebdbda2fb8417eff2f8973b0bb1b291104f7747d9804cb54e69",
     "app/src/main/AndroidManifest.xml": "d3b7a56c3c7526929aacfb8bfb1cf2f4d2d10c68a0d8c15df199f755cd0b07eb",
