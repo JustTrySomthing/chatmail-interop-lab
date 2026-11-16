@@ -3,7 +3,15 @@ package app.p2p
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -13,11 +21,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.PermMedia
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -31,9 +42,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -57,7 +74,8 @@ internal fun ChannelBoard(
     share: (ChatmailChannel) -> Unit,
     legacy: () -> Unit,
     preview: (PreviewLink) -> Unit,
-    openLink: (PreviewLink) -> Unit
+    openLink: (PreviewLink) -> Unit,
+    profilePhoto: String
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
@@ -69,7 +87,9 @@ internal fun ChannelBoard(
     var error by remember(page, selected) { mutableStateOf<String?>(null) }
     var actionError by remember(page, selected) { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    var draft by remember(page, selected) { mutableStateOf("") }
+    var channelName by rememberSaveable(page, selected) { mutableStateOf("") }
+    var draft by rememberSaveable(page, selected, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    var composePost by rememberSaveable(page, selected) { mutableStateOf(false) }
     var attachments by remember(page, selected) { mutableStateOf<List<AttachmentDraft>>(emptyList()) }
     var trimIndex by remember(page, selected) { mutableStateOf<Int?>(null) }
     var previewing by remember(page, selected) { mutableStateOf<ChannelPost?>(null) }
@@ -135,6 +155,63 @@ internal fun ChannelBoard(
         }
     }
 
+    if (composePost && current?.owned == true && trimIndex == null) {
+        val channel = current
+        Sheet("Write a post", { if (!busy) composePost = false }) {
+            val focus = LocalFocusManager.current
+            val keyboard = LocalSoftwareKeyboardController.current
+            var showEmoji by rememberSaveable { mutableStateOf(false) }
+            OutlinedTextField(draft, { if (it.text.length <= INTEROP_TEXT_LIMIT) draft = it },
+                modifier = Modifier.fillMaxWidth(), label = { Text("What would you like to share?") },
+                minLines = 3, maxLines = 6, enabled = !busy,
+                textStyle = contentTextStyle(MaterialTheme.typography.bodyLarge),
+                shape = RoundedFieldShape)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                P2pTextButton(enabled = !busy,
+                    onClick = { mediaPicker.launch(arrayOf("image/*", "video/*", "audio/*")) }) {
+                    Icon(Icons.Outlined.PermMedia, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Add media")
+                }
+                IconButton(enabled = !busy, onClick = {
+                    if (!showEmoji) {
+                        keyboard?.hide()
+                        focus.clearFocus()
+                    }
+                    showEmoji = !showEmoji
+                }) { Icon(Icons.Outlined.EmojiEmotions, "Emoji picker") }
+            }
+            if (showEmoji) EmojiPicker(Modifier.fillMaxWidth().height(210.dp), insert = { emoji ->
+                val cursor = draft.selection
+                val text = draft.text.replaceRange(cursor.min, cursor.max, emoji)
+                if (text.length <= INTEROP_TEXT_LIMIT) draft = TextFieldValue(text, TextRange(cursor.min + emoji.length))
+            }, close = { showEmoji = false })
+            AttachmentDraftList(attachments, busy,
+                removeAttachment = { index -> attachments = attachments.filterIndexed { position, _ -> position != index } },
+                trimAttachment = {
+                    inlineAudio?.value = null
+                    trimIndex = it
+                })
+            actionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            PageActionButton(
+                if (busy) "Publishing…" else "Post",
+                onClick = {
+                    val text = draft.text
+                    val media = attachments
+                    submit {
+                        model.publishChatmailChannelPost(channel.id, text, media)
+                        draft = TextFieldValue()
+                        attachments = emptyList()
+                        composePost = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = channel.canPost && !busy && (draft.text.isNotBlank() || attachments.isNotEmpty())
+            )
+        }
+    }
+
     trimIndex?.let { index ->
         attachments.getOrNull(index)?.let { item ->
             Sheet("Trim attachment", { trimIndex = null }) {
@@ -160,59 +237,38 @@ internal fun ChannelBoard(
     LazyColumn(contentPadding = PaddingValues(16.dp, 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (error != null) item { Text(error.orEmpty(), color = MaterialTheme.colorScheme.error) }
         if (channels == null && error == null) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        if (actionError != null) item { Text(actionError.orEmpty(), color = MaterialTheme.colorScheme.error) }
+        if (actionError != null && !composePost) item { Text(actionError.orEmpty(), color = MaterialTheme.colorScheme.error) }
         if (selected != null) item {
             P2pTextButton(onClick = { selectChannel(null) }) { Text("Back to $page") }
         }
 
         when {
             active != null -> {
-                if (current != null) item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Avatar(current.name, icon = Icons.Outlined.Campaign)
-                        Text(current.name, Modifier.padding(start = 12.dp),
-                            style = MaterialTheme.typography.titleLarge)
+                if (current != null) {
+                    item {
+                        ChannelProfileCard(current, profilePhoto.takeIf { current.owned }.orEmpty(), share)
                     }
-                    if (current.owned) {
-                        P2pTextButton(onClick = { share(current) }) { Text("Share invite") }
-                        OutlinedTextField(draft, { draft = it.take(INTEROP_TEXT_LIMIT) },
-                            modifier = Modifier.fillMaxWidth(), label = { Text("Write a post") },
-                            maxLines = 5, enabled = !busy)
-                        AttachmentDraftList(attachments, busy,
-                            removeAttachment = { index -> attachments = attachments.filterIndexed { position, _ -> position != index } },
-                            trimAttachment = {
-                                inlineAudio?.value = null
-                                trimIndex = it
-                            })
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            P2pOutlinedButton(
-                                enabled = current.canPost && !busy,
-                                onClick = { mediaPicker.launch(arrayOf("image/*", "video/*", "audio/*")) }
-                            ) {
-                                Icon(Icons.Outlined.AttachFile, null)
-                                Text("Add media")
-                            }
-                            Button(shape = P2pButtonShape,
-                                enabled = current.canPost && (draft.isNotBlank() || attachments.isNotEmpty()) && !busy,
-                                onClick = {
-                                    val text = draft
-                                    val media = attachments
-                                    submit {
-                                        model.publishChatmailChannelPost(current.id, text, media)
-                                        draft = ""
-                                        attachments = emptyList()
-                                    }
-                                }) { Text("Publish") }
+                    if (current.owned) item {
+                        PageActionButton("Write a post", {
+                            actionError = null
+                            composePost = true
+                        }, Modifier.fillMaxWidth(), icon = Icons.Outlined.Edit, enabled = current.canPost && !busy)
+                    }
+                    if (current.owned && matches.isNotEmpty()) item {
+                        val colors = MaterialTheme.colorScheme
+                        Surface(color = colors.surfaceVariant, contentColor = colors.onSurface,
+                            shape = RoundedCornerShape(16.dp)) {
+                            Text("My posts", Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                style = MaterialTheme.typography.titleMedium)
                         }
-                        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
                 }
                 if (matches.isEmpty() && current != null && error == null) item {
                     EmptyTabMessage(if (search.isBlank()) "No posts yet" else "No matching posts")
                 }
                 items(matches, key = { it.id }) { post ->
-                    ChannelPostCard(post, current?.owned == true, null, preview, openLink, { openAttachment(post) })
+                    ChannelPostCard(post, current?.owned == true, profilePhoto.takeIf { current?.owned == true }.orEmpty(),
+                        null, preview, openLink, { openAttachment(post) })
                 }
                 if (hasOlder) item { P2pTextButton(onClick = { limit += 50 }) { Text("Load older posts") } }
             }
@@ -221,7 +277,7 @@ internal fun ChannelBoard(
                     EmptyTabMessage(if (search.isBlank()) "No posts from channels you follow" else "No matching posts")
                 }
                 items(matches, key = { it.id }) { post ->
-                    ChannelPostCard(post, false, { selectChannel(post.channelId) }, preview, openLink, { openAttachment(post) })
+                    ChannelPostCard(post, false, "", { selectChannel(post.channelId) }, preview, openLink, { openAttachment(post) })
                 }
             }
             page == "Following" -> {
@@ -234,10 +290,10 @@ internal fun ChannelBoard(
             }
             channels != null -> {
                 if (owned.isEmpty()) item {
-                    OutlinedTextField(draft, { draft = it.take(80) }, modifier = Modifier.fillMaxWidth(),
+                    OutlinedTextField(channelName, { channelName = it.take(80) }, modifier = Modifier.fillMaxWidth(),
                         label = { Text("Channel name") }, singleLine = true, enabled = !busy)
-                    Button(shape = P2pButtonShape, enabled = !busy && draft.isNotBlank(), onClick = {
-                        val name = draft
+                    Button(shape = P2pButtonShape, enabled = !busy && channelName.isNotBlank(), onClick = {
+                        val name = channelName
                         submit {
                             val id = model.createChatmailChannel(name)
                             selectChannel(id)
@@ -278,8 +334,53 @@ private fun ChannelRow(channel: ChatmailChannel, open: () -> Unit) {
 }
 
 @Composable
+private fun ChannelProfileCard(channel: ChatmailChannel, photo: String, share: (ChatmailChannel) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Surface(color = colors.surfaceVariant, contentColor = colors.onSurface, shape = RoundedCornerShape(22.dp)) {
+        Column(Modifier.fillMaxWidth()) {
+            Box(Modifier.fillMaxWidth().height(72.dp).background(colors.primary))
+            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Avatar(channel.name, icon = Icons.Outlined.Campaign.takeIf { photo.isBlank() }, photo = photo, size = 52.dp)
+                    Text(channel.name, Modifier.weight(1f),
+                        style = contentTextStyle(MaterialTheme.typography.headlineSmall),
+                        fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                if (channel.owned) P2pTextButton(onClick = { share(channel) }) { Text("Share invite") }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SocialPostCard(
+    author: String, date: String?, key: String, body: String, photo: String = "",
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null, open: (() -> Unit)? = null,
+    modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(modifier = modifier, color = colors.surfaceVariant, contentColor = colors.onSurface,
+        shape = RoundedCornerShape(20.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Avatar(author, icon = icon, photo = photo)
+                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                    if (open != null) P2pTextButton(onClick = open, contentPadding = PaddingValues(0.dp)) {
+                        Text(author, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    } else Text(author, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    date?.let { Text(it, color = colors.onSurfaceVariant, style = MaterialTheme.typography.labelMedium) }
+                }
+                ReadAloudButton(key, body, "post")
+            }
+            content()
+        }
+    }
+}
+
+@Composable
 private fun ChannelPostCard(
-    post: ChannelPost, owned: Boolean, open: (() -> Unit)?, preview: (PreviewLink) -> Unit,
+    post: ChannelPost, owned: Boolean, photo: String, open: (() -> Unit)?, preview: (PreviewLink) -> Unit,
     openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit
 ) {
     val save = LocalMediaDownload.current
@@ -287,28 +388,17 @@ private fun ChannelPostCard(
     val date = remember(post.time) {
         post.time.takeIf { it > 0 }?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it)) }
     }
-    Surface(color = colors.surfaceVariant, contentColor = colors.onSurfaceVariant, shape = RoundedCornerShape(20.dp)) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(post.channelName, icon = Icons.Outlined.Campaign)
-                Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                    if (open != null) P2pTextButton(onClick = open, contentPadding = PaddingValues(horizontal = 0.dp)) {
-                        Text(post.channelName, fontWeight = FontWeight.SemiBold)
-                    } else Text(post.channelName, fontWeight = FontWeight.SemiBold)
-                    date?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
-                }
-                ReadAloudButton("channel-post:${post.id}", post.text, "post")
-            }
-            MessageBodyWithPreviews(post.text, preview, openLink, colors.surfaceVariant)
-            post.attachment?.let { attachment ->
-                val download = post.download()
-                ChatAttachment(attachment.displayData(post.localFile), post.localFile, !owned,
-                    openAttachment, if (post.localFile == null || download == null || save == null) null else ({ save(download) }),
-                    playbackKey = "channel:${post.id}", usePlaybackPoster = true)
-            }
-            if (owned && post.state == 20) Text("Queued", style = MaterialTheme.typography.labelMedium)
-            if (owned && post.state == 24) Text("Send failed", color = colors.error, style = MaterialTheme.typography.labelMedium)
+    SocialPostCard(post.channelName, date, "channel-post:${post.id}", post.text, photo,
+        icon = Icons.Outlined.Campaign.takeIf { photo.isBlank() }, open = open) {
+        MessageBodyWithPreviews(post.text, preview, openLink, colors.surfaceVariant)
+        post.attachment?.let { attachment ->
+            val download = post.download()
+            ChatAttachment(attachment.displayData(post.localFile), post.localFile, !owned,
+                openAttachment, if (post.localFile == null || download == null || save == null) null else ({ save(download) }),
+                playbackKey = "channel:${post.id}", usePlaybackPoster = true)
         }
+        if (owned && post.state == 20) Text("Queued", style = MaterialTheme.typography.labelMedium)
+        if (owned && post.state == 24) Text("Send failed", color = colors.error, style = MaterialTheme.typography.labelMedium)
     }
 }
 

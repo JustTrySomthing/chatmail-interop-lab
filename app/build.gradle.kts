@@ -15,8 +15,8 @@ android {
         applicationId = "app.p2p.interop"
         minSdk = 31
         targetSdk = 35
-        versionCode = 83
-        versionName = "0.7.23-rc47"
+        versionCode = 84
+        versionName = "0.7.23-rc48"
         manifestPlaceholders["p2pAppLabel"] = "Relay Lab"
         ndk { abiFilters += listOf("arm64-v8a") }
     }

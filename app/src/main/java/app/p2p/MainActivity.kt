@@ -989,28 +989,37 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 )
             },
             bottomBar = {
-                if (thread == null) NavigationBar(containerColor = Panel, tonalElevation = 0.dp) {
-                    Area.entries.forEach { value ->
-                        NavigationBarItem(
-                            selected = area == value,
-                            onClick = { goArea(value) },
-                            icon = {
-                                val unread = records.any { record ->
-                                    val data = record.data()
-                                    if (data.optBoolean("locallyDeleted") || !data.optBoolean("unread")) false
-                                    else when (value) {
-                                        Area.Talk -> (record.kind == "file-received" && data.optBoolean("voicemail")) || record.kind == "call-history"
-                                        Area.Chats -> record.kind in setOf("message", "file-received") && !data.optBoolean("voicemail") && groups.none { it.key == data.optString("thread") }
-                                        Area.Groups -> record.kind in setOf("message", "file-received") && groups.any { it.key == data.optString("thread") }
-                                        Area.Social -> record.kind in setOf("post", "social-action")
+                if (thread == null) Surface(color = Panel) {
+                    NavigationBar(
+                        modifier = Modifier.fillMaxWidth().wrapContentWidth().widthIn(max = 760.dp)
+                            .fillMaxWidth().padding(horizontal = 8.dp),
+                        containerColor = Panel, tonalElevation = 0.dp
+                    ) {
+                        Area.entries.forEach { value ->
+                            NavigationBarItem(
+                                selected = area == value,
+                                onClick = { goArea(value) },
+                                icon = {
+                                    val unread = records.any { record ->
+                                        val data = record.data()
+                                        if (data.optBoolean("locallyDeleted") || !data.optBoolean("unread")) false
+                                        else when (value) {
+                                            Area.Talk -> (record.kind == "file-received" && data.optBoolean("voicemail")) || record.kind == "call-history"
+                                            Area.Chats -> record.kind in setOf("message", "file-received") && !data.optBoolean("voicemail") && groups.none { it.key == data.optString("thread") }
+                                            Area.Groups -> record.kind in setOf("message", "file-received") && groups.any { it.key == data.optString("thread") }
+                                            Area.Social -> record.kind in setOf("post", "social-action")
+                                        }
                                     }
-                                }
-                                Box { Icon(value.icon, null); if (unread) Badge(Modifier.align(Alignment.TopEnd).offset(x = 16.dp, y = (-6).dp)) }
-                            },
-                            label = { FittedLabel(value.label, fontWeight = if (area == value) FontWeight.SemiBold else FontWeight.Normal) },
-                            colors = NavigationBarItemDefaults.colors(indicatorColor = AccentPanel, selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                selectedTextColor = readableAccent(Panel, MaterialTheme.colorScheme.onSurface), unselectedIconColor = Quiet, unselectedTextColor = Quiet)
-                        )
+                                    Box { Icon(value.icon, null); if (unread) Badge(Modifier.align(Alignment.TopEnd).offset(x = 16.dp, y = (-6).dp)) }
+                                },
+                                label = {
+                                    FittedLabel(value.label, fontWeight = if (area == value) FontWeight.SemiBold else FontWeight.Normal,
+                                        size = 12, modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp))
+                                },
+                                colors = NavigationBarItemDefaults.colors(indicatorColor = AccentPanel, selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    selectedTextColor = readableAccent(Panel, MaterialTheme.colorScheme.onSurface), unselectedIconColor = Quiet, unselectedTextColor = Quiet)
+                            )
+                        }
                     }
                 } else SystemNavigationBar()
             }
@@ -1194,7 +1203,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                 modal = "add-contact"
                             },
                             share = { sharingChannel = it; modal = "channel-invite" },
-                            legacy = { legacySocial = true }, preview = ::showLink, openLink = ::openLink)
+                            legacy = { legacySocial = true }, preview = ::showLink, openLink = ::openLink,
+                            profilePhoto = profileData?.optString("photo").orEmpty())
                     }
                     area == Area.Social -> {
                         Segments(listOf("My Page", "Friends", "Feed"), socialPage) { socialPage = it }
@@ -1267,60 +1277,50 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                 items(posts, key = { it.key }) { post ->
                                     val data = post.data()
                                     val actions = records.filter { it.kind == "social-action" && it.data().optString("post") == post.key }
-                                    Surface(color = Edge, contentColor = Ink, shape = RoundedCornerShape(20.dp),
+                                    SocialPostCard(name(data.optString("author")), shortDate(post.created), post.key,
+                                        data.optString("text"), photo = photo(data.optString("author")),
                                         modifier = Modifier.combinedClickable(onClick = {}, onLongClickLabel = "Post options",
                                             onLongClick = { showItemActions(post.key) })) {
-                                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Avatar(name(data.optString("author")), photo = photo(data.optString("author")))
-                                                Spacer(Modifier.width(12.dp))
-                                                Column(Modifier.weight(1f)) {
-                                                    Text(name(data.optString("author")), fontWeight = FontWeight.SemiBold)
-                                                    Text(shortDate(post.created), color = Quiet, fontSize = 12.sp)
-                                                }
-                                                ReadAloudButton(post.key, data.optString("text"), "post")
-                                            }
-                                            if (data.optString("text").isNotBlank()) {
-                                                val body = data.optString("text")
-                                                MessageBodyWithPreviews(body, ::showLink, ::openLink)
-                                            }
-                                            records.filter { item -> item.kind != "message" && item.isThreadMessage() &&
-                                                item.data().optString("post") == post.key }
-                                                .forEach { attachment ->
-                                                    key(attachment.key) {
-                                                        val media = attachment.data()
-                                                        val kind = mediaKind(media.optString("mime"), media.optString("name"))
-                                                        val open = { showAttachment(attachment.key) }
-                                                        if (kind == null) {
-                                                            FileRow(attachment, name(data.optString("author")), open)
-                                                        } else {
-                                                            val local = model.galleryFile(attachment)
-                                                            ChatAttachment(media, local, attachment.kind == "file-received", open,
-                                                                local?.let { { showDownload(MediaDownload.attachment(attachment)) } },
-                                                                playbackKey = attachment.key, usePlaybackPoster = true)
-                                                        }
+                                        if (data.optString("text").isNotBlank()) {
+                                            val body = data.optString("text")
+                                            MessageBodyWithPreviews(body, ::showLink, ::openLink, Edge)
+                                        }
+                                        records.filter { item -> item.kind != "message" && item.isThreadMessage() &&
+                                            item.data().optString("post") == post.key }
+                                            .forEach { attachment ->
+                                                key(attachment.key) {
+                                                    val media = attachment.data()
+                                                    val kind = mediaKind(media.optString("mime"), media.optString("name"))
+                                                    val open = { showAttachment(attachment.key) }
+                                                    if (kind == null) {
+                                                        FileRow(attachment, name(data.optString("author")), open)
+                                                    } else {
+                                                        val local = model.galleryFile(attachment)
+                                                        ChatAttachment(media, local, attachment.kind == "file-received", open,
+                                                            local?.let { { showDownload(MediaDownload.attachment(attachment)) } },
+                                                            playbackKey = attachment.key, usePlaybackPoster = true)
                                                     }
                                                 }
-                                            FlowRow {
-                                                P2pTextButton(onClick = { selected = post.key; modal = "react" }) {
-                                                    Icon(Icons.Outlined.EmojiEmotions, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("React")
-                                                }
-                                                P2pTextButton(onClick = { selected = post.key; modal = "reply" }) {
-                                                    Icon(Icons.AutoMirrored.Outlined.Reply, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Reply")
-                                                }
                                             }
-                                            actions.asReversed().forEach { action ->
-                                                val detail = action.data()
-                                                if (detail.optString("type") == "reply") {
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        Text(name(detail.optString("author")), Modifier.weight(1f),
-                                                            color = Quiet, style = MaterialTheme.typography.labelMedium)
-                                                        ReadAloudButton(action.key, detail.optString("text"), "reply")
-                                                    }
-                                                    LinkedMessageText(detail.optString("text"), ::openLink, MaterialTheme.typography.bodyMedium)
-                                                } else Text(name(detail.optString("author")) + " · " + detail.optString("text"),
-                                                    color = Quiet, fontSize = 13.sp)
+                                        FlowRow {
+                                            P2pTextButton(onClick = { selected = post.key; modal = "react" }) {
+                                                Icon(Icons.Outlined.EmojiEmotions, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("React")
                                             }
+                                            P2pTextButton(onClick = { selected = post.key; modal = "reply" }) {
+                                                Icon(Icons.AutoMirrored.Outlined.Reply, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Reply")
+                                            }
+                                        }
+                                        actions.asReversed().forEach { action ->
+                                            val detail = action.data()
+                                            if (detail.optString("type") == "reply") {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(name(detail.optString("author")), Modifier.weight(1f),
+                                                        color = Quiet, style = MaterialTheme.typography.labelMedium)
+                                                    ReadAloudButton(action.key, detail.optString("text"), "reply")
+                                                }
+                                                LinkedMessageText(detail.optString("text"), ::openLink, MaterialTheme.typography.bodyMedium)
+                                            } else Text(name(detail.optString("author")) + " · " + detail.optString("text"),
+                                                color = Quiet, fontSize = 13.sp)
                                         }
                                     }
                                 }
@@ -1560,7 +1560,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     }
                 }
             }
-            "add-contact" -> Sheet(if (channelInviteOnly) "Join channel" else "Add contact", { modal = null }) {
+            "add-contact" -> Sheet(
+                if (channelInviteOnly) "Join channel" else "Add contact", { modal = null }, tall = !channelInviteOnly
+            ) {
                 if (!channelInviteOnly) Segments(listOf("Send invite", "Accept invite"), addContactTab, prominent = true) { tab ->
                     addContactTab = tab
                 }
@@ -2069,9 +2071,9 @@ private val FittedLabelMinimum = 11.sp
 @Composable
 private fun FittedLabel(
     label: String, fontWeight: FontWeight = FontWeight.Medium, size: Int = 14,
-    color: Color = LocalContentColor.current
+    color: Color = LocalContentColor.current, modifier: Modifier = Modifier
 ) {
-    BasicText(label, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+    BasicText(label, modifier = modifier, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
         style = LocalTextStyle.current.copy(color = color, fontWeight = fontWeight, textAlign = TextAlign.Center),
         autoSize = TextAutoSize.StepBased(minFontSize = FittedLabelMinimum, maxFontSize = size.sp, stepSize = 0.5.sp))
 }
@@ -2109,7 +2111,7 @@ internal fun Segments(options: List<String>, current: String, prominent: Boolean
 }
 
 @Composable
-private fun PageActionButton(
+internal fun PageActionButton(
     label: String, onClick: () -> Unit, modifier: Modifier = Modifier, icon: ImageVector? = null,
     enabled: Boolean = true, trailing: @Composable RowScope.() -> Unit = {}
 ) {
@@ -2189,7 +2191,8 @@ internal fun Avatar(
         value = if (photo.isBlank()) null else withContext(Dispatchers.IO) { decodeProfilePhoto(photo) }
     }
     val first = label.trim().let { it.take(if (it.isEmpty()) 0 else Character.charCount(it.codePointAt(0))) }.uppercase()
-    Box(Modifier.size(size).clip(CircleShape).background(if (image == null) inkOnAccent(Mint) else background), contentAlignment = Alignment.Center) {
+    val fill = if (icon != null || image != null) background else inkOnAccent(Mint)
+    Box(Modifier.size(size).clip(CircleShape).background(fill), contentAlignment = Alignment.Center) {
         when {
             icon != null -> Icon(icon, null, Modifier.size(22.dp), tint = inkOnAccent(background))
             else -> {
@@ -2385,19 +2388,43 @@ private fun FullPageScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun Sheet(title: String, dismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+internal fun Sheet(
+    title: String, dismiss: () -> Unit, tall: Boolean = false, content: @Composable ColumnScope.() -> Unit
+) {
+    val scroll = rememberScrollState()
+    val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
+    val maxHeight = if (tall) windowHeight * .88f else minOf(540.dp, windowHeight * .88f)
     ModalBottomSheet(onDismissRequest = dismiss, containerColor = Panel, contentColor = Ink, sheetMaxWidth = 560.dp,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(
-            Modifier.fillMaxWidth().heightIn(max = 540.dp)
-                .padding(start = 18.dp, end = 18.dp, bottom = 22.dp),
+            Modifier.fillMaxWidth().heightIn(max = maxHeight)
+                .padding(start = 18.dp, end = 10.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                item {
-                    Column(verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
+            Text(title, Modifier.padding(end = 8.dp), style = MaterialTheme.typography.titleLarge,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Box(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                Column(Modifier.fillMaxWidth().padding(end = 8.dp).verticalScroll(scroll),
+                    verticalArrangement = Arrangement.spacedBy(9.dp), content = content)
+                val track = Edge
+                val thumb = Quiet
+                Canvas(Modifier.matchParentSize()) {
+                    val range = scroll.maxValue
+                    val viewport = scroll.viewportSize.toFloat()
+                    if (range in 1 until Int.MAX_VALUE && viewport > 0f && size.height > 0f) {
+                        val height = (size.height * viewport / (viewport + range))
+                            .coerceIn(minOf(24.dp.toPx(), size.height), size.height)
+                        val position = (size.height - height) * scroll.value / range
+                        val radius = 2.dp.toPx()
+                        val x = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Ltr) size.width - radius else radius
+                        drawLine(track, androidx.compose.ui.geometry.Offset(x, radius),
+                            androidx.compose.ui.geometry.Offset(x, maxOf(radius, size.height - radius)), 4.dp.toPx(),
+                            androidx.compose.ui.graphics.StrokeCap.Round)
+                        drawLine(thumb, androidx.compose.ui.geometry.Offset(x, position + radius),
+                            androidx.compose.ui.geometry.Offset(x, maxOf(position + radius, position + height - radius)),
+                            4.dp.toPx(), androidx.compose.ui.graphics.StrokeCap.Round)
+                    }
                 }
             }
         }
