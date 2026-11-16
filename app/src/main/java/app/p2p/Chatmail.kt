@@ -50,7 +50,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     private fun call(method: String, vararg params: Any?): Any = rpc(method, account, *params)
 
-    fun listenForEvents(onMessagesChanged: () -> Unit, onCall: (ChatmailCallEvent) -> Unit) {
+    fun listenForEvents(onMessagesChanged: (Set<Int>) -> Unit, onCall: (ChatmailCallEvent) -> Unit) {
         synchronized(eventLock) {
             if (readingEvents || closing) return
             readingEvents = true
@@ -60,15 +60,19 @@ internal class Chatmail(directory: File) : AutoCloseable {
                 while (synchronized(eventLock) { !closing }) {
                     val batch = rpc("get_next_event_batch") as JSONArray
                     var messagesChanged = false
+                    val updatedMessages = mutableSetOf<Int>()
                     for (index in 0 until batch.length()) {
                         val row = batch.optJSONObject(index) ?: continue
                         if (row.optInt("contextId") != account) continue
                         val event = row.optJSONObject("event") ?: continue
                         if (synchronized(eventLock) { closing }) break
-                        messagesChanged = messagesChanged || event.optString("kind") in MESSAGE_EVENTS
+                        if (event.optString("kind") in MESSAGE_EVENTS) {
+                            messagesChanged = true
+                            event.optInt("msgId", event.optInt("msg_id")).takeIf { it > 9 }?.let(updatedMessages::add)
+                        }
                         readChatmailCallEvent(event)?.let(onCall)
                     }
-                    if (messagesChanged && synchronized(eventLock) { !closing }) onMessagesChanged()
+                    if (messagesChanged && synchronized(eventLock) { !closing }) onMessagesChanged(updatedMessages)
                 }
             } catch (error: Exception) {
                 android.util.Log.w("RelayLabChatmail", "Chatmail event reader stopped", error)

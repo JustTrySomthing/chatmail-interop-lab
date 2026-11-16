@@ -27,6 +27,7 @@ import org.json.JSONObject
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.io.File
 import java.io.RandomAccessFile
 import java.security.MessageDigest
@@ -164,7 +165,10 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun openChatmail(directory: File): Chatmail = Chatmail(directory).also { core ->
-        core.listenForEvents(onMessagesChanged = { nextNativeSync = 0L }) { event ->
+        core.listenForEvents(onMessagesChanged = { changed ->
+            nativeChangedMessages.addAll(changed)
+            nextNativeSync = 0L
+        }) { event ->
             viewModelScope.launch {
                 val accepted = chatmailLock.withLock {
                     if (chatmail !== core) return@withLock false to null
@@ -220,6 +224,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private var chatmail: Chatmail? = null
     private var chatmailNetwork: Network? = null
     @Volatile private var selectedNetwork: EngineRoute? = null
+    @Volatile private var nextNativeSync = 0L
+    private val nativeChangedMessages = ConcurrentHashMap.newKeySet<Int>()
     private var nextChatmailPoll = 0L
     private var nextChatmailConnect = 0L
     private var chatmailCursor: Int? = null
@@ -684,8 +690,6 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         catch (failure: Exception) { AppLog.record(context, "Chatmail conversation sync failed", failure) }
     }
 
-    @Volatile private var nextNativeSync = 0L
-
     private suspend fun updateNativeCatalog(core: Chatmail, now: Long) {
         if (now < nextNativeSync) return
         nextNativeSync = now + 8_000
@@ -702,7 +706,17 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 cacheNativeRecord(key, "peer-profile", obj("name" to contact.name), 0L)
             }
         }
-        for (chat in threads) updateNativeHistory(core, chat, legacy[chat.id] ?: nativeThreadKey(chat.id), 25)
+        val chatsById = threads.associateBy(NativeThread::id)
+        val recent = threads.flatMapTo(mutableSetOf<Int>()) { chat ->
+            updateNativeHistory(core, chat, legacy[chat.id] ?: nativeThreadKey(chat.id), 25)
+        }
+        for (id in nativeChangedMessages.toList()) {
+            if (!nativeChangedMessages.remove(id) || id in recent) continue
+            val thread = records.get(nativeMessageKey(id))?.data()?.optString("thread") ?: continue
+            val chatId = records.get(thread)?.data()?.optInt("nativeChat") ?: continue
+            val chat = chatsById[chatId] ?: continue
+            updateNativeHistory(core, chat, thread, 25, messageId = id)
+        }
     }
 
     private suspend fun cacheNativeThread(chat: NativeThread, key: String = nativeThreadKey(chat.id)) {
@@ -735,19 +749,19 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun updateNativeHistory(
         core: Chatmail, chat: NativeThread, thread: String, limit: Int, before: Int? = null, messageId: Int? = null
-    ) {
+    ): List<Int> {
         val saved = records.get(thread)?.data()
         val loaded = saved?.optInt("nativeHistoryFirst") ?: 0
         val latest = saved?.optInt("nativeHistoryLast")?.takeIf { before == null && it > 9 }
         val page = if (messageId == null) core.nativeHistory(chat.id, limit, before, latest)
             else NativeHistory(listOfNotNull(core.nativeMessage(chat.id, messageId)), null, null, false)
         val batch = page.messages
-        if (batch.isEmpty() && page.first == null && before == null) return
+        if (batch.isEmpty() && page.first == null && before == null) return emptyList()
         var newMessage = false
         var newAttachment = false
         val parent = File(context.noBackupFilesDir, "chatmail").canonicalFile.toPath()
         database.withTransaction {
-            if (messageId == null && (before != null || loaded <= 9 || latest == null)) change(thread) {
+            if (messageId == null && (loaded <= 9 || latest == null)) change(thread) {
                 put("nativeHasOlder", page.hasOlder)
                 page.first?.let { put("nativeHistoryFirst", it) }
             }
@@ -836,6 +850,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             val area = if (chat.group) AlertArea.GROUPS else AlertArea.CHATS
             alerts.show(area, thread, chat.name, if (newAttachment) "New attachment" else "New message")
         }
+        return batch.map(NativeMessage::id)
     }
 
     private suspend fun tryConsumeChatmail(service: Chatmail, message: JSONObject): Boolean =
