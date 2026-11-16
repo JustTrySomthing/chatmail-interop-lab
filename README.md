@@ -24,7 +24,7 @@ Chatmail contacts appear in **Contacts** and **New chat**. Open a conversation t
 
 ## Device test status
 
-Use fresh profiles and record the client versions and networks used. SecureJoin can continue after the app starts the handshake. Chatmail profile transfer, encrypted group invites, and live-call interoperability are pending.
+Use fresh profiles and record the client versions and networks used. SecureJoin can continue after the app starts the handshake. Chatmail profile transfer and encrypted group invites are pending.
 
 | Client | Relay Lab sends invite | Relay Lab accepts invite | Relay Lab sends text | Relay Lab receives text |
 | --- | --- | --- | --- | --- |
@@ -41,3 +41,15 @@ Read Aloud uses the included offline voices and existing speech animation for re
 | --- | --- | --- |
 | Delta Chat | Device test pending | Device test pending |
 | ArcaneChat | Device test pending | Device test pending |
+
+
+## Talk calls
+
+Talk uses Chatmail Core for call signaling and relay configuration. It bundles the shared Delta Chat and ArcaneChat Android v2.69.0 WebRTC client and uses their WebRTC 129 dependency. Calls start with the camera off. During a connected call, tap the camera icon to turn video on or off. Video capture stops when Relay Lab goes to the background.
+
+| Client | Relay Lab calls client | Client calls Relay Lab |
+| --- | --- | --- |
+| Delta Chat | Device test pending | Device test pending |
+| ArcaneChat | Device test pending | Device test pending |
+
+For each direction, record ringing and answer time, two-way audio, camera toggles on both phones, and hang-up on Wi-Fi and mobile data. Legacy P2P voicemail remains available for legacy conversations.

@@ -1,6 +1,10 @@
 package app.p2p
 
 import android.os.SystemClock
+import androidx.compose.ui.viewinterop.AndroidView
+import org.thoughtcrime.securesms.EglUtils
+import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoTrack
 import android.text.format.DateFormat
 import android.view.WindowManager
 import androidx.compose.animation.core.*
@@ -106,7 +110,7 @@ internal fun RecentTalkCalls(
                 val data = entry.data()
                 val contact = data.optString("contact")
                 RecentTalkCallRow(
-                    name = name(contact), photo = photo(contact), time = timeFormat.format(Date(entry.created)),
+                    name = data.optString("name").ifBlank { name(contact) }, photo = photo(contact), time = timeFormat.format(Date(entry.created)),
                     outgoing = data.optBoolean("outgoing"), missed = data.optString("detail") == "Missed call",
                     onCall = { call(contact) }
                 )
@@ -156,7 +160,7 @@ private fun RecentTalkCallRow(
 @Composable
 internal fun TalkCallPanel(
     call: TalkCall, name: String, photo: String, end: () -> Unit,
-    answer: () -> Unit, speaker: () -> Unit, mute: () -> Unit, message: () -> Unit
+    answer: () -> Unit, speaker: () -> Unit, mute: () -> Unit, camera: () -> Unit, message: (() -> Unit)?
 ) {
     val colors = MaterialTheme.colorScheme
     val pending = call.phase == TalkPhase.Connecting || call.phase == TalkPhase.Incoming
@@ -188,12 +192,20 @@ internal fun TalkCallPanel(
                 }
                 Text(name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold,
                     maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+                if (call.phase == TalkPhase.Active) {
+                    call.remoteVideo?.takeIf { call.remoteCamera }?.let { track ->
+                        TalkVideo(track, Modifier.fillMaxWidth().aspectRatio(4f / 3f), mirror = false)
+                    }
+                    call.localVideo?.takeIf { call.camera }?.let { track ->
+                        TalkVideo(track, Modifier.width(110.dp).aspectRatio(3f / 4f), mirror = true)
+                    }
+                }
                 if (pending || call.phase == TalkPhase.Active) {
                     TalkRouteAnimation(call.setupStep, pending, call.phase == TalkPhase.Incoming)
                 }
                 val status = when (call.phase) {
                     TalkPhase.Connecting -> call.setupStep.label
-                    TalkPhase.Incoming -> "Incoming Talk call"
+                    TalkPhase.Incoming -> if (call.startsWithVideo) "Incoming video call" else "Incoming Talk call"
                     TalkPhase.Active -> (elapsed / 60).toString() + ":" + (elapsed % 60).toString().padStart(2, '0')
                     TalkPhase.Finished -> call.detail
                 }
@@ -216,6 +228,13 @@ internal fun TalkCallPanel(
                     }
                     TalkPhase.Active, TalkPhase.Connecting -> {
                         if (call.phase == TalkPhase.Active) {
+                            IconButton(onClick = camera, modifier = Modifier.semantics {
+                                stateDescription = if (call.camera) "On" else "Off"
+                            }) {
+                                Icon(if (call.camera) Icons.Outlined.Videocam else Icons.Outlined.VideocamOff,
+                                    if (call.camera) "Turn camera off" else "Turn camera on",
+                                    tint = if (call.camera) colors.primary else colors.onSurfaceVariant)
+                            }
                             Button(onClick = mute, shape = P2pButtonShape, modifier = Modifier.fillMaxWidth()) {
                                 Icon(if (call.muted) Icons.Outlined.MicOff else Icons.Outlined.Mic, null)
                                 Spacer(Modifier.width(8.dp))
@@ -237,7 +256,7 @@ internal fun TalkCallPanel(
                         }
                     }
                     TalkPhase.Finished -> {
-                        if (call.outgoing && call.connectedAt == 0L) {
+                        if (message != null && call.outgoing && call.connectedAt == 0L) {
                             Button(onClick = message, shape = P2pButtonShape, modifier = Modifier.fillMaxWidth()) {
                                 Icon(Icons.Outlined.MicNone, null)
                                 Spacer(Modifier.width(8.dp))
@@ -323,4 +342,20 @@ internal fun recentCallTime(time: Long): String {
     val date = java.time.Instant.ofEpochMilli(time).atZone(java.time.ZoneId.systemDefault())
     return if (date.toLocalDate() == today) java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(time))
         else java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(time))
+}
+
+@Composable
+private fun TalkVideo(track: VideoTrack, modifier: Modifier, mirror: Boolean) {
+    val context = LocalContext.current
+    val renderer = remember(track) { SurfaceViewRenderer(context) }
+    DisposableEffect(track, renderer) {
+        renderer.init(EglUtils.getEglBase().eglBaseContext, null)
+        renderer.setMirror(mirror)
+        track.addSink(renderer)
+        onDispose {
+            runCatching { track.removeSink(renderer) }
+            renderer.release()
+        }
+    }
+    key(track) { AndroidView(factory = { renderer }, modifier = modifier) }
 }

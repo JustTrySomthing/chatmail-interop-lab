@@ -32,6 +32,7 @@ import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val PORT = 41736
+private const val RETIRED_TALK_PACKET = "talkCall"
 
 internal data class InviteImportState(
     val busy: Boolean = false, val message: String? = null, val failed: Boolean = false, val peer: String? = null,
@@ -140,48 +141,50 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private val alerts = LocalAlerts(application)
     private val notificationsMuted = MutableStateFlow(AppAlertMute.isMuted(context))
     internal val appNotificationsMuted = notificationsMuted.asStateFlow()
-    internal val talk = TalkCalls(application, viewModelScope, ::sendTalkSignal, ::talkIce,
+    internal val talk = TalkCalls(application, viewModelScope, ::resolveTalkContact, ::talkIce,
+        { chat, offer -> withInteropChatmail { it.placeCall(chat, offer) } },
+        { id, answer -> withInteropChatmail { it.acceptCall(id, answer) } },
+        { id -> withInteropChatmail { it.endCall(id) } },
         ::announceTalkCall, { call -> alerts.clear(AlertArea.TALK, call) },
-        { call -> announceMissedCall(call.contact) },
-        { call -> save("call:" + call.id, "call-history", obj("contact" to call.contact, "outgoing" to call.outgoing,
-            "detail" to call.detail, "unread" to (!call.outgoing && call.connectedAt == 0L))) })
+        { call -> save("call:" + call.id, "call-history", obj("contact" to call.contact,
+            "name" to call.displayName, "outgoing" to call.outgoing, "detail" to call.detail,
+            "unread" to (!call.outgoing && call.connectedAt == 0L))) })
 
-    private suspend fun announceMissedCall(contact: String) {
-        val record = records.get(contact)?.takeIf { it.kind == "contact" }?.data() ?: return
-        if (record.optBoolean("blocked")) return
-        val name = record.optString("name").ifBlank { "P2P contact" }
-        alerts.show(AlertArea.MISSED_CALLS, contact, name, "Missed Talk call")
+    private suspend fun resolveTalkContact(contact: String): InteropChat {
+        val chat = if (contact.startsWith("chatmail:")) contact.substringAfter(':').toIntOrNull()
+        else records.get(contact)?.takeIf { it.kind == "contact" && !it.data().optBoolean("blocked") }
+            ?.data()?.optInt("chatmailChat")
+        require(chat != null && chat > 9) { "Exchange a Chatmail invite before calling this contact." }
+        return withInteropChatmail { core ->
+            requireNotNull(core.interoperableChat(chat)?.takeIf { it.canSend }) {
+                "An accepted, encrypted contact is required to call."
+            }
+        }
     }
 
-    private suspend fun announceTalkCall(contact: String, call: String, expiresAt: Long) {
-        val name = records.get(contact)?.data()?.optString("name").orEmpty().ifBlank { "P2P contact" }
+    private fun openChatmail(directory: File): Chatmail = Chatmail(directory).also { core ->
+        core.listenForCalls { event ->
+            viewModelScope.launch {
+                val accepted = chatmailLock.withLock {
+                    if (chatmail !== core) return@withLock false to null
+                    val caller = if (event.kind == "IncomingCall") runCatching {
+                        core.interoperableChat(event.chatId)?.takeIf { it.canSend && core.isRingingCall(event.id) }
+                    }.getOrNull() else null
+                    true to caller
+                }
+                if (accepted.first) talk.event(event, accepted.second)
+            }
+        }
+    }
+
+    private suspend fun announceTalkCall(call: String, expiresAt: Long) {
+        val name = talk.state.value?.displayName.orEmpty().ifBlank { "Chatmail contact" }
         if (talk.state.value?.let { it.id == call && it.phase == TalkPhase.Incoming } != true ||
             System.currentTimeMillis() >= expiresAt) return
         if (visible && !QuietHours.read(context).active()) {
             AppAlertMute.deliver(context, talk::ring)
         } else if (!visible) {
             alerts.show(AlertArea.TALK, call, name, "Incoming Talk call", expiresAt)
-        }
-    }
-
-    private suspend fun sendTalkSignal(contact: String, signal: TalkSignal) {
-        outboxLock.withLock {
-            database.withTransaction {
-                val row = records.get(contact)?.takeIf { it.kind == "contact" && !it.data().optBoolean("blocked") }
-                check(row != null) { "Contact is unavailable" }
-                if (signal.action == "end" || signal.action == "decline") {
-                    records.all("outbox").filter {
-                        val data = it.data()
-                        val payload = data.optJSONObject("payload")
-                        data.optString("to") == contact && payload?.optString("type") == TALK_SIGNAL &&
-                            payload.optString("call") == signal.call && payload.optString("action") in setOf("offer", "answer")
-                    }.forEach { retireSend(it) }
-                }
-                queue(contact, signal.packet())
-            }
-        }
-        if (!visible && signal.action in setOf("end", "decline", "busy")) {
-            BackgroundMessages.start(context, catchUp = true)
         }
     }
 
@@ -392,7 +395,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private suspend fun connectedChatmail(name: String, setupQr: String? = null): Chatmail {
         val current = selectedNetwork?.network
             ?: error("Connect to the internet to set up Chatmail.")
-        val service = chatmail ?: Chatmail(File(context.noBackupFilesDir, "chatmail")).also { chatmail = it }
+        val service = chatmail ?: openChatmail(File(context.noBackupFilesDir, "chatmail")).also { chatmail = it }
         if (chatmailNetwork != current) service.disconnect()
         val profile = records.get("profile")?.data()
         if (profile != null && service.profileNeedsSync(profile.optLong("revision"))) {
@@ -434,7 +437,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
                 val directory = File(context.noBackupFilesDir, "chatmail")
                 val service = if (selectedNetwork != null) connectedChatmail(name)
-                else chatmail ?: directory.takeIf(File::isDirectory)?.let { Chatmail(it).also { opened -> chatmail = opened } }
+                else chatmail ?: directory.takeIf(File::isDirectory)?.let { openChatmail(it).also { opened -> chatmail = opened } }
                 check(service != null && service.isConfigured()) { "Connect to the internet to set up Chatmail." }
                 action(service)
             }
@@ -798,7 +801,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             if (chat <= 0) continue
             val payload = data.getJSONObject("payload")
             val type = payload.optString("type")
-            if (type == TALK_SIGNAL && payload.optLong("expires") <= System.currentTimeMillis()) {
+            // Drop proprietary call packets left in the outbox by earlier builds.
+            if (type == RETIRED_TALK_PACKET) {
                 database.withTransaction { retireSend(record) }
                 continue
             }
@@ -851,9 +855,6 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                     when (message?.optInt("state")) {
                         24 -> handleResult(record.key, "rejected")
                         26, 28 -> {
-                            if (type == TALK_SIGNAL && payload.optString("action") == "offer") {
-                                talk.inviteSent(payload.optString("call"))
-                            }
                             if (type == "chatmailAck") records.remove(record.key)
                             else if (type == "hello") {
                                 val key = "request:" + to
@@ -2120,7 +2121,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             (snapshot.optString("state") == "Complete" && File(incoming, id).isFile)) return
         val chatmailMessage = snapshot.optInt("chatmailAttachment")
         val retainedFile = if (chatmailMessage > 9) chatmailLock.withLock {
-            val service = chatmail ?: Chatmail(File(context.noBackupFilesDir, "chatmail")).also { chatmail = it }
+            val service = chatmail ?: openChatmail(File(context.noBackupFilesDir, "chatmail")).also { chatmail = it }
             val cachedPath = service.message(chatmailMessage).optString("file")
             if (cachedPath.isBlank() || cachedPath == "null") null else File(cachedPath).takeIf(File::isFile)
         } else null
@@ -2439,7 +2440,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             }
             val payload = if (record.kind == "stream") makeChunk(record) ?: continue else data.getJSONObject("payload")
             val expires = payload.optLong("expires")
-            if (payload.optString("type") == TALK_SIGNAL && expires <= System.currentTimeMillis()) {
+            if (payload.optString("type") == RETIRED_TALK_PACKET) {
                 handleResult(record.key, "rejected")
                 continue
             }
@@ -2567,11 +2568,6 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
-        if (status in setOf("ok", "complete") && queued?.optString("type") == TALK_SIGNAL &&
-            queued.optString("action") == "offer"
-        ) {
-            talk.inviteSent(queued.optString("call"))
-        }
         if (status != "ok" && status != "complete") {
             database.withTransaction {
                 val payload = record.data().optJSONObject("payload")
@@ -2676,23 +2672,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         if (type in setOf("message", "offer", "messageReaction") && records.get(seen) != null) return "ok"
         val contact = records.get(sender)?.takeIf { it.kind == "contact" }?.data()
         if (contact?.optBoolean("blocked") == true) return "rejected"
-        if (type == TALK_SIGNAL) {
-            if (contact == null) return "rejected"
-            val now = System.currentTimeMillis()
-            val signal = TalkSignal.read(data, now, allowMissedOffer = true) ?: return "rejected"
-            val key = if (signal.action == "offer") "talk-offer:$sender:${signal.call}" else seen
-            val fresh = database.withTransaction {
-                if (records.get(seen) != null || records.get(key) != null) return@withTransaction false
-                val retainUntil = signal.expires + if (signal.action == "offer") MISSED_CALL_WINDOW else 0L
-                save(key, "talk-receipt", obj("expires" to retainUntil))
-                true
-            }
-            if (fresh) {
-                if (signal.expires > System.currentTimeMillis()) talk.receive(sender, signal)
-                else if (signal.action == "offer") announceMissedCall(sender)
-            }
-            return "ok"
-        }
+        if (type == RETIRED_TALK_PACKET) return "rejected"
         val group = data.optString("group")
         val post = data.optString("post")
         if (isId(group) && type !in setOf("group", "deviceUpdate", "offerCancel") && groupBlocked(group)) return "rejected"

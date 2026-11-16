@@ -28,6 +28,10 @@ internal class Chatmail(directory: File) : AutoCloseable {
         ChatmailNative.close(handle)
         throw error
     }
+    private val eventLock = Any()
+    private var readingEvents = false
+    private var closing = false
+    private var closeReady = false
     private var displayName: String? = null
     private var profileRevision: Long? = null
     private var running = false
@@ -42,6 +46,39 @@ internal class Chatmail(directory: File) : AutoCloseable {
     }
 
     private fun call(method: String, vararg params: Any?): Any = rpc(method, account, *params)
+
+    fun listenForCalls(onEvent: (ChatmailCallEvent) -> Unit) {
+        synchronized(eventLock) {
+            if (readingEvents || closing) return
+            readingEvents = true
+        }
+        Thread({
+            try {
+                while (synchronized(eventLock) { !closing }) {
+                    val batch = rpc("get_next_event_batch") as JSONArray
+                    for (index in 0 until batch.length()) {
+                        val row = batch.optJSONObject(index) ?: continue
+                        if (row.optInt("contextId") != account) continue
+                        val event = row.optJSONObject("event")?.let(::readChatmailCallEvent) ?: continue
+                        if (synchronized(eventLock) { !closing }) onEvent(event)
+                    }
+                }
+            } catch (error: Exception) {
+                android.util.Log.w("RelayLabCall", "Chatmail call event reader stopped", error)
+            } finally {
+                synchronized(eventLock) {
+                    readingEvents = false
+                    if (closeReady) ChatmailNative.close(handle)
+                }
+            }
+        }, "Chatmail call events").apply { isDaemon = true }.start()
+    }
+
+    fun placeCall(chat: Int, offer: String): Int = (call("place_outgoing_call", chat, offer, false) as Number).toInt()
+    fun acceptCall(id: Int, answer: String) { call("accept_incoming_call", id, answer) }
+    fun endCall(id: Int) { call("end_call", id) }
+    fun isRingingCall(id: Int): Boolean = (call("call_info", id) as JSONObject)
+        .optJSONObject("state")?.optString("kind") == "Alerting"
 
     fun profileNeedsSync(revision: Long): Boolean = profileRevision != revision
 
@@ -222,10 +259,18 @@ internal class Chatmail(directory: File) : AutoCloseable {
     }
 
     override fun close() {
+        // The event read holds the native handle until a blocked read returns.
+        synchronized(eventLock) {
+            if (closing) return
+            closing = true
+        }
         try {
             disconnect()
         } finally {
-            ChatmailNative.close(handle)
+            synchronized(eventLock) {
+                closeReady = true
+                if (!readingEvents) ChatmailNative.close(handle)
+            }
         }
     }
 }

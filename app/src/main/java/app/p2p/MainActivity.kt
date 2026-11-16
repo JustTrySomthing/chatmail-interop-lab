@@ -512,6 +512,14 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 talkMicPermission.launch(Manifest.permission.RECORD_AUDIO)
             }
         }
+        val callCameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted && model.talk.state.value?.camera == false) model.talk.toggleCamera()
+        }
+        fun toggleCallCamera() {
+            if (context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                model.talk.toggleCamera()
+            } else callCameraPermission.launch(Manifest.permission.CAMERA)
+        }
         val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { result ->
             val target = pickerThread
             pickerThread = null
@@ -835,7 +843,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         }
                     }
                     FullPageRoute.Chatmail -> {
-                        InteropChats(model, nativeConversation)
+                        InteropChats(model, nativeConversation) { chat ->
+                            modal = null
+                            requestTalkMic(TalkMicAction.Call, "chatmail:$chat")
+                        }
                     }
                     FullPageRoute.Settings -> {
                         SettingsGrid(settingsQuery) { destination ->
@@ -1327,9 +1338,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         }
         talkCall?.let { call ->
             if (showTalkCall) {
-                TalkCallPanel(call, name(call.contact), photo(call.contact), model.talk::end,
+                val leaveMessage: (() -> Unit)? = if (call.contact.startsWith("chatmail:")) null
+                    else ({ requestTalkMic(TalkMicAction.Message, call.contact) })
+                TalkCallPanel(call, call.displayName.ifBlank { name(call.contact) }, photo(call.contact), model.talk::end,
                     { requestTalkMic(TalkMicAction.Answer, call.id) }, model.talk::toggleSpeaker, model.talk::toggleMute,
-                    { requestTalkMic(TalkMicAction.Message, call.contact) })
+                    ::toggleCallCamera, leaveMessage)
             }
         }
 
@@ -1337,12 +1350,13 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             "call-contacts" -> Sheet("Call", { modal = null }) {
                 val available = contacts.filterNot { blocked(it.key) }
                 SearchField(search, { search = it }, "Search contacts")
+                NativeContactRows(model, search, showEmpty = available.isEmpty()) { chat ->
+                    modal = null
+                    requestTalkMic(TalkMicAction.Call, "chatmail:$chat")
+                }
                 val matches = available.filter { threadSearchMatches(search, name(it.key), emptyList()) }
-                if (matches.isEmpty()) {
-                    EmptyTabMessage(if (available.isEmpty()) "No contacts to call" else "No matching contacts")
-                    if (contacts.isEmpty()) {
-                        PageActionButton("Add contact", { showAddContact() }, Modifier.fillMaxWidth())
-                    }
+                if (contacts.isEmpty()) {
+                    PageActionButton("Add contact", { showAddContact() }, Modifier.fillMaxWidth())
                 }
                 matches.forEach { contact ->
                     ContactActionRow(name(contact.key), photo(contact.key), ContactAction.Call,

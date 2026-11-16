@@ -40,7 +40,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun InteropChats(model: P2pModel, initialChat: Int? = null) {
+internal fun InteropChats(model: P2pModel, initialChat: Int? = null, call: (Int) -> Unit) {
     var selected by rememberSaveable(initialChat) { mutableStateOf(initialChat) }
     var chats by remember { mutableStateOf<List<InteropChat>?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
@@ -75,12 +75,12 @@ internal fun InteropChats(model: P2pModel, initialChat: Int? = null) {
         }
     } else {
         P2pTextButton(onClick = { selected = null }) { Text("Back to Chatmail chats") }
-        InteropConversation(model, id)
+        InteropConversation(model, id) { call(id) }
     }
 }
 
 @Composable
-private fun InteropConversation(model: P2pModel, id: Int) {
+private fun InteropConversation(model: P2pModel, id: Int, call: () -> Unit) {
     var conversation by remember(id) { mutableStateOf<Pair<InteropChat, InteropHistory>?>(null) }
     var limit by remember(id) { mutableIntStateOf(50) }
     var refresh by remember(id) { mutableIntStateOf(0) }
@@ -113,6 +113,7 @@ private fun InteropConversation(model: P2pModel, id: Int) {
     }
     val (chat, history) = current
     NativeContactHeader(chat.name, chat.bio, chat.photoPath)
+    if (chat.canSend) P2pTextButton(onClick = call) { Text("Call") }
     Text(when {
         chat.request -> "Contact request"
         chat.canSend -> "Encrypted chat"
