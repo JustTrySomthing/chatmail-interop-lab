@@ -19,6 +19,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Edit
@@ -26,9 +30,9 @@ import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.PermMedia
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material3.Badge
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -37,6 +41,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,7 +93,8 @@ internal fun ChannelBoard(
     var error by remember(page, selected) { mutableStateOf<String?>(null) }
     var actionError by remember(page, selected) { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
-    var channelName by rememberSaveable(page, selected) { mutableStateOf("") }
+    var creating by rememberSaveable(page) { mutableStateOf(false) }
+    var editingId by rememberSaveable(page) { mutableStateOf<Int?>(null) }
     var draft by rememberSaveable(page, selected, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
     var composePost by rememberSaveable(page, selected) { mutableStateOf(false) }
     var attachments by remember(page, selected) { mutableStateOf<List<AttachmentDraft>>(emptyList()) }
@@ -108,8 +115,12 @@ internal fun ChannelBoard(
 
     val owned = channels.orEmpty().filter { it.owned }
     val current = channels.orEmpty().firstOrNull { it.id == selected }
-        ?: owned.singleOrNull()?.takeIf { selected == null && page == "My Channel" }
-    val active = selected ?: current?.id
+    val active = selected
+    val editing = owned.firstOrNull { it.id == editingId }
+    val description by produceState("", active, revision) {
+        value = ""
+        if (active != null) channelAction { value = model.chatmailChannelDescription(active) }
+    }
     val viewingFeed = page == "Feed" && selected == null
     LaunchedEffect(model, lifecycle, page, selected, active, limit, revision) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -153,6 +164,32 @@ internal fun ChannelBoard(
         } else {
             post.download()?.let { saveMedia?.invoke(it) }
         }
+    }
+
+    if (creating || editing != null) {
+        ChannelEditor(editing, model, busy, actionError, dismiss = {
+            if (!busy) {
+                creating = false
+                editingId = null
+                actionError = null
+            }
+        }) { name, details ->
+            submit {
+                if (editing == null) {
+                    val id = model.createChatmailChannel(name)
+                    creating = false
+                    selectChannel(id)
+                } else {
+                    model.updateChatmailChannel(editing.id, name, details)
+                    editingId = null
+                }
+            }
+        }
+    }
+
+    fun editChannel(channel: ChatmailChannel) {
+        actionError = null
+        editingId = channel.id
     }
 
     if (composePost && current?.owned == true && trimIndex == null) {
@@ -232,12 +269,20 @@ internal fun ChannelBoard(
         }
     }
 
-    Segments(listOf("Feed", "Following", "My Channel"), page, select = selectPage)
+    Segments(listOf("Feed", "Following", "My Channels"), page, select = selectPage)
+    if (page == "My Channels" && selected == null) {
+        PageActionButton("Create a Channel", {
+            actionError = null
+            creating = true
+        }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), icon = Icons.Outlined.Add, enabled = !busy)
+    }
+    val listState = key(page) { rememberLazyListState() }
+    val detailState = key(selected) { rememberLazyListState() }
     val matches = posts.filter { search.isBlank() || it.channelName.contains(search, true) || it.text.contains(search, true) }
-    LazyColumn(contentPadding = PaddingValues(16.dp, 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(state = if (selected == null) listState else detailState, contentPadding = PaddingValues(16.dp, 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (error != null) item { Text(error.orEmpty(), color = MaterialTheme.colorScheme.error) }
         if (channels == null && error == null) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        if (actionError != null && !composePost) item { Text(actionError.orEmpty(), color = MaterialTheme.colorScheme.error) }
+        if (actionError != null && !composePost && !creating && editing == null) item { Text(actionError.orEmpty(), color = MaterialTheme.colorScheme.error) }
         if (selected != null) item {
             P2pTextButton(onClick = { selectChannel(null) }) { Text("Back to $page") }
         }
@@ -246,7 +291,8 @@ internal fun ChannelBoard(
             active != null -> {
                 if (current != null) {
                     item {
-                        ChannelProfileCard(current, profilePhoto.takeIf { current.owned }.orEmpty(), share)
+                        ChannelProfileCard(current, description, profilePhoto.takeIf { current.owned }.orEmpty(),
+                            share, edit = { editChannel(current) })
                     }
                     if (current.owned) item {
                         PageActionButton("Write a post", {
@@ -289,20 +335,32 @@ internal fun ChannelBoard(
                 items(following, key = { it.id }) { channel -> ChannelRow(channel) { selectChannel(channel.id) } }
             }
             channels != null -> {
-                if (owned.isEmpty()) item {
-                    OutlinedTextField(channelName, { channelName = it.take(80) }, modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Channel name") }, singleLine = true, enabled = !busy)
-                    Button(shape = P2pButtonShape, enabled = !busy && channelName.isNotBlank(), onClick = {
-                        val name = channelName
-                        submit {
-                            val id = model.createChatmailChannel(name)
-                            selectChannel(id)
+                val matching = owned.filter { it.name.contains(search, ignoreCase = true) }
+                if (matching.isEmpty()) item {
+                    EmptyTabMessage(if (search.isBlank()) "No channels yet" else "No matching channels")
+                }
+                items(matching, key = ChatmailChannel::id) { channel ->
+                    P2pRow(channel.name, "", Icons.Outlined.Campaign, trailing = {
+                        IconButton(enabled = !busy, onClick = { editChannel(channel) }) {
+                            Icon(Icons.Outlined.Edit, "Edit " + channel.name)
                         }
-                    }) { Text("Create channel") }
-                } else items(owned, key = { it.id }) { channel -> ChannelRow(channel) { selectChannel(channel.id) } }
+                        IconToggleButton(checked = channel.pinned, enabled = !busy, onCheckedChange = { pinned ->
+                            submit {
+                                model.pinChatmailChannel(channel.id, pinned)
+                                channels = channels?.map { if (it.id == channel.id) it.copy(pinned = pinned) else it }
+                                    ?.sortedByDescending(ChatmailChannel::pinned)
+                            }
+                        }) {
+                            Icon(if (channel.pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                                if (channel.pinned) "Unpin " + channel.name else "Pin " + channel.name,
+                                tint = if (channel.pinned) readableAccent(MaterialTheme.colorScheme.surfaceVariant,
+                                    MaterialTheme.colorScheme.onSurface) else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }) { selectChannel(channel.id) }
+                }
             }
         }
-        if (page == "My Channel" && (selected == null || current?.owned == true)) item {
+        if (page == "My Channels" && selected == null) item {
             P2pTextButton(onClick = legacy) { Text("Previous Social posts") }
         }
     }
@@ -320,6 +378,44 @@ private suspend fun channelAction(action: suspend () -> Unit): String? = try {
 }
 
 @Composable
+private fun ChannelEditor(
+    channel: ChatmailChannel?, model: P2pModel, busy: Boolean, error: String?,
+    dismiss: () -> Unit, save: (String, String) -> Unit
+) {
+    var name by rememberSaveable(channel?.id) { mutableStateOf(channel?.name.orEmpty()) }
+    var description by rememberSaveable(channel?.id) { mutableStateOf<String?>(null) }
+    var loadError by remember(channel?.id) { mutableStateOf<String?>(null) }
+    var attempt by remember(channel?.id) { mutableIntStateOf(0) }
+    LaunchedEffect(channel?.id, attempt) {
+        if (channel != null && description == null) {
+            loadError = null
+            loadError = channelAction { description = model.chatmailChannelDescription(channel.id) }
+        }
+    }
+    Sheet(if (channel == null) "Create a Channel" else "Edit channel", dismiss) {
+        OutlinedTextField(name, { name = it.take(80) }, modifier = Modifier.fillMaxWidth(),
+            label = { Text("Channel name") }, shape = RoundedFieldShape, singleLine = true, enabled = !busy)
+        if (channel != null) {
+            OutlinedTextField(description.orEmpty(), { if (it.length <= INTEROP_TEXT_LIMIT) description = it },
+                modifier = Modifier.fillMaxWidth(), label = { Text("Description") }, shape = RoundedFieldShape,
+                minLines = 2, maxLines = 5, enabled = !busy && description != null)
+            loadError?.let {
+                Text(it, color = MaterialTheme.colorScheme.error)
+                P2pTextButton(onClick = { attempt++ }) { Text("Retry") }
+            }
+        }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        if (busy || (channel != null && description == null && loadError == null)) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        PageActionButton(if (channel == null) "Create channel" else "Save changes",
+            onClick = { save(name, description.orEmpty()) },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !busy && name.isNotBlank() && (channel == null || description != null))
+    }
+}
+
+@Composable
 private fun ChannelRow(channel: ChatmailChannel, open: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Surface(onClick = open, shape = RoundedCornerShape(16.dp),
@@ -334,7 +430,9 @@ private fun ChannelRow(channel: ChatmailChannel, open: () -> Unit) {
 }
 
 @Composable
-private fun ChannelProfileCard(channel: ChatmailChannel, photo: String, share: (ChatmailChannel) -> Unit) {
+private fun ChannelProfileCard(
+    channel: ChatmailChannel, description: String, photo: String, share: (ChatmailChannel) -> Unit, edit: () -> Unit
+) {
     val colors = MaterialTheme.colorScheme
     Surface(color = colors.surfaceVariant, contentColor = colors.onSurface, shape = RoundedCornerShape(22.dp)) {
         Column(Modifier.fillMaxWidth()) {
@@ -347,7 +445,13 @@ private fun ChannelProfileCard(channel: ChatmailChannel, photo: String, share: (
                         style = contentTextStyle(MaterialTheme.typography.headlineSmall),
                         fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                if (channel.owned) P2pTextButton(onClick = { share(channel) }) { Text("Share invite") }
+                if (description.isNotBlank()) {
+                    Text(description, style = contentTextStyle(MaterialTheme.typography.bodyMedium))
+                }
+                if (channel.owned) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    P2pTextButton(onClick = { share(channel) }) { Text("Share invite") }
+                    P2pTextButton(onClick = edit) { Text("Edit channel") }
+                }
             }
         }
     }

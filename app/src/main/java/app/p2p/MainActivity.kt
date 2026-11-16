@@ -2277,7 +2277,7 @@ private fun ContactActionRow(
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun P2pRow(
+internal fun P2pRow(
     title: String, description: String, icon: ImageVector? = null,
     trailing: @Composable RowScope.() -> Unit = {},
     onLong: (() -> Unit)? = null, photo: String = "", detail: @Composable RowScope.() -> Unit = {},

@@ -142,7 +142,11 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     fun joinChecked(code: String): Int = (call("secure_join", code) as Number).toInt()
 
-    fun channels(): List<ChatmailChannel> = chatIds().mapNotNull(::channel)
+    fun channels(): List<ChatmailChannel> {
+        val active = chatIds().mapNotNull(::channel)
+        val archived = chatIds(ARCHIVED_CHATS_ONLY).mapNotNull(::channel).filter { it.owned }
+        return (active + archived).distinctBy(ChatmailChannel::id).sortedByDescending(ChatmailChannel::pinned)
+    }
 
     fun channel(id: Int): ChatmailChannel? = parseChatmailChannel(fullChat(id))
 
@@ -160,6 +164,22 @@ internal class Chatmail(directory: File) : AutoCloseable {
     }
 
     fun createChannel(name: String): Int = (call("create_broadcast", name) as Number).toInt()
+
+    fun channelDescription(id: Int): String = call("get_chat_description", id) as String
+
+    fun updateChannel(id: Int, name: String, description: String) {
+        val channel = requireOwnedChannel(id)
+        if (name != channel.name) call("set_chat_name", id, name)
+        if (description != channelDescription(id)) call("set_chat_description", id, description)
+    }
+
+    fun pinChannel(id: Int, pinned: Boolean) {
+        requireOwnedChannel(id)
+        call("set_chat_visibility", id, if (pinned) "Pinned" else "Normal")
+    }
+
+    private fun requireOwnedChannel(id: Int): ChatmailChannel =
+        requireNotNull(channel(id)?.takeIf(ChatmailChannel::owned)) { "This channel is unavailable or read-only." }
 
     fun channelInvite(channel: ChatmailChannel): String {
         require(channel.owned) { "Only the owner can share this channel’s invite." }
@@ -363,7 +383,8 @@ private const val ARCHIVED_CHATS_ONLY = 1
 internal const val INTEROP_TEXT_LIMIT = 12_000
 
 internal data class ChatmailChannel(
-    val id: Int, val name: String, val owned: Boolean, val canPost: Boolean, val unread: Int
+    val id: Int, val name: String, val owned: Boolean, val canPost: Boolean, val unread: Int,
+    val pinned: Boolean = false
 )
 internal data class ChannelPost(
     val id: Int, val channelId: Int, val channelName: String, val text: String,
@@ -378,7 +399,7 @@ internal fun parseChatmailChannel(chat: JSONObject): ChatmailChannel? {
         (type != "InBroadcast" && type != "OutBroadcast")) return null
     val owned = type == "OutBroadcast"
     return ChatmailChannel(id, chat.optString("name").ifBlank { "Channel" }, owned,
-        owned && chat.optBoolean("canSend"), chat.optInt("freshMessageCounter"))
+        owned && chat.optBoolean("canSend"), chat.optInt("freshMessageCounter"), chat.optBoolean("pinned"))
 }
 
 internal fun parseChannelPost(message: JSONObject, channel: ChatmailChannel): ChannelPost? {

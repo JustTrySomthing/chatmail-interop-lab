@@ -101,11 +101,27 @@ class NavigationSmokeTest {
     }
 
     @Test
+    fun myChannelsOffersCreationFromItsOwnTab() {
+        val channels = compose.onAllNodesWithText("Channels")[0]
+        compose.waitUntil(5_000) { channels.isDisplayed() }
+        channels.performClick()
+        compose.onNodeWithText("Create a Channel").assertDoesNotExist()
+        compose.onNodeWithText("My Channels").performClick()
+        compose.onNodeWithText("Create a Channel").assertIsDisplayed()
+            .performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithText("Channel name").assertIsDisplayed()
+        val create = compose.onNode(hasClickAction() and hasText("Create channel"))
+        create.assertIsNotEnabled()
+        compose.onNode(hasSetTextAction() and hasText("Channel name")).performTextInput("Trail notes")
+        create.assertIsDisplayed()
+    }
+
+    @Test
     fun socialComposerKeepsItsOnlyAttachmentActionInsideTheSheet() {
         val channels = compose.onAllNodesWithText("Channels")[0]
         compose.waitUntil(5_000) { channels.isDisplayed() }
         channels.performClick()
-        compose.onNodeWithText("My Channel").performClick()
+        compose.onNodeWithText("My Channels").performClick()
         compose.onNodeWithText("Previous Social posts").performClick()
         compose.onNodeWithText("My Page").performClick()
         compose.onNodeWithText("No posts yet").assertIsDisplayed()
@@ -141,7 +157,7 @@ class NavigationSmokeTest {
         compose.onAllNodesWithText("Channels")[0].performClick()
         compose.onNodeWithText("Feed").assertIsDisplayed()
         compose.onNodeWithText("Publish").assertDoesNotExist()
-        compose.onNodeWithText("My Channel").assertIsDisplayed()
+        compose.onNodeWithText("My Channels").assertIsDisplayed()
         compose.onNodeWithText("Following").performClick()
         compose.onNodeWithText("Join channel").assertIsDisplayed()
 

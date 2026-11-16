@@ -87,7 +87,7 @@ class MediaNavigationTest {
             compose.onNodeWithText("Close").performClick()
 
             compose.onAllNodesWithText("Channels")[0].performClick()
-            compose.onNodeWithText("My Channel").performClick()
+            compose.onNodeWithText("My Channels").performClick()
             compose.onNodeWithText("Previous Social posts").performClick()
             compose.onNodeWithText("Feed").performClick()
             compose.onNodeWithText("A new post", useUnmergedTree = true).performTouchInput { longClick() }
@@ -194,7 +194,7 @@ class MediaNavigationTest {
 
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.onAllNodesWithText("Channels")[0].performClick()
-            compose.onNodeWithText("My Channel").performClick()
+            compose.onNodeWithText("My Channels").performClick()
             compose.onNodeWithText("Previous Social posts").performClick()
             compose.onNodeWithText("Feed").performClick()
             val picture = compose.onNodeWithContentDescription("Garden.png", useUnmergedTree = true)

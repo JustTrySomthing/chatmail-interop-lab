@@ -559,11 +559,22 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }.getOrNull()
     }
 
-    internal suspend fun createChatmailChannel(name: String) = withChatmail { core ->
-        val title = name.trim()
-        require(title.isNotEmpty() && title.length <= 80) { "Enter a channel name of up to 80 characters." }
-        check(core.channels().none { it.owned }) { "You already have a channel on this profile." }
-        core.createChannel(title)
+    internal suspend fun createChatmailChannel(name: String) =
+        withChatmail { it.createChannel(checkedChannelName(name)) }
+
+    internal suspend fun chatmailChannelDescription(id: Int) = withChatmail { it.channelDescription(id) }
+
+    internal suspend fun updateChatmailChannel(id: Int, name: String, description: String) =
+        withChatmail {
+            require(description.length <= INTEROP_TEXT_LIMIT) { "The channel description is too long." }
+            it.updateChannel(id, checkedChannelName(name), description.trim())
+        }
+
+    internal suspend fun pinChatmailChannel(id: Int, pinned: Boolean) =
+        withChatmail { it.pinChannel(id, pinned) }
+
+    private fun checkedChannelName(name: String): String = name.trim().also {
+        require(it.isNotEmpty() && it.length <= 80) { "Enter a channel name of up to 80 characters." }
     }
 
     internal suspend fun chatmailChannelInvite(id: Int) = withChatmail { core ->

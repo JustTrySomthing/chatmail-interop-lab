@@ -100,9 +100,11 @@ class ChatmailTest {
         assertFalse(followed.owned)
         assertFalse(followed.canPost)
         assertEquals(2, followed.unread)
-        val owned = requireNotNull(parseChatmailChannel(chat.put("chatType", "OutBroadcast")))
+        val owned = requireNotNull(parseChatmailChannel(chat.put("chatType", "OutBroadcast").put("pinned", true)))
         assertTrue(owned.owned)
         assertTrue(owned.canPost)
+        assertTrue(owned.pinned)
+        assertFalse(followed.pinned)
         assertNull(parseChatmailChannel(chat.put("chatType", "Group")))
         assertNull(parseChatmailChannel(chat.put("chatType", "InBroadcast").put("isEncrypted", false)))
     }
