@@ -68,6 +68,10 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     fun invite(): String = call("get_chat_securejoin_qr_code", null) as String
 
+    fun secureJoinInvite(): String = invite().also {
+        check(isSecureJoinInvite(it)) { "Chatmail returned an invalid contact invite." }
+    }
+
     fun join(code: String): Int {
         val qr = call("check_qr", code) as JSONObject
         require(qr.optString("kind") == "askVerifyContact") { "This Chatmail invite can’t be used to add a contact." }
@@ -139,6 +143,19 @@ internal fun decodeChatmailPacket(text: String): JSONObject? {
 
 internal fun isChatmailInviteLink(value: String): Boolean =
     value.startsWith("https://i.delta.chat/#") && value.substringAfter('#').isNotBlank()
+
+// This recognizes envelopes only. Chatmail Core validates the invite and distinguishes
+// contact invites from groups, account setup, and invitations from the current account.
+internal fun isSecureJoinInvite(value: String): Boolean {
+    if (value.length >= 32_768) return false
+    val code = value.trim()
+    return isChatmailInviteLink(code) ||
+        (code.startsWith("https://i.delta.chat#") && code.substringAfter('#').isNotBlank()) ||
+        (code.startsWith("openpgp4fpr:", ignoreCase = true) && code.substringAfter(':').isNotBlank())
+}
+
+internal fun isContactInviteCode(value: String): Boolean =
+    InviteCode.hasPrefix(value.trim()) || isSecureJoinInvite(value)
 
 internal fun chatmailInviteCode(signed: String): String =
     CHATMAIL_INVITE_PREFIX + InviteCode.compact("p2p1:" + encode(signed.toByteArray())).substringAfter(':')

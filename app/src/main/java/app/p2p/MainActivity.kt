@@ -108,20 +108,30 @@ class MainActivity : ComponentActivity() {
     private val shared = MutableStateFlow<List<Uri>>(emptyList())
     private val alert = MutableStateFlow<AlertRoute?>(null)
     private val openUpdates = MutableStateFlow(false)
+    private val incomingSecureJoin = MutableStateFlow<String?>(null)
+
+    private fun acceptSecureJoinLink(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_VIEW) {
+            incomingSecureJoin.value = intent.dataString?.takeIf(::isSecureJoinInvite)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         acceptShare(intent)
+        acceptSecureJoinLink(intent)
         alert.value = LocalAlerts.read(intent)
         openUpdates.value = intent.action == UpdateChecks.OPEN
         setContent {
             val incoming by shared.collectAsState()
             val route by alert.collectAsState()
             val updateRequested by openUpdates.collectAsState()
+            val secureJoinLink by incomingSecureJoin.collectAsState()
             CompositionLocalProvider(LocalReadAloud provides readAloud) {
                 P2pApp(model, updates, incoming, route, { alert.value = null }, ::clearShare,
-                    updateRequested, { openUpdates.value = false })
+                    updateRequested, { openUpdates.value = false },
+                    secureJoinLink, { incomingSecureJoin.value = null })
             }
         }
     }
@@ -130,6 +140,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         acceptShare(intent)
+        acceptSecureJoinLink(intent)
         alert.value = LocalAlerts.read(intent)
         openUpdates.value = intent.action == UpdateChecks.OPEN
     }
@@ -195,7 +206,8 @@ private enum class Area(val label: String, val icon: ImageVector) {
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, alert: AlertRoute?, clearAlert: () -> Unit,
-                   clearShared: () -> Unit, updateRequested: Boolean, clearUpdateRequest: () -> Unit) {
+                   clearShared: () -> Unit, updateRequested: Boolean, clearUpdateRequest: () -> Unit,
+                   secureJoinLink: String?, clearSecureJoinLink: () -> Unit) {
     val loadedRecords by model.items.collectAsState()
     val records = loadedRecords.orEmpty()
     val appearance = Appearance.read(records.firstOrNull { it.kind == "appearance" }?.data())
@@ -680,6 +692,16 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 modal = "updates"
                 updates.dismissPrompt()
                 clearUpdateRequest()
+            }
+        }
+        LaunchedEffect(secureJoinLink, inviteImport.busy) {
+            if (secureJoinLink != null && !inviteImport.busy) {
+                model.clearInviteImport()
+                trackedInvitePeer = null
+                addContactTab = "Accept invite"
+                modal = "add-contact"
+                pastedInvite = secureJoinLink
+                clearSecureJoinLink()
             }
         }
         LaunchedEffect(inviteImport, modal) {
@@ -1464,6 +1486,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     if (tab == "Send invite" && inviteKey.isEmpty() && !inviteCreation.busy) model.createInternetInvite()
                 }
                 if (addContactTab == "Send invite") {
+                    P2pOutlinedButton(onClick = { modal = "secure-join-invite" }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Invite someone on Delta Chat or ArcaneChat")
+                    }
                     val clock by produceState(System.currentTimeMillis(), inviteKey) {
                         while (true) {
                             kotlinx.coroutines.delay(1_000)
@@ -1540,7 +1565,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         val status = inviteImport.message ?: pending?.let { inviteRequestStatus(it, clock) }
                         status?.let { Text(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                             color = if (inviteImport.failed) MaterialTheme.colorScheme.error else Quiet) }
-                        Text("Scan a P2P QR code, choose a saved QR image, or paste an invite code.")
+                        Text("Scan a Relay Lab, Delta Chat, or ArcaneChat invite, choose a saved QR image, or paste an invite link or code.")
                         Button(onClick = ::openScanner, enabled = !inviteImport.busy, modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Outlined.QrCodeScanner, null)
                             Spacer(Modifier.width(8.dp))
@@ -1550,7 +1575,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             model.clearInviteImport()
                             inviteImagePicker.launch(arrayOf("image/*"))
                         }, enabled = !inviteImport.busy, modifier = Modifier.fillMaxWidth()) { Text("Choose QR image") }
-                        OutlinedTextField(pastedInvite, { pastedInvite = it.take(32_768) }, label = { Text("Invite code") },
+                        OutlinedTextField(pastedInvite, { pastedInvite = it.take(32_768) }, label = { Text("Invite link or code") },
                             maxLines = 3, enabled = !inviteImport.busy, modifier = Modifier.fillMaxWidth(),
                             trailingIcon = {
                                 IconButton(enabled = !inviteImport.busy, onClick = {
@@ -1568,6 +1593,37 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
 
                     }
                 }
+            }
+            "secure-join-invite" -> Sheet("Chatmail invite", { modal = "add-contact" }) {
+                var code by remember { mutableStateOf<String?>(null) }
+                var failure by remember { mutableStateOf<String?>(null) }
+                var attempt by remember { mutableIntStateOf(0) }
+                LaunchedEffect(attempt) {
+                    failure = null
+                    try {
+                        code = model.createSecureJoinInvite()
+                    } catch (error: kotlinx.coroutines.CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        failure = error.message ?: "Couldn’t create the Chatmail invite."
+                    } catch (_: LinkageError) {
+                        failure = "Chatmail couldn’t start on this device."
+                    }
+                }
+                val invite = code
+                val error = failure
+                when {
+                    invite != null -> {
+                        Text("Ask your contact to scan this QR code or open the link in Delta Chat or ArcaneChat.")
+                        ShareContactInvite(invite, profile, profileData?.optString("photo").orEmpty())
+                    }
+                    error != null -> {
+                        Text(error, color = MaterialTheme.colorScheme.error)
+                        Button(onClick = { attempt++ }) { Text("Retry") }
+                    }
+                    else -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                P2pTextButton(onClick = { modal = "add-contact" }) { Text("Back to Add contact") }
             }
             "link-preview" -> {
                 val link = linkUrl?.let(::parsePreviewLink)
@@ -2299,7 +2355,7 @@ private fun Sheet(title: String, dismiss: () -> Unit, content: @Composable Colum
 }
 
 @Composable
-private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo: String, expiresAt: Long) {
+private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo: String, expiresAt: Long? = null) {
     val context = LocalContext.current
     val bitmap = remember(code) { InviteImage.make(code) }
     val windowHeight = with(LocalDensity.current) { LocalWindowInfo.current.containerSize.height.toDp() }
@@ -2318,9 +2374,11 @@ private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo:
                     .clickable(onClickLabel = "Enlarge QR code") { enlarged = true })
                 Text(if (profile.isBlank()) "Scan to start a chat" else "Scan to chat with $profile",
                     style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center)
-                Text("Expires at " + shortTime(expiresAt), Modifier.padding(top = 4.dp),
-                    color = Color.DarkGray, style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center)
+                if (expiresAt != null) {
+                    Text("Expires at " + shortTime(expiresAt), Modifier.padding(top = 4.dp),
+                        color = Color.DarkGray, style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center)
+                }
             }
         }
         if (enlarged) InviteQrDialog(bitmap) { enlarged = false }
@@ -2330,12 +2388,12 @@ private fun ColumnScope.ShareContactInvite(code: String, profile: String, photo:
     Row(Modifier.align(Alignment.CenterHorizontally).widthIn(max = cardWidth).fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         P2pOutlinedButton(onClick = {
-            val clip = android.content.ClipData.newPlainText("P2P contact invite", code)
+            val clip = android.content.ClipData.newPlainText("Contact invite", code)
             clip.description.extras = android.os.PersistableBundle().apply {
                 putBoolean("android.content.extra.IS_SENSITIVE", true)
             }
             context.getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(clip)
-        }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { FittedLabel("Copy code") }
+        }, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 8.dp)) { FittedLabel(if (isSecureJoinInvite(code)) "Copy link" else "Copy code") }
         Button(onClick = {
             val intent = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, code)
             context.startActivity(Intent.createChooser(intent, "Share contact invite"))

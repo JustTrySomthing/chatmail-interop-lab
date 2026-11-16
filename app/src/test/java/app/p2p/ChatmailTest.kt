@@ -34,6 +34,36 @@ class ChatmailTest {
     }
 
     @Test
+    fun recognizesStandardSecureJoinEnvelopesAlongsideSignedInvites() {
+        val fingerprint = "ABCD".repeat(10)
+        val fields = "a=relay%40example.org&n=Relay&i=invite&s=auth"
+
+        assertTrue(isContactInviteCode("  https://i.delta.chat/#$fingerprint&$fields  "))
+        assertTrue(isContactInviteCode("https://i.delta.chat#$fingerprint&$fields"))
+        assertTrue(isContactInviteCode("OPENPGP4FPR:$fingerprint#$fields"))
+        assertTrue(isContactInviteCode("openpgp4fpr:$fingerprint#$fields"))
+        assertTrue(isContactInviteCode("p2p3:legacy"))
+        assertFalse(isSecureJoinInvite("p2p3:legacy"))
+        assertFalse(isContactInviteCode("https://i.delta.chat.evil.example/#$fingerprint&$fields"))
+        assertFalse(isContactInviteCode("https://i.delta.chat/#"))
+        assertFalse(isContactInviteCode("DCACCOUNT:https://example.org/new"))
+    }
+
+    @Test
+    fun secureJoinQrPreservesTheExactInviteLink() {
+        val fingerprint = "ABCD".repeat(10)
+        val link = "https://i.delta.chat/#$fingerprint&a=relay%40example.org&n=Relay%20Lab&i=invite&s=auth"
+        val qr = requireNotNull(InviteImage.make(link))
+        val scaled = android.graphics.Bitmap.createScaledBitmap(qr, qr.width * 5, qr.height * 5, false)
+        try {
+            assertEquals(link, InviteImage.readBitmap(scaled))
+        } finally {
+            scaled.recycle()
+            qr.recycle()
+        }
+    }
+
+    @Test
     fun decodesAScreenSizedChatmailQrFromCameraLuma() {
         val random = kotlin.random.Random(15)
         val payload = obj("v" to 3, "peer" to encode(random.nextBytes(40)),

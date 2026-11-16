@@ -21,7 +21,7 @@ internal object InviteImage {
     private val hints = mapOf(DecodeHintType.TRY_HARDER to true)
 
     fun make(invite: String): Bitmap? = runCatching {
-        val code = InviteCode.compact(invite)
+        val code = if (isSecureJoinInvite(invite)) invite.trim() else InviteCode.compact(invite)
         // Ask ZXing for a one-pixel-per-module matrix, including the quiet zone.
         val writer = QRCodeWriter()
         val matrix = writer.encode(code, BarcodeFormat.QR_CODE, 0, 0,

@@ -73,7 +73,7 @@ internal fun InviteScanner(
                     if (active.get() && now - lastScan >= 180L) {
                         lastScan = now
                         val value = runCatching { readCameraQr(frame) }.getOrNull()
-                        if (value != null && !InviteCode.hasPrefix(value.trim())) {
+                        if (value != null && !isContactInviteCode(value)) {
                             main.execute { if (!disposed.get() && active.get()) wrongCode = true }
                         } else if (value != null && active.compareAndSet(true, false)) {
                             main.execute {
@@ -129,7 +129,7 @@ internal fun InviteScanner(
                         Box(Modifier.sizeIn(maxWidth = previewHeight * 0.82f).fillMaxWidth(0.76f).aspectRatio(1f)
                             .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp)))
                     }
-                    Text(if (wrongCode) "That QR code isn’t a P2P invite." else "Looking for a P2P invite…")
+                    Text(if (wrongCode) "That QR code isn’t a contact invite." else "Looking for a contact invite…")
                     Text("Open the large QR on the other phone. Fit the whole code in the frame and tap to focus.")
                     TextButton(onClick = {
                         val target = !torch

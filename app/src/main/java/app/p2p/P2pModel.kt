@@ -398,6 +398,28 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         return service
     }
 
+    internal suspend fun createSecureJoinInvite(): String = withContext(Dispatchers.IO) {
+        awaitInviteAccount()
+        awaitInviteNetwork()
+        val name = requireChatmailName()
+        chatmailLock.withLock {
+            check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
+            connectedChatmail(name).secureJoinInvite()
+        }
+    }
+
+    private suspend fun importSecureJoinInvite(code: String): InviteImportState {
+        awaitInviteAccount()
+        awaitInviteNetwork()
+        val name = requireChatmailName()
+        return chatmailLock.withLock {
+            check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
+            val chat = connectedChatmail(name).join(code)
+            check(chat > 9) { "Chatmail couldn’t open this conversation." }
+            InviteImportState(message = "SecureJoin started. Keep both apps online while they verify the connection.")
+        }
+    }
+
     private suspend fun importChatmailInvite(text: String): InviteImportState {
         val bytes = chatmailInviteBytes(text)
         val signed = JSONObject(bytes.toString(Charsets.UTF_8))
@@ -1308,8 +1330,11 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val code = read()
-                inviteImportState.value = if (nearby == null) importChatmailInvite(code)
-                    else InviteImportState(message = importContactInvite(code, nearby))
+                inviteImportState.value = when {
+                    nearby != null -> InviteImportState(message = importContactInvite(code, nearby))
+                    isSecureJoinInvite(code) -> importSecureJoinInvite(code.trim())
+                    else -> importChatmailInvite(code)
+                }
             } catch (error: CancellationException) {
                 inviteImportState.value = InviteImportState()
                 throw error
@@ -1327,14 +1352,14 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val text = runCatching { InviteImage.read(context, uri) }.getOrElse {
             error("Couldn’t read the QR code. Try a close-up image with the full code visible, or paste the invite.")
         }
-        require(InviteCode.hasPrefix(text.trim())) { "This QR code isn’t a P2P contact invite." }
+        require(isContactInviteCode(text)) { "This QR code isn’t a contact invite." }
         text
     })
 
     fun importInvite(text: String) = submitInvite(read = { text })
 
     fun importScannedInvite(text: String) = submitInvite(read = {
-        require(InviteCode.hasPrefix(text.trim())) { "This QR code isn’t a P2P contact invite." }
+        require(isContactInviteCode(text)) { "This QR code isn’t a contact invite." }
         text
     })
 
