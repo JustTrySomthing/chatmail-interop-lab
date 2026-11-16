@@ -93,8 +93,8 @@
             applied = true;
           }
           if (!applied) {
-            console.log("WEBRTC-WG: holder budget did not apply, filling locally");
-            await allocate();
+            loadingDiv.innerText = "Couldn’t verify WebRTC isolation for this app.";
+            return;
           }
         } else {
           await allocate();

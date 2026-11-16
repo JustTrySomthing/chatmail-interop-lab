@@ -3,12 +3,17 @@ package app.p2p
 import android.annotation.SuppressLint
 import android.net.Uri
 import android.util.Base64
+import android.view.View
 import android.webkit.*
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -93,27 +98,49 @@ internal fun webxdcRequestPath(uri: Uri, host: String): String? {
     return path
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun WebxdcPage(title: String, close: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        val colors = MaterialTheme.colorScheme
-        Surface(Modifier.fillMaxSize(), color = colors.background, contentColor = colors.onBackground) {
-            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
-                TopAppBar(title = { Text(title, maxLines = 1) }, navigationIcon = {
-                    IconButton(onClick = close) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Close $title") }
-                }, colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.surface))
-                content()
-            }
+        WebxdcFrame(title, Modifier.fillMaxSize(), close, content = content)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WebxdcFrame(
+    title: String, modifier: Modifier, back: () -> Unit, close: (() -> Unit)? = null,
+    switchApps: (() -> Unit)? = null, visible: Boolean = true, content: @Composable ColumnScope.() -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(modifier, color = colors.background, contentColor = colors.onBackground) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
+            if (visible) TopAppBar(
+                title = { Text(title, maxLines = 1) },
+                navigationIcon = {
+                    val label = if (close == null) "Close $title" else "Minimize $title"
+                    IconButton(onClick = back) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, label) }
+                },
+                actions = {
+                    if (switchApps != null) IconButton(onClick = switchApps) { Icon(Icons.Outlined.Dashboard, "Open apps") }
+                    if (close != null) IconButton(onClick = close) { Icon(Icons.Outlined.Close, "Close $title") }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.surface)
+            )
+            content()
         }
     }
 }
 
+internal data class WebxdcSession(val thread: String, val id: Int, val file: File, val href: String, val title: String)
+internal const val MAX_OPEN_WEBXDC_APPS = 3
+
 @Composable
 internal fun WebxdcRunner(
-    model: P2pModel, thread: String, id: Int, file: File, href: String, close: () -> Unit,
-    sendDraft: (String, AttachmentDraft?) -> Unit
+    model: P2pModel, session: WebxdcSession, visible: Boolean, hasGuard: Boolean?, minimize: () -> Unit,
+    switchApps: () -> Unit, close: () -> Unit, sendDraft: (String, AttachmentDraft?) -> Unit
 ) {
+    val (thread, id, file, href, title) = session
+    BackHandler(enabled = visible, onBack = minimize)
     var info by remember(id) { mutableStateOf<WebxdcInfo?>(null) }
     var loadError by remember(id) { mutableStateOf<String?>(null) }
     LaunchedEffect(id, file) {
@@ -122,12 +149,13 @@ internal fun WebxdcRunner(
             info = model.openWebxdc(thread, id)
         }
     }
-    WebxdcPage(info?.name ?: "App", close) {
+    val bounds = if (visible) Modifier.fillMaxSize() else Modifier.size(0.dp).clearAndSetSemantics {}
+    WebxdcFrame(info?.name ?: title, bounds, minimize, close, switchApps, visible) {
         val current = info
         when {
             loadError != null -> Text(loadError.orEmpty(), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
-            current == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
-            else -> SandboxedWebxdc(model, thread, id, current, href, close, sendDraft)
+            current == null || hasGuard == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
+            else -> SandboxedWebxdc(model, thread, id, current, href, visible, hasGuard, close, sendDraft)
         }
     }
 }
@@ -135,11 +163,12 @@ internal fun WebxdcRunner(
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun ColumnScope.SandboxedWebxdc(
-    model: P2pModel, thread: String, id: Int, info: WebxdcInfo, href: String, close: () -> Unit,
-    sendDraft: (String, AttachmentDraft?) -> Unit
+    model: P2pModel, thread: String, id: Int, info: WebxdcInfo, href: String,
+    visible: Boolean, hasGuard: Boolean, close: () -> Unit, sendDraft: (String, AttachmentDraft?) -> Unit
 ) {
     val context = LocalContext.current
     val closeAction by rememberUpdatedState(close)
+    val isVisible by rememberUpdatedState(visible)
     val draftAction by rememberUpdatedState(sendDraft)
     val speech = LocalReadAloud.current
     val speechCount = remember(id) { AtomicInteger() }
@@ -162,6 +191,14 @@ private fun ColumnScope.SandboxedWebxdc(
             ?.filter { it.scheme == "content" }?.toTypedArray()
         fileCallback?.onReceiveValue(uris)
         fileCallback = null
+    }
+    LaunchedEffect(href, ready, view) {
+        if (ready && href.startsWith('#') && href.length <= 1_024) {
+            val fragment = JSONObject.quote(href)
+            view?.evaluateJavascript(
+                "(()=>{const app=document.getElementById('frame')?.contentWindow;if(app)app.location.hash=$fragment})()", null
+            )
+        }
     }
     LaunchedEffect(id) {
         delay(35_000)
@@ -192,16 +229,23 @@ private fun ColumnScope.SandboxedWebxdc(
             }
         }
     }
-    DisposableEffect(view, lifecycle) {
+    DisposableEffect(view, lifecycle, visible) {
         val browser = view
         val observer = LifecycleEventObserver { _, event ->
-            if (live.get() && !rendererFailed) when (event) {
+            if (live.get() && visible && !rendererFailed) when (event) {
                 Lifecycle.Event.ON_RESUME -> browser?.onResume()
                 Lifecycle.Event.ON_PAUSE -> browser?.onPause()
                 else -> Unit
             }
         }
-        lifecycle.addObserver(observer)
+        if (visible) lifecycle.addObserver(observer)
+        else {
+            browser?.onPause()
+            browser?.clearFocus()
+            fileCallback?.onReceiveValue(null)
+            fileCallback = null
+            if (speech?.active?.startsWith(speechPrefix) == true) speech.stop()
+        }
         onDispose { lifecycle.removeObserver(observer) }
     }
     if (rendererFailed || startError) {
@@ -264,6 +308,10 @@ private fun ColumnScope.SandboxedWebxdc(
                     override fun onPermissionRequest(request: PermissionRequest) = request.deny()
                     override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>,
                                                    params: FileChooserParams): Boolean {
+                        if (!isVisible) {
+                            callback.onReceiveValue(null)
+                            return true
+                        }
                         fileCallback?.onReceiveValue(null)
                         fileCallback = callback
                         if (runCatching { picker.launch(params.createIntent()) }.isFailure) {
@@ -275,21 +323,23 @@ private fun ColumnScope.SandboxedWebxdc(
                 }
                 val dispatch: (String, AttachmentDraft?) -> Unit = { text, attachment ->
                     web.post {
-                        if (live.get()) draftAction(text, attachment)
+                        if (live.get() && isVisible) draftAction(text, attachment)
                         else attachment?.uri?.path?.let { File(it).delete() }
                     }
                 }
                 web.addJavascriptInterface(WebxdcBridge(model, thread, id, info, context.cacheDir,
                     live, joined, dispatch, speak = { text ->
                         web.post {
-                            if (live.get()) speech?.toggle(speechPrefix + speechCount.incrementAndGet(), text)
+                            if (live.get() && isVisible) speech?.toggle(speechPrefix + speechCount.incrementAndGet(), text)
                         }
                     }), "InternalJSApi")
                 val destination = href.takeIf { it.startsWith('#') && it.length <= 1_024 }.orEmpty()
                 val entry = URLEncoder.encode("https://$host/index.html$destination", Charsets.UTF_8.name())
-                web.loadUrl("https://$host$BOOTSTRAP_PATH?i=0&h=0&href=$entry")
+                val guard = if (hasGuard) 1 else 0
+                web.loadUrl("https://$host$BOOTSTRAP_PATH?i=0&h=$guard&href=$entry")
             }
         },
+        update = { web -> web.visibility = if (visible) View.VISIBLE else View.INVISIBLE },
         onRelease = { web ->
             live.set(false)
             fileCallback?.onReceiveValue(null)

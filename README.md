@@ -53,6 +53,8 @@ Use fresh profiles and record the client versions and networks used. SecureJoin 
 
 The bottom-right button jumps to the newest messages when you are reading older history. Near the bottom it opens **Apps** in writable Chatmail chats and groups. Search **Home**, **Tools**, or **Games**, open an app's details, and use **Add to chat** to attach it to the composer. Send the draft to share an app instance. Use **Open app** on its message to run it.
 
+Use the back arrow to minimize a mini-app and return to the chat. The chat's **Apps** button or the mini-app's **Open apps** button opens the switcher. You can reopen or close a running mini-app there. Up to three mini-apps stay open in the current app session when the shared WebRTC guard is available. Each mini-app still checks its own renderer before it loads. If the shared guard is unavailable, one mini-app can run with its own isolation checks.
+
 The catalog is the same index used by Delta Chat's default Webxdc Store. Relay Lab ships Delta Chat Android v2.69.0's JavaScript API and WebRTC isolation assets and uses Chatmail Core for native Webxdc messages, status updates, and realtime data. Relay Lab hosts each message in its own isolated WebView origin. Motion, camera, microphone, and location permissions are disabled in this preview. Two catalog apps passed offline Core tests. Android WebView isolation, game interaction, and multiplayer sync across installed clients still need device testing.
 
 ## Channels and Read Aloud

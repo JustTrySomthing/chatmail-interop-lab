@@ -273,8 +273,29 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         var sharingChannel by remember { mutableStateOf<ChatmailChannel?>(null) }
         var channelInviteOnly by rememberSaveable { mutableStateOf(false) }
         var thread by rememberSaveable { mutableStateOf<String?>(null) }
-        var webxdcDraftText by rememberSaveable(thread) { mutableStateOf<String?>(null) }
-        var webxdcHref by rememberSaveable { mutableStateOf("") }
+        var webxdcDraftText by rememberSaveable { mutableStateOf<String?>(null) }
+        var webxdcDraftThread by rememberSaveable { mutableStateOf<String?>(null) }
+        val webxdcSessions = remember { mutableStateListOf<WebxdcSession>() }
+        var activeWebxdc by remember { mutableStateOf<Int?>(null) }
+        val hasWebxdcSessions = webxdcSessions.isNotEmpty()
+        val guard = remember(hasWebxdcSessions) {
+            if (hasWebxdcSessions) WebxdcNetworkGuard(context) else null
+        }
+        var webxdcGuardConfirmed by remember(guard) { mutableStateOf<Boolean?>(null) }
+        LaunchedEffect(guard) {
+            if (guard != null) webxdcGuardConfirmed = try {
+                guard.start {
+                    webxdcSessions.clear()
+                    activeWebxdc = null
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                guard.close()
+                false
+            }
+        }
+        DisposableEffect(guard) { onDispose { guard?.close() } }
         var threadView by rememberSaveable { mutableStateOf(Feed) }
         var threadQuery by rememberSaveable(thread) { mutableStateOf("") }
         var quote by rememberSaveable { mutableStateOf<String?>(null) }
@@ -586,6 +607,14 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         fun blocked(id: String): Boolean =
             contacts.firstOrNull { it.key == id }?.data()?.optBoolean("blocked") == true ||
                 threadPreferences[id]?.optBoolean("blocked") == true
+        LaunchedEffect(records, threadPreferences, hasWebxdcSessions) {
+            if (!hasWebxdcSessions) return@LaunchedEffect
+            webxdcSessions.removeAll { session ->
+                blocked(session.thread) || records.firstOrNull { it.key == nativeMessageKey(session.id) }
+                    ?.data()?.optBoolean("locallyDeleted") == true
+            }
+            if (activeWebxdc != null && webxdcSessions.none { it.id == activeWebxdc }) activeWebxdc = null
+        }
         fun showAction(id: String, choice: ThreadAction) {
             selected = id
             action = choice
@@ -832,8 +861,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             if (fullPage == FullPageRoute.Updates) updates.dismissPrompt()
             modal = if (fullPage in setOf(FullPageRoute.Settings, FullPageRoute.Contacts)) null else "settings"
         }
-        BackHandler(thread != null || modal != null || (area == Area.Social && (legacySocial || channelId != null))) {
+        val webxdcVisible = activeWebxdc != null && !showTalkCall && modal == null
+        BackHandler(thread != null || modal != null || webxdcVisible || (area == Area.Social && (legacySocial || channelId != null))) {
             when {
+                webxdcVisible -> activeWebxdc = null
                 fullPage != null -> closeFullPage()
                 modal != null -> modal = null
                 area == Area.Social && legacySocial -> legacySocial = false
@@ -844,6 +875,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         }
         CompositionLocalProvider(LocalMediaDownload provides ::showDownload) {
         Box(Modifier.fillMaxSize().background(Panel)
+            .then(if (webxdcVisible) Modifier.clearAndSetSemantics {} else Modifier)
             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))) {
         AppBackground(Modifier.matchParentSize())
         if (fullPage != null) {
@@ -1154,7 +1186,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             file = ::showAttachment,
                             openApps = if (conversation?.optInt("nativeChat")?.let { it > 9 } == true &&
                                 conversation.optBoolean("nativeCanSend") && !conversation.optBoolean("contactRequest") && !blocked(id)) {
-                                { inlineAudio?.value = null; modal = "webxdc-catalog" }
+                                {
+                                    inlineAudio?.value = null
+                                    modal = if (hasWebxdcSessions) "webxdc-sessions" else "webxdc-catalog"
+                                }
                             } else null,
                             openWebxdc = { message ->
                                 val data = message.data()
@@ -1165,17 +1200,39 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                     app.data().optBoolean("locallyDeleted")) {
                                     downloadScope.launch { snack.showSnackbar("Load the original app message to open it.") }
                                 } else if (app.data().optString("state") != "Downloading") {
-                                    if (model.galleryFile(app) == null) model.requestDownload(app.key)
-                                    else {
+                                    val local = model.galleryFile(app)
+                                    val appId = app.data().optInt("nativeMessage")
+                                    if (local == null) model.requestDownload(app.key)
+                                    else if (appId > 9) {
                                         inlineAudio?.value = null
-                                        selected = app.key
-                                        webxdcHref = data.optString("webxdcHref")
-                                        modal = "webxdc-app"
+                                        val href = data.optString("webxdcHref")
+                                        val index = webxdcSessions.indexOfFirst { it.id == appId }
+                                        when {
+                                            index >= 0 -> {
+                                                if (href.isNotEmpty()) webxdcSessions[index] = webxdcSessions[index].copy(href = href)
+                                                activeWebxdc = appId
+                                                modal = null
+                                            }
+                                            webxdcSessions.size >= MAX_OPEN_WEBXDC_APPS ||
+                                                (hasWebxdcSessions && webxdcGuardConfirmed != true) -> {
+                                                modal = "webxdc-sessions"
+                                                downloadScope.launch { snack.showSnackbar("Close an open app before opening another.") }
+                                            }
+                                            else -> {
+                                                val title = app.data().optString("name").substringBeforeLast('.').ifBlank { "App" }
+                                                webxdcSessions.add(WebxdcSession(id, appId, local, href, title))
+                                                activeWebxdc = appId
+                                                modal = null
+                                            }
+                                        }
                                     }
                                 }
                             },
-                            draftText = webxdcDraftText,
-                            consumeDraftText = { webxdcDraftText = null }
+                            draftText = webxdcDraftText.takeIf { webxdcDraftThread == id },
+                            consumeDraftText = {
+                                webxdcDraftText = null
+                                webxdcDraftThread = null
+                            }
                         )
                     }
                     area == Area.Chats || area == Area.Groups -> {
@@ -1962,20 +2019,21 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     } else it.uri.path?.let { path -> File(path).delete() }
                 })
             }
-            "webxdc-app" -> thread?.let { target ->
-                val record = records.firstOrNull { it.key == selected &&
-                    it.data().optString("thread") == target && it.data().optBoolean("webxdc") }
-                val local = record?.let(model::galleryFile)
-                val appId = record?.data()?.optInt("nativeMessage") ?: 0
-                if (local != null && appId > 9) {
-                    WebxdcRunner(model, target, appId, local, webxdcHref, close = { modal = null }) { text, attachment ->
-                        if (thread == target && !blocked(target)) {
-                            attachment?.let { addDraft(target, listOf(it)) }
-                            if (text.isNotBlank()) webxdcDraftText = text
-                            modal = null
-                        } else attachment?.uri?.path?.let { File(it).delete() }
+            "webxdc-sessions" -> Sheet("Open apps", { modal = null }) {
+                if (webxdcSessions.isEmpty()) Text("No apps open")
+                webxdcSessions.toList().forEach { session ->
+                    P2pRow(session.title, name(session.thread), Icons.Outlined.GridView, trailing = {
+                        IconButton(onClick = {
+                            webxdcSessions.removeAll { it.id == session.id }
+                            if (activeWebxdc == session.id) activeWebxdc = null
+                        }) { Icon(Icons.Outlined.Close, "Close ${session.title}") }
+                    }) {
+                        activeWebxdc = session.id
+                        inlineAudio?.value = null
+                        modal = null
                     }
-                } else LaunchedEffect(selected) { modal = null }
+                }
+                if (thread != null) P2pTextButton(onClick = { modal = "webxdc-catalog" }) { Text("Browse apps") }
             }
             "group-info" -> groups.firstOrNull { it.key == thread }?.let { group ->
                 val chat = group.data().optInt("nativeChat")
@@ -2285,6 +2343,32 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             Text(if (data.optBoolean("star")) "Remove star" else "Star attachment")
                         }
                     }
+                }
+            }
+        }
+        webxdcSessions.toList().forEach { session ->
+            key(session.id) {
+                fun closeApp() {
+                    webxdcSessions.removeAll { it.id == session.id }
+                    if (activeWebxdc == session.id) activeWebxdc = null
+                }
+                WebxdcRunner(model, session, visible = webxdcVisible && activeWebxdc == session.id,
+                    hasGuard = webxdcGuardConfirmed, minimize = { activeWebxdc = null },
+                    switchApps = { modal = "webxdc-sessions" }, close = ::closeApp) { text, attachment ->
+                    val target = session.thread
+                    val conversation = records.firstOrNull { it.key == target }
+                    if (conversation != null && !blocked(target) && activeWebxdc == session.id) {
+                        if (thread != target) {
+                            goArea(if (conversation.kind == "group") Area.Groups else Area.Chats)
+                            goThread(target)
+                        }
+                        attachment?.let { addDraft(target, listOf(it)) }
+                        if (text.isNotBlank()) {
+                            webxdcDraftThread = target
+                            webxdcDraftText = text
+                        }
+                        closeApp()
+                    } else attachment?.uri?.path?.let { File(it).delete() }
                 }
             }
         }
