@@ -42,7 +42,7 @@
     "app/src/main/java/app/p2p/InviteScanner.kt": "7d7250492d75e522c4173a2790d95705628a550ec0bb936da17bc9add277920c",
     "app/src/main/java/app/p2p/LinkPreviews.kt": "0d78b1dc90a636f0e760ae1cec16f3abf81458fb5a91724f9e13519797d13c23",
     "app/src/main/java/app/p2p/LocalAlerts.kt": "12d772a837524f839eae0764a162580735a409ccb17407db32a11e12ef93ed65",
-    "app/src/main/java/app/p2p/MainActivity.kt": "cd46c0bb7d42fff4c620a292f9c5c1e0091dc730eb5ee1be603b194c3cef2dc7",
+    "app/src/main/java/app/p2p/MainActivity.kt": "c4bece61c82cb5f9bd0f02b3d664fd75efb52cdb5389bcf16a338f5dc29fb63d",
     "app/src/main/java/app/p2p/MediaDownloads.kt": "a0ede76ed67a3af7ce98f654972796d1f30a36450d55d16e4196b28b44854229",
     "app/src/main/java/app/p2p/MessageMedia.kt": "6541cae9137c1af4aac9460fae3212cbcba6a7768a0b0b757dc46775d4190306",
     "app/src/main/java/app/p2p/NativeCrashTrace.kt": "ed334dbb470bce1e74ff3809a41d87bf89cd9da6116e085aca451311c5983750",
