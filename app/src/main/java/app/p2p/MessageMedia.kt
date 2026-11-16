@@ -87,7 +87,8 @@ internal fun EmojiPicker(modifier: Modifier, insert: (String) -> Unit, close: ()
 internal fun mediaThumbnail(file: File?, kind: MediaKind?): Bitmap? {
     val thumbnail by produceState<Bitmap?>(null, file, kind) {
         value = null
-        value = if (file == null || kind == null || kind == MediaKind.Audio) null else withContext(Dispatchers.IO) {
+        value = if (file == null || kind == null || kind == MediaKind.Audio || kind == MediaKind.Svg ||
+            kind == MediaKind.Tgs) null else withContext(Dispatchers.IO) {
             runCatching {
                 if (kind == MediaKind.Video) {
                     runCatching { ThumbnailUtils.createVideoThumbnail(file, Size(480, 480), null) }.getOrNull()

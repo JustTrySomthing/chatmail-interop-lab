@@ -84,6 +84,7 @@ dependencies {
     implementation("androidx.room:room-ktx:2.7.1")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("com.google.zxing:core:3.5.3")
+    implementation("com.airbnb.android:lottie:6.6.7")
     implementation("androidx.media3:media3-transformer:1.6.1")
     implementation("androidx.media3:media3-effect:1.6.1")
     implementation("androidx.media3:media3-exoplayer:1.6.1")

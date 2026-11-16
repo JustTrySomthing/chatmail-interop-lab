@@ -240,14 +240,18 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         }
         if (!setupComplete || profile.isBlank()) {
             val restoring by model.backupBusy.collectAsState()
+            var receivingProfile by rememberSaveable { mutableStateOf(false) }
             val restore = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                 if (uri != null) model.importChatmailProfile(uri)
             }
             Box(Modifier.fillMaxSize()) {
                 FirstRunSetup(profile, model::setName, restoreBackup = { restore.launch(arrayOf("*/*")) },
-                    restoringBackup = restoring) {
+                    restoringBackup = restoring, receiveProfile = { receivingProfile = true }) {
                     setup.edit().putBoolean("complete", true).apply()
                     setupComplete = true
+                }
+                if (receivingProfile && profile.isBlank()) {
+                    ReceiveProfileDialog(model, close = { receivingProfile = false })
                 }
                 SnackbarHost(snack, Modifier.align(Alignment.TopCenter).statusBarsPadding())
             }
@@ -918,6 +922,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         }) { Text("Copy address") }
                     }
                     FullPageRoute.Backup -> {
+                        P2pRow("Add second device", "Show a QR code for your other device", Icons.Outlined.QrCode,
+                            enabled = !backupBusy) { modal = "send-profile" }
                         Text("Chatmail backup", style = MaterialTheme.typography.titleMedium)
                         Text("Export your Chatmail profile, conversations and media. The file contains private keys and messages. Store it somewhere private.")
                         Button(onClick = { exportChatmailBackup.launch("Relay-Lab-Chatmail-backup.tar") },
@@ -1898,6 +1904,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 confirmButton = { P2pTextButton(onClick = { model.emptyTrash(area == Area.Groups); modal = null }) { Text("Empty trash") } },
                 dismissButton = { P2pTextButton(onClick = { modal = null }) { Text("Cancel") } }
             )
+            "send-profile" -> SendProfileDialog(model) { modal = "backup" }
             "save-password" -> InputDialog("Create encrypted backup", "Backup password (12+ characters)", "Choose where to save",
                 "", { modal = "backup" }, password = true, confirmPassword = true) { value ->
                 model.prepareBackupPicker(value.toCharArray())
@@ -2758,7 +2765,7 @@ private fun ColumnScope.ShareInvite(code: String, target: InviteTarget, profile:
 }
 
 @Composable
-private fun InviteQr(bitmap: Bitmap, label: String, modifier: Modifier) {
+internal fun InviteQr(bitmap: Bitmap, label: String, modifier: Modifier) {
     val image = remember(bitmap) { bitmap.asImageBitmap() }
     Canvas(modifier.background(Color.White).semantics { contentDescription = label }) {
         val pixels = minOf(size.width, size.height).toInt()
@@ -3223,7 +3230,9 @@ internal fun ChatAttachment(
     }
     if (inlineAnimation) {
         Box(Modifier.combinedClickable(onClickLabel = "Open $animation", onClick = open,
-            onLongClickLabel = onLongClickLabel, onLongClick = longPress)) { InlineAnimatedImage(local, label) }
+            onLongClickLabel = onLongClickLabel, onLongClick = longPress)) {
+            if (kind == MediaKind.Tgs) AnimatedSticker(local, label) else InlineAnimatedImage(local, label)
+        }
     }
     if (thumbnail != null) {
         Image(thumbnail.asImageBitmap(), label, Modifier.widthIn(max = if (usePlaybackPoster) 420.dp else 260.dp).fillMaxWidth()
@@ -3240,7 +3249,7 @@ internal fun ChatAttachment(
         val icon = when (kind) {
             MediaKind.Audio -> Icons.Outlined.AudioFile
             MediaKind.Video -> Icons.Outlined.VideoFile
-            MediaKind.Photo, MediaKind.Gif, MediaKind.AnimatedWebP -> Icons.Outlined.Image
+            MediaKind.Photo, MediaKind.Svg, MediaKind.Gif, MediaKind.AnimatedWebP, MediaKind.Tgs -> Icons.Outlined.Image
             null -> Icons.AutoMirrored.Outlined.InsertDriveFile
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,

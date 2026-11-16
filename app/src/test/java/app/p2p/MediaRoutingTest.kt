@@ -31,8 +31,27 @@ class MediaRoutingTest {
         assertEquals(MediaKind.Video, mediaKind("application/ogg", "Video.ogv"))
         assertEquals(MediaKind.Audio, mediaKind("application/mp4", "Recording.m4a"))
         assertNull(mediaKind("application/pdf", "Document.mp4"))
-        assertNull(mediaKind("image/svg+xml", "Logo.svg"))
+        assertEquals(MediaKind.Svg, mediaKind("image/svg+xml", "Logo.svg"))
+        assertEquals(MediaKind.Tgs, mediaKind("application/octet-stream", "Sticker.tgs"))
+        assertEquals("Sticker", chatmailAttachmentViewType("application/x-tgsticker", false))
         assertNull(mediaKind("application/vnd.android.package-archive", "App.apk"))
+    }
+
+    @Test
+    fun readsBoundedTelegramStickerAnimations() {
+        val file = java.io.File.createTempFile("relay-sticker", ".tgs")
+        try {
+            val json = """{"v":"5.7.4","fr":60,"ip":0,"op":60,"w":512,"h":512,"layers":[]}"""
+            java.util.zip.GZIPOutputStream(file.outputStream()).use { it.write(json.toByteArray()) }
+            val sticker = decodeAnimatedSticker(file)
+            assertEquals(60f, sticker.frameRate, 0.01f)
+            assertEquals("application/x-tgsticker", MediaDownload("Sticker.tgs", "application/octet-stream").contentType)
+            assertEquals("Download image", MediaDownload("Vector.svg", "image/svg+xml").title)
+            file.writeText(json)
+            assertThrows(java.util.zip.ZipException::class.java) { decodeAnimatedSticker(file) }
+        } finally {
+            file.delete()
+        }
     }
 
     @Test

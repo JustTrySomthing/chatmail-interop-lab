@@ -139,6 +139,7 @@ internal fun chatmailAttachmentViewType(
 ): String = when {
     mime == WEBXDC_MIME || name.endsWith(".xdc", ignoreCase = true) -> "Webxdc"
     asFile -> "File"
+    isTgsSticker(mime, name) -> "Sticker"
     voicemail && mime.startsWith("audio/") -> "Voice"
     mime == "image/gif" -> "Gif"
     mime.startsWith("image/") -> "Image"

@@ -218,6 +218,15 @@ class ChatmailTest {
     }
 
     @Test
+    fun secondDeviceQrIsRoutedSeparatelyFromContactInvites() {
+        assertTrue(isProfileTransferQr(" DCBACKUP5:test-token&test-node "))
+        assertFalse(isSupportedInviteCode("DCBACKUP5:test-token&test-node"))
+        assertFalse(isProfileTransferQr("DCBACKUP5:"))
+        assertFalse(isProfileTransferQr("DCBACKUP5:has embedded spaces"))
+        assertFalse(isProfileTransferQr("OPENPGP4FPR:0123456789012345678901234567890123456789"))
+    }
+
+    @Test
     fun savedMessagesKeepsASelfChatDistinctFromOtherContacts() {
         val raw = obj("id" to 12, "name" to "Saved Messages", "chatType" to "Single", "isEncrypted" to true,
             "contactIds" to JSONArray(listOf(1)), "canSend" to true, "isSelfTalk" to true)

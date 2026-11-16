@@ -329,6 +329,17 @@ internal class Chatmail(directory: File) : AutoCloseable {
         if (description != null) updateChatDescription(id, description)
     }
 
+    fun provideProfileTransfer() { call("provide_backup") }
+    fun profileTransferQr(): String = call("get_backup_qr") as String
+    fun stopProfileTransfer() { call("stop_ongoing_process") }
+
+    fun receiveProfileTransfer(code: String) {
+        require(inviteKind(code).equals("backup2", ignoreCase = true)) {
+            "Scan an Add Second Device QR code."
+        }
+        call("get_backup", code)
+    }
+
     fun exportProfileBackup(directory: File) { call("export_backup", directory.absolutePath, null) }
     fun importProfileBackup(archive: File) { call("import_backup", archive.absolutePath, null) }
     fun profileName(): String = call("get_config", "displayname").takeUnless { it == JSONObject.NULL }?.toString().orEmpty()

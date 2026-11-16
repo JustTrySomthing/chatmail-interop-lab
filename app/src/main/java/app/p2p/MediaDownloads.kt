@@ -45,7 +45,8 @@ internal data class MediaDownload(
         }
 
     val title get() = when (mediaKind(mime, name)) {
-        MediaKind.Photo, MediaKind.Gif, MediaKind.AnimatedWebP -> "Download image"
+        MediaKind.Photo, MediaKind.Svg, MediaKind.Gif, MediaKind.AnimatedWebP -> "Download image"
+        MediaKind.Tgs -> "Download sticker"
         MediaKind.Audio -> "Download audio"
         MediaKind.Video -> "Download video"
         null -> "Download file"
@@ -58,6 +59,8 @@ internal data class MediaDownload(
                 declared != "application/octet-stream") return declared
             val extension = name.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
             if (extension == "opus") return "audio/ogg"
+            if (extension == "tgs") return "application/x-tgsticker"
+            if (extension == "svg") return "image/svg+xml"
             return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
         }
 

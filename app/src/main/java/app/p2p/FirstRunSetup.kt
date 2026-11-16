@@ -44,6 +44,7 @@ internal fun FirstRunSetup(
     back: (() -> Unit)? = null,
     restoreBackup: (() -> Unit)? = null,
     restoringBackup: Boolean = false,
+    receiveProfile: (() -> Unit)? = null,
     finish: () -> Unit
 ) {
     val context = LocalContext.current
@@ -145,6 +146,9 @@ internal fun FirstRunSetup(
                         }
                         if (name.isBlank() && restoreBackup != null) {
                             P2pTextButton(onClick = restoreBackup, enabled = !busy) { Text("Restore Chatmail backup") }
+                            receiveProfile?.let { action ->
+                                P2pTextButton(onClick = action, enabled = !busy) { Text("Add as second device") }
+                            }
                             if (restoringBackup) LinearProgressIndicator(Modifier.fillMaxWidth())
                         }
                     } else {

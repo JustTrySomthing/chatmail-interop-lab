@@ -1335,36 +1335,63 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         Unit
     }
 
-    internal fun importChatmailProfile(source: Uri) = work {
-        check(backupWorking.compareAndSet(false, true)) { "A backup operation is already running." }
-        try {
-            recoveryLock.withLock {
-                check(records.get("profile")?.data()?.optString("name").isNullOrBlank()) {
-                    "Restore a Chatmail backup during setup on a fresh install."
-                }
-                val directory = java.nio.file.Files.createTempDirectory(context.cacheDir.toPath(), "chatmail-import-").toFile()
-                try {
-                    val staged = File(directory, "chatmail-backup.tar")
-                    checkNotNull(context.contentResolver.openInputStream(source)) { "Couldn’t open the backup." }
-                        .use { input -> staged.outputStream().use { output -> input.copyTo(output) } }
+    private suspend fun restoreFreshChatmailProfile(restore: suspend (Chatmail) -> Unit) =
+        withContext(Dispatchers.IO) {
+            check(backupWorking.compareAndSet(false, true)) { "A backup operation is already running." }
+            try {
+                recoveryLock.withLock {
                     chatmailLock.withLock {
                         check(records.get("profile")?.data()?.optString("name").isNullOrBlank()) {
-                            "Restore a Chatmail backup before creating a profile."
+                            "Restore a Chatmail profile before creating one on this install."
                         }
                         val root = File(context.noBackupFilesDir, "chatmail")
                         val core = chatmail ?: openChatmail(root).also { chatmail = it }
                         check(!core.isConfigured()) { "A Chatmail profile is already set up on this install." }
-                        core.importProfileBackup(staged)
+                        restore(core)
                         val name = core.profileName().trim().take(60).ifBlank { "Chatmail profile" }
                         save("profile", "profile", obj("name" to name))
                         nextChatmailConnect = 0L
                         nextNativeSync = 0L
                     }
-                } finally {
-                    directory.deleteRecursively()
                 }
+                notice.value = "Chatmail profile restored."
+            } finally {
+                backupWorking.value = false
             }
-            notice.value = "Chatmail profile restored."
+        }
+
+    internal fun importChatmailProfile(source: Uri) = work {
+        restoreFreshChatmailProfile { core ->
+            val directory = java.nio.file.Files.createTempDirectory(context.cacheDir.toPath(), "chatmail-import-").toFile()
+            try {
+                val staged = File(directory, "chatmail-backup.tar")
+                checkNotNull(context.contentResolver.openInputStream(source)) { "Couldn’t open the backup." }
+                    .use { input -> staged.outputStream().use { output -> input.copyTo(output) } }
+                core.importProfileBackup(staged)
+            } finally {
+                directory.deleteRecursively()
+            }
+        }
+    }
+
+    internal suspend fun receiveChatmailProfile(code: String) {
+        require(isProfileTransferQr(code)) { "Scan an Add Second Device QR code." }
+        awaitInviteNetwork()
+        restoreFreshChatmailProfile { core ->
+            runProfileTransfer(core, transfer = { core.receiveProfileTransfer(code.trim()) })
+        }
+    }
+
+    internal suspend fun shareChatmailProfile(onQr: suspend (String) -> Unit) {
+        check(backupWorking.compareAndSet(false, true)) { "A backup operation is already running." }
+        try {
+            withChatmail(requireNetwork = true) { core ->
+                check(talk.state.value?.phase.let { it == null || it == TalkPhase.Finished }) {
+                    "End your call before starting a profile transfer."
+                }
+                runProfileTransfer(core, transfer = core::provideProfileTransfer,
+                    untilReady = { onQr(core.profileTransferQr()) })
+            }
         } finally {
             backupWorking.value = false
         }

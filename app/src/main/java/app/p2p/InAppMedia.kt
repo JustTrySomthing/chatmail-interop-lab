@@ -62,7 +62,7 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 internal enum class MediaKind(val animationLabel: String? = null) {
-    Audio, Video, Photo, Gif("GIF"), AnimatedWebP("WebP")
+    Audio, Video, Photo, Svg, Gif("GIF"), AnimatedWebP("WebP"), Tgs("sticker")
 }
 
 internal fun isAnimatedWebP(file: File): Boolean = try {
@@ -88,7 +88,8 @@ internal fun mediaKind(mime: String, name: String, local: File? = null): MediaKi
     val type = mime.substringBefore(';').trim().lowercase(Locale.ROOT)
     val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
     val kind = when {
-        type == "image/svg+xml" || extension == "svg" -> null
+        type == "image/svg+xml" || extension == "svg" -> MediaKind.Svg
+        isTgsSticker(type, name) -> MediaKind.Tgs
         type.startsWith("video/") -> MediaKind.Video
         type.startsWith("audio/") -> MediaKind.Audio
         type == "image/gif" -> MediaKind.Gif
@@ -153,6 +154,12 @@ internal fun MediaDialog(
                                 LocalPlayer(page.file, page.kind == MediaKind.Video, save)
                             }
                             MediaKind.Photo -> ZoomPhoto(page.file, page.title, save)
+                            MediaKind.Svg -> if (index == pager.settledPage) {
+                                SvgImage(page.file, page.title)
+                            }
+                            MediaKind.Tgs -> if (index == pager.settledPage) {
+                                AnimatedSticker(page.file, page.title, fullScreen = true)
+                            }
                             MediaKind.Gif, MediaKind.AnimatedWebP -> if (index == pager.settledPage) {
                                 InlineAnimatedImage(page.file, page.title, fullScreen = true)
                             }

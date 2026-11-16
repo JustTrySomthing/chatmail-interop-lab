@@ -34,11 +34,11 @@ Use the shared Chatmail Core adapter for both Delta Chat and ArcaneChat. Chats, 
 
 ## Chatmail controls and recovery
 
-Long-press a message for editing, deletion for everyone, shared pinning, and saving to Saved Messages. Open Saved Messages from **Start a chat**. Tap the conversation title for Chat options. Groups include Chat options inside Group info. Chat options has the disappearing-message timer and the shared pin list. Long-press a message containing a point location to open it in a maps app. Chats render basic inline Markdown formatting.
+Long-press a message for editing, deletion for everyone, shared pinning, and saving to Saved Messages. Open Saved Messages from **Start a chat**. Tap the conversation title for Chat options. Groups include Chat options inside Group info. Chat options has the disappearing-message timer and the shared pin list. Long-press a message containing a point location to open it in a maps app. Chats render basic inline Markdown formatting and loop Telegram TGS stickers. SVG attachments open in the media viewer.
 
 In Group info, choose or remove a group photo. On a channel post, use the emoji button to send or remove your reaction. The Chatmail contact list shows the day a contact was last seen when Core reports it.
 
-In **Settings → Backup**, export a standard Chatmail archive that includes the profile and its history. It contains private keys and messages, so keep it in private storage. Choose **Restore Chatmail backup** during setup on a fresh install to import an archive. Existing installations retain their profile and use the existing P2P backup controls for earlier P2P data. Profile switching and QR-based second-device transfer are pending.
+In **Settings → Backup**, export a standard Chatmail archive that includes the profile and its history. It contains private keys and messages, so keep it in private storage. Choose **Restore Chatmail backup** during setup on a fresh install to import an archive. Existing installations retain their profile and use the existing P2P backup controls for earlier P2P data. For a QR transfer, open **Settings → Backup → Add second device** on the original device. On a fresh Relay Lab install, choose **Add as second device** during setup and scan the code on the same network. Standard Chatmail Core QR transfers still need a cross-client device test. Profile switching is pending.
 
 ## Device test status
 
