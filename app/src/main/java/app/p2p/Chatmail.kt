@@ -50,7 +50,9 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     private fun call(method: String, vararg params: Any?): Any = rpc(method, account, *params)
 
-    fun listenForEvents(onMessagesChanged: (Set<Int>) -> Unit, onCall: (ChatmailCallEvent) -> Unit) {
+    fun listenForEvents(
+        onMessagesChanged: (Set<Int>) -> Unit, onWebxdc: (JSONObject) -> Unit, onCall: (ChatmailCallEvent) -> Unit
+    ) {
         synchronized(eventLock) {
             if (readingEvents || closing) return
             readingEvents = true
@@ -70,6 +72,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
                             messagesChanged = true
                             event.optInt("msgId", event.optInt("msg_id")).takeIf { it > 9 }?.let(updatedMessages::add)
                         }
+                        if (event.optString("kind") in WEBXDC_EVENTS) onWebxdc(event)
                         readChatmailCallEvent(event)?.let(onCall)
                     }
                     if (messagesChanged && synchronized(eventLock) { !closing }) onMessagesChanged(updatedMessages)
@@ -243,8 +246,8 @@ internal class Chatmail(directory: File) : AutoCloseable {
         val all = messageIds(chat)
         val window = chatmailHistoryWindow(all, limit, before, after, cached)
         val ids = all.subList(window.first, window.last + 1)
-        val rows = messageRows(ids).mapNotNull { readNativeMessage(it, chat) }
-        return NativeHistory(rows.toList(), ids.firstOrNull(), ids.lastOrNull(), window.first > 0, all.toSet())
+        val rows = nativeRows(chat, ids)
+        return NativeHistory(rows, ids.firstOrNull(), ids.lastOrNull(), window.first > 0, all.toSet())
     }
 
     fun nativeSend(chat: Int, text: String, quote: Int?, file: File? = null,
@@ -253,8 +256,19 @@ internal class Chatmail(directory: File) : AutoCloseable {
         return sendMessage(chat, text, quote, file, name, viewType)
     }
 
-    fun nativeMessage(chat: Int, id: Int): NativeMessage? =
-        messageRows(listOf(id)).firstOrNull()?.let { readNativeMessage(it, chat) }
+    fun nativeMessage(chat: Int, id: Int): NativeMessage? = nativeRows(chat, listOf(id)).firstOrNull()
+
+    private fun nativeRows(chat: Int, ids: List<Int>): List<NativeMessage> {
+        val rows = messageRows(ids).toList()
+        val parents = rows.asSequence().filter { it.optBoolean("isInfo") && it.optString("systemMessageType") == "WebxdcInfoMessage" }
+            .map { it.optInt("parentId") }.filter { it > 9 }.distinct().toList()
+        val apps = messageRows(parents).filter {
+            isEncryptedChatmailMessage(it, chat) && it.optString("viewType") == "Webxdc"
+        }.map { it.getInt("id") }.toSet()
+        return rows.mapNotNull { readNativeMessage(it, chat, it.optInt("parentId").takeIf { id ->
+            id in apps && it.optBoolean("isInfo")
+        }) }
+    }
 
     fun nativeReact(id: Int, emoji: String) { call("send_reaction", id, JSONArray(listOf(emoji))) }
 
@@ -326,6 +340,15 @@ internal class Chatmail(directory: File) : AutoCloseable {
         check(message.optString("kind") == "message") { "Chatmail message state is unavailable." }
         if (isPendingChatmailSend(message, chat, transfer)) call("delete_messages", JSONArray(listOf(id)))
     }
+
+    fun webxdcInfo(id: Int): JSONObject = (call("get_webxdc_info", id) as JSONObject)
+        .put("selfName", displayName ?: (call("get_config", "displayname") as? String).orEmpty())
+    fun webxdcBlob(id: Int, path: String): String = call("get_webxdc_blob", id, path) as String
+    fun webxdcUpdates(id: Int, after: Int): String = call("get_webxdc_status_updates", id, after) as String
+    fun webxdcUpdate(id: Int, update: String) { call("send_webxdc_status_update", id, update, null) }
+    fun webxdcAdvertise(id: Int) { call("send_webxdc_realtime_advertisement", id) }
+    fun webxdcSendRealtime(id: Int, bytes: JSONArray) { call("send_webxdc_realtime_data", id, bytes) }
+    fun webxdcLeave(id: Int) { call("leave_webxdc_realtime", id) }
 
     fun download(id: Int) { call("download_full_message", id) }
 

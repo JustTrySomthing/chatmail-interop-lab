@@ -39,6 +39,12 @@ Use fresh profiles and record the client versions and networks used. SecureJoin 
 | Delta Chat | Device test pending | Device test pending | Device test pending | Device test pending |
 | ArcaneChat | Device test pending | Device test pending | Device test pending | Device test pending |
 
+## Webxdc apps in chats and groups
+
+The bottom-right button jumps to the newest messages when you are reading older history. Near the bottom it opens **Apps** in writable Chatmail chats and groups. Search **Home**, **Tools**, or **Games**, open an app's details, and use **Add to chat** to attach it to the composer. Send the draft to share an app instance. Use **Open app** on its message to run it.
+
+The catalog is the same index used by Delta Chat's default Webxdc Store. Relay Lab ships Delta Chat Android v2.69.0's JavaScript API and WebRTC isolation assets and uses Chatmail Core for native Webxdc messages, status updates, and realtime data. Relay Lab hosts each message in its own isolated WebView origin. Motion, camera, microphone, and location permissions are disabled in this preview. Two catalog apps passed offline Core tests. Android WebView isolation, game interaction, and multiplayer sync across installed clients still need device testing.
+
 ## Channels and Read Aloud
 
 **Channels → Feed** shows recent posts from joined channels, newest first. **Following** opens an individual channel or joins a standard Chatmail broadcast from a QR code, an image, or an invite link. **My Channels** lists the channels owned by your profile, with pinned channels first. Use **Create a Channel** to add another. Open a channel to see its posts and share its invite, or use the pencil to edit its name and description. Open **Write a post** to compose in the bottom sheet. **Add media** attaches images, audio, or video with an optional caption, and the shared emoji picker inserts standard Unicode text. Relay Lab uses standard Chatmail posts and sends each selected attachment as its own post, with the caption on the first. Images and video show previews, links show cards, and audio plays directly in the channel, chat, or group. Existing Social content is reachable through **Previous Social posts**.

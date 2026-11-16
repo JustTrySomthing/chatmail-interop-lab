@@ -31,7 +31,8 @@ internal data class NativeMessage(
     val id: Int, val from: Int, val text: String, val time: Long, val state: Int, val quote: Int?,
     val quoteText: String, val quoteAuthor: String, val senderName: String,
     val attachment: ChatmailAttachment?,
-    val reactions: Map<Int, List<String>>
+    val reactions: Map<Int, List<String>>,
+    val webxdcParent: Int? = null, val webxdcHref: String? = null
 )
 
 internal data class ChatmailAttachment(
@@ -40,6 +41,7 @@ internal data class ChatmailAttachment(
 ) {
     fun displayData(local: File?) = obj(
         "name" to name, "mime" to mime, "size" to size, "listed" to (viewType == "File"),
+        "webxdc" to (viewType == "Webxdc"),
         "state" to when {
             local != null || downloadState == "Done" -> "Complete"
             downloadState == "InProgress" -> "Downloading"
@@ -54,11 +56,12 @@ internal fun readChatmailAttachment(row: JSONObject): ChatmailAttachment? {
     val path = row.optString("file").takeUnless { it.isBlank() || row.isNull("file") }
     val name = row.optString("fileName").takeUnless { row.isNull("fileName") }.orEmpty()
     val viewType = row.optString("viewType")
-    if (path == null && name.isBlank() && viewType !in setOf("Image", "Gif", "Sticker", "Audio", "Voice", "Video", "File")) {
+    if (path == null && name.isBlank() && viewType !in setOf("Image", "Gif", "Sticker", "Audio", "Voice", "Video", "File", "Webxdc")) {
         return null
     }
     val mime = row.optString("fileMime").takeUnless { row.isNull("fileMime") }.orEmpty().ifBlank {
         when (viewType) {
+            "Webxdc" -> WEBXDC_MIME
             "Gif" -> "image/gif"
             "Image", "Sticker" -> "image/*"
             "Audio", "Voice" -> "audio/*"
@@ -105,8 +108,11 @@ internal fun Collection<Record>.removedChatmailMessages(thread: String, existing
     id > 9 && data.optString("thread") == thread && id !in existingIds
 }
 
-internal fun readNativeMessage(row: JSONObject, chat: Int): NativeMessage? {
-    if (!isEncryptedChatmailMessage(row, chat)) return null
+internal fun readNativeMessage(row: JSONObject, chat: Int, webxdcParent: Int? = null): NativeMessage? {
+    if (webxdcParent == null && !isEncryptedChatmailMessage(row, chat)) return null
+    if (webxdcParent != null && (row.optInt("chatId") != chat || row.optInt("id") <= 9 ||
+        row.optString("kind") != "message" || !row.optBoolean("isInfo") ||
+        row.optString("systemMessageType") != "WebxdcInfoMessage" || row.optInt("parentId") != webxdcParent)) return null
     val id = row.getInt("id")
     val from = row.optInt("fromId")
     if (from != 1 && from <= 9) return null
@@ -126,10 +132,14 @@ internal fun readNativeMessage(row: JSONObject, chat: Int): NativeMessage? {
     return NativeMessage(id, from, text, row.optLong("sortTimestamp", row.optLong("timestamp")) * 1_000L,
         row.optInt("state"), quote?.takeIf { it.optInt("chatId") == chat }?.optInt("messageId")?.takeIf { it > 9 },
         quote?.optString("text").orEmpty(), quote?.optString("authorDisplayName").orEmpty(),
-        row.optJSONObject("sender")?.optString("displayName").orEmpty(), attachment, values)
+        row.optJSONObject("sender")?.optString("displayName").orEmpty(), attachment, values,
+        webxdcParent, row.optString("webxdcHref").takeIf { webxdcParent != null && !row.isNull("webxdcHref") })
 }
 
-internal fun chatmailAttachmentViewType(mime: String, asFile: Boolean, voicemail: Boolean = false): String = when {
+internal fun chatmailAttachmentViewType(
+    mime: String, asFile: Boolean, voicemail: Boolean = false, name: String = ""
+): String = when {
+    mime == WEBXDC_MIME || name.endsWith(".xdc", ignoreCase = true) -> "Webxdc"
     asFile -> "File"
     voicemail && mime.startsWith("audio/") -> "Voice"
     mime == "image/gif" -> "Gif"

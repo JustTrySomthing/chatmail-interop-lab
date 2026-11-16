@@ -264,6 +264,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         var sharingChannel by remember { mutableStateOf<ChatmailChannel?>(null) }
         var channelInviteOnly by rememberSaveable { mutableStateOf(false) }
         var thread by rememberSaveable { mutableStateOf<String?>(null) }
+        var webxdcDraftText by rememberSaveable(thread) { mutableStateOf<String?>(null) }
+        var webxdcHref by rememberSaveable { mutableStateOf("") }
         var threadView by rememberSaveable { mutableStateOf(Feed) }
         var threadQuery by rememberSaveable(thread) { mutableStateOf("") }
         var quote by rememberSaveable { mutableStateOf<String?>(null) }
@@ -1089,7 +1091,31 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             star = { model.star(it) },
                             galleryFile = model::galleryFile,
                             requestAttachment = { model.requestDownload(it) },
-                            file = ::showAttachment
+                            file = ::showAttachment,
+                            openApps = if (conversation?.optInt("nativeChat")?.let { it > 9 } == true &&
+                                conversation.optBoolean("nativeCanSend") && !conversation.optBoolean("contactRequest") && !blocked(id)) {
+                                { inlineAudio?.value = null; modal = "webxdc-catalog" }
+                            } else null,
+                            openWebxdc = { message ->
+                                val data = message.data()
+                                val parent = data.optInt("webxdcParent")
+                                val app = if (parent > 9) records.firstOrNull { it.key == nativeMessageKey(parent) }
+                                    else message
+                                if (app == null || app.data().optString("thread") != id ||
+                                    app.data().optBoolean("locallyDeleted")) {
+                                    downloadScope.launch { snack.showSnackbar("Load the original app message to open it.") }
+                                } else if (app.data().optString("state") != "Downloading") {
+                                    if (model.galleryFile(app) == null) model.requestDownload(app.key)
+                                    else {
+                                        inlineAudio?.value = null
+                                        selected = app.key
+                                        webxdcHref = data.optString("webxdcHref")
+                                        modal = "webxdc-app"
+                                    }
+                                }
+                            },
+                            draftText = webxdcDraftText,
+                            consumeDraftText = { webxdcDraftText = null }
                         )
                     }
                     area == Area.Chats || area == Area.Groups -> {
@@ -1771,6 +1797,29 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     ContactActionRow(name(contact.key), photo(contact.key), ContactAction.Message,
                         onAction = { goThread(contact.key) })
                 }
+            }
+            "webxdc-catalog" -> thread?.let { target ->
+                WebxdcCatalog(close = { modal = null }, attach = {
+                    if (thread == target) {
+                        addDraft(target, listOf(it))
+                        modal = null
+                    } else it.uri.path?.let { path -> File(path).delete() }
+                })
+            }
+            "webxdc-app" -> thread?.let { target ->
+                val record = records.firstOrNull { it.key == selected &&
+                    it.data().optString("thread") == target && it.data().optBoolean("webxdc") }
+                val local = record?.let(model::galleryFile)
+                val appId = record?.data()?.optInt("nativeMessage") ?: 0
+                if (local != null && appId > 9) {
+                    WebxdcRunner(model, target, appId, local, webxdcHref, close = { modal = null }) { text, attachment ->
+                        if (thread == target && !blocked(target)) {
+                            attachment?.let { addDraft(target, listOf(it)) }
+                            if (text.isNotBlank()) webxdcDraftText = text
+                            modal = null
+                        } else attachment?.uri?.path?.let { File(it).delete() }
+                    }
+                } else LaunchedEffect(selected) { modal = null }
             }
             "group-info" -> groups.firstOrNull { it.key == thread }?.let { group ->
                 val chat = group.data().optInt("nativeChat")
@@ -2701,7 +2750,11 @@ internal fun ColumnScope.ThreadView(
     openLink: (PreviewLink) -> Unit, attach: () -> Unit,
     messageMenu: (String) -> Unit, react: (String) -> Unit,
     star: (String) -> Unit, galleryFile: (Record) -> File?, file: (String) -> Unit,
-    requestAttachment: ((String) -> Unit)? = null
+    requestAttachment: ((String) -> Unit)? = null,
+    openApps: (() -> Unit)? = null,
+    openWebxdc: ((Record) -> Unit)? = null,
+    draftText: String? = null,
+    consumeDraftText: () -> Unit = {}
 ) {
     val messages = remember(records, id) {
         records.filter { it.isThreadMessage() && !it.data().optBoolean("locallyDeleted") && !it.data().optBoolean("voicemail") && it.data().optString("thread") == id }
@@ -2727,6 +2780,13 @@ internal fun ColumnScope.ThreadView(
         if (find.isBlank()) filtered else filtered.filter { threadSearchMatches(find, "", listOf(it.searchText())) }
     }
     var draft by rememberSaveable(id, stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue()) }
+    LaunchedEffect(draftText) {
+        draftText?.let { text ->
+            val combined = if (draft.text.isBlank()) text else draft.text + "\n" + text
+            draft = TextFieldValue(combined, TextRange(combined.length))
+            consumeDraftText()
+        }
+    }
     var emojiPicker by rememberSaveable(id) { mutableStateOf(false) }
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -2743,128 +2803,172 @@ internal fun ColumnScope.ThreadView(
             onView(next)
         }
     }
-    if (loadOlder != null && view == Feed) {
-        P2pTextButton(onClick = loadOlder, modifier = Modifier.align(Alignment.CenterHorizontally)) { Text("Load older messages") }
-    }
-    Box(Modifier.fillMaxWidth().weight(1f)) {
-        if (visible.isEmpty()) {
-            val message = when {
-                find.isNotBlank() -> "No matching messages"
-                view == "Starred" -> "No starred messages"
-                view == "Gallery" -> "No shared media"
-                else -> "No messages"
+    key(id, view, find) {
+        val listState = rememberLazyListState()
+        val scope = rememberCoroutineScope()
+        val closeDistance = with(density) { 96.dp.roundToPx() }
+        val nearLatest by remember(listState, closeDistance) {
+            derivedStateOf {
+                !listState.canScrollBackward ||
+                    (listState.firstVisibleItemIndex <= 1 && listState.firstVisibleItemScrollOffset <= closeDistance)
             }
-            EmptyTabMessage(message, Modifier.fillMaxSize())
-        } else if (view == "Gallery") {
-            MediaGallery(visible, galleryFile, file, star)
-        } else key(id, view, find) {
-            val listState = rememberLazyListState()
-            if (view == Feed) {
-                val keys = remember(visible) { visible.map(Record::key) }
-                val previousKeys = remember { mutableSetOf<String>().apply { addAll(keys) } }
-                LaunchedEffect(keys) {
-                    val arrival = keys.indexOfFirst { it !in previousKeys }
-                    previousKeys.clear()
-                    previousKeys.addAll(keys)
-                    // A reverse list normally keeps the old first visible key anchored after insertion.
-                    if (arrival >= 0) listState.requestScrollToItem(arrival)
+        }
+        val latest = visible.firstOrNull()
+        var previousLatest by remember { mutableStateOf(latest?.key) }
+        LaunchedEffect(latest?.key) {
+            val previous = previousLatest
+            previousLatest = latest?.key
+            val newHead = latest != null && previous != null &&
+                visible.indexOfFirst { it.key == previous } > 0
+            if (view == Feed && find.isBlank() && newHead &&
+                ((nearLatest && !listState.isScrollInProgress) ||
+                    (peer.isNotBlank() && latest?.data()?.optString("author") == peer))) {
+                listState.animateScrollToItem(0)
+            }
+        }
+        val showActions = view == Feed && find.isBlank() && !searchOpen
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            if (visible.isEmpty()) {
+                val message = when {
+                    find.isNotBlank() -> "No matching messages"
+                    view == "Starred" -> "No starred messages"
+                    view == "Gallery" -> "No shared media"
+                    else -> "No messages"
                 }
-            }
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(), reverseLayout = true,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp)
-            ) {
-                items(visible, key = { it.key }) { message ->
-                    val data = message.data()
-                    val author = data.optString("author")
-                    val isAttachment = message.kind.startsWith("file-")
-                    val own = message.kind == "file-sent" || (!isAttachment && peer.isNotBlank() && author == peer)
-                    val sender = if (own) "You" else name(author)
-                    val status = if (own && !isAttachment) {
-                        when {
-                            data.optInt("failed") > 0 || data.optInt("cancelled") > 0 -> messageDeliveryStatus(data)
-                            data.optInt("delivered") == 0 && !data.optBoolean("chatmailSubmitted") -> "Sending…"
-                            else -> ""
-                        }
-                    } else ""
-                    val options = { messageMenu(message.key) }
-                    var animatingReaction by remember { mutableStateOf(false) }
-                    val bubbleColor = if (own) ownCard else Mint
-                    Box(
-                        Modifier.zIndex(if (animatingReaction) 1f else 0f).fillMaxWidth().padding(start = if (own) 0.dp else 76.dp, end = if (own) 76.dp else 0.dp),
-                        contentAlignment = if (own) Alignment.CenterStart else Alignment.CenterEnd
-                    ) {
-                        Surface(
-                            color = bubbleColor,
-                            contentColor = inkOnAccent(bubbleColor),
-                            shape = RoundedCornerShape(18.dp),
-                            modifier = Modifier.widthIn(max = 460.dp).fillMaxWidth()
-                                .combinedClickable(onClick = {}, onLongClick = options, onLongClickLabel = "Message options")
+                EmptyTabMessage(message, Modifier.fillMaxSize())
+            } else if (view == "Gallery") {
+                MediaGallery(visible, galleryFile, file, star)
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(), reverseLayout = true,
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp,
+                        bottom = if (showActions) 64.dp else 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    items(visible, key = { it.key }) { message ->
+                        val data = message.data()
+                        val author = data.optString("author")
+                        val isAttachment = message.kind.startsWith("file-")
+                        val own = message.kind == "file-sent" || (!isAttachment && peer.isNotBlank() && author == peer)
+                        val sender = if (own) "You" else name(author)
+                        val status = if (own && !isAttachment) {
+                            when {
+                                data.optInt("failed") > 0 || data.optInt("cancelled") > 0 -> messageDeliveryStatus(data)
+                                data.optInt("delivered") == 0 && !data.optBoolean("chatmailSubmitted") -> "Sending…"
+                                else -> ""
+                            }
+                        } else ""
+                        val options = { messageMenu(message.key) }
+                        var animatingReaction by remember { mutableStateOf(false) }
+                        val bubbleColor = if (own) ownCard else Mint
+                        Box(
+                            Modifier.zIndex(if (animatingReaction) 1f else 0f).fillMaxWidth().padding(start = if (own) 0.dp else 76.dp, end = if (own) 76.dp else 0.dp),
+                            contentAlignment = if (own) Alignment.CenterStart else Alignment.CenterEnd
                         ) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                BoxWithConstraints {
-                                    val identity: @Composable (Modifier) -> Unit = { modifier ->
-                                        Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-                                            Avatar(sender, photo = photo(if (own) peer else author), size = 38.dp)
-                                            Column(Modifier.weight(1f).padding(start = 9.dp)) {
-                                                Text(sender, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                Text(shortTime(message.created), fontSize = 12.sp)
+                            Surface(
+                                color = bubbleColor,
+                                contentColor = inkOnAccent(bubbleColor),
+                                shape = RoundedCornerShape(18.dp),
+                                modifier = Modifier.widthIn(max = 460.dp).fillMaxWidth()
+                                    .combinedClickable(onClick = {}, onLongClick = options, onLongClickLabel = "Message options")
+                            ) {
+                                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    BoxWithConstraints {
+                                        val identity: @Composable (Modifier) -> Unit = { modifier ->
+                                            Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+                                                Avatar(sender, photo = photo(if (own) peer else author), size = 38.dp)
+                                                Column(Modifier.weight(1f).padding(start = 9.dp)) {
+                                                    Text(sender, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Text(shortTime(message.created), fontSize = 12.sp)
+                                                }
                                             }
                                         }
-                                    }
-                                    val actions: @Composable () -> Unit = {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            ReadAloudButton(message.key, if (isAttachment) data.optString("caption") else data.optString("text"), "message")
-                                            IconButton(onClick = { react(message.key) }, enabled = canCompose) {
-                                                Icon(Icons.Outlined.EmojiEmotions, if (isAttachment) "React to attachment" else "React to message", Modifier.size(24.dp))
+                                        val actions: @Composable () -> Unit = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                ReadAloudButton(message.key, if (isAttachment) data.optString("caption") else data.optString("text"), "message")
+                                                IconButton(onClick = { react(message.key) }, enabled = canCompose) {
+                                                    Icon(Icons.Outlined.EmojiEmotions, if (isAttachment) "React to attachment" else "React to message", Modifier.size(24.dp))
+                                                }
+                                                StarButton(data.optBoolean("star"), if (isAttachment) "attachment" else "message") { star(message.key) }
                                             }
-                                            StarButton(data.optBoolean("star"), if (isAttachment) "attachment" else "message") { star(message.key) }
+                                        }
+                                        if (maxWidth < 300.dp) Column {
+                                            identity(Modifier.fillMaxWidth())
+                                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { actions() }
+                                        } else Row(verticalAlignment = Alignment.CenterVertically) {
+                                            identity(Modifier.weight(1f)); actions()
                                         }
                                     }
-                                    if (maxWidth < 300.dp) Column {
-                                        identity(Modifier.fillMaxWidth())
-                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { actions() }
-                                    } else Row(verticalAlignment = Alignment.CenterVertically) {
-                                        identity(Modifier.weight(1f)); actions()
+                                    if (status.isNotBlank()) Text(status, fontSize = 12.sp)
+                                    val reference = data.optString("replyTo")
+                                    val quoteText = data.optString("quoteText")
+                                    if (reference.isNotEmpty() || quoteText.isNotEmpty()) {
+                                        val original = messages.firstOrNull { it.key == reference }?.data()
+                                        QuotedMessage(original?.let { name(it.optString("author")) }
+                                            ?: data.optString("quoteAuthor").ifBlank { "Earlier message" },
+                                            original?.optString("text")?.ifBlank { original.optString("name") } ?: quoteText)
                                     }
-                                }
-                                if (status.isNotBlank()) Text(status, fontSize = 12.sp)
-                                val reference = data.optString("replyTo")
-                                val quoteText = data.optString("quoteText")
-                                if (reference.isNotEmpty() || quoteText.isNotEmpty()) {
-                                    val original = messages.firstOrNull { it.key == reference }?.data()
-                                    QuotedMessage(original?.let { name(it.optString("author")) }
-                                        ?: data.optString("quoteAuthor").ifBlank { "Earlier message" },
-                                        original?.optString("text")?.ifBlank { original.optString("name") } ?: quoteText)
-                                }
-                                if (isAttachment) {
+                                    if (isAttachment && data.optBoolean("webxdc") && openWebxdc != null) {
                                     val local = galleryFile(message)
-                                    val pendingInline = local == null && message.kind == "file-received" &&
-                                        data.optInt("nativeMessage") > 9 && mediaKind(data.optString("mime"), data.optString("name")) != null
-                                    val open = if (pendingInline && requestAttachment != null) ({ requestAttachment(message.key) })
-                                        else ({ file(message.key) })
-                                    ChatAttachment(data, local, message.kind == "file-received",
-                                        open, options, playbackKey = message.key, onLongClickLabel = "Attachment options")
-                                }
-                                val body = data.optString(if (isAttachment) "caption" else "text")
-                                MessageBodyWithPreviews(body, preview, openLink, bubbleColor)
-                                val reactions = reactionsByMessage[message.key].orEmpty().values
-                                    .map(ReactionMark::emoji).distinct().joinToString(" ")
-                                if (reactions.isNotBlank()) {
-                                    Surface(modifier = Modifier.align(Alignment.End), shape = CircleShape, color = Panel) {
-                                        Text(reactions, Modifier.padding(horizontal = 9.dp, vertical = 4.dp), fontSize = 15.sp)
+                                    val downloading = data.optString("state") == "Downloading"
+                                    Text(data.optString("name", "App").substringBeforeLast(".xdc"),
+                                        style = contentTextStyle(MaterialTheme.typography.titleMedium))
+                                    if (downloading) LinearProgressIndicator(Modifier.fillMaxWidth())
+                                    else Button(onClick = { openWebxdc(message) }, shape = P2pButtonShape) {
+                                        Icon(Icons.Outlined.GridView, null, Modifier.size(18.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(if (local != null) "Open app" else "Download app")
+                                    }
+                                } else if (isAttachment) {
+                                        val local = galleryFile(message)
+                                        val pendingInline = local == null && message.kind == "file-received" &&
+                                            data.optInt("nativeMessage") > 9 && mediaKind(data.optString("mime"), data.optString("name")) != null
+                                        val open = if (pendingInline && requestAttachment != null) ({ requestAttachment(message.key) })
+                                            else ({ file(message.key) })
+                                        ChatAttachment(data, local, message.kind == "file-received",
+                                            open, options, playbackKey = message.key, onLongClickLabel = "Attachment options")
+                                    }
+                                    val body = data.optString(if (isAttachment) "caption" else "text")
+                                    MessageBodyWithPreviews(body, preview, openLink, bubbleColor)
+                                    if (data.optInt("webxdcParent") > 9 && openWebxdc != null) {
+                                        P2pTextButton(onClick = { openWebxdc(message) }) { Text("Open app") }
+                                    }
+                                    val reactions = reactionsByMessage[message.key].orEmpty().values
+                                        .map(ReactionMark::emoji).distinct().joinToString(" ")
+                                    if (reactions.isNotBlank()) {
+                                        Surface(modifier = Modifier.align(Alignment.End), shape = CircleShape, color = Panel) {
+                                            Text(reactions, Modifier.padding(horizontal = 9.dp, vertical = 4.dp), fontSize = 15.sp)
+                                        }
                                     }
                                 }
                             }
-                        }
-                        Box(Modifier.matchParentSize()) {
-                            ReactionDecoration(message.key, reactionsByMessage[message.key].orEmpty(), seenReactions) {
-                                animatingReaction = it
+                            Box(Modifier.matchParentSize()) {
+                                ReactionDecoration(message.key, reactionsByMessage[message.key].orEmpty(), seenReactions) {
+                                    animatingReaction = it
+                                }
                             }
                         }
                     }
+                    if (loadOlder != null && view == Feed && find.isBlank()) item(key = "thread-load-older") {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            P2pTextButton(onClick = loadOlder) { Text("Load older messages") }
+                        }
+                    }
+                }
+            }
+            if (showActions && (!nearLatest || openApps != null)) {
+                SmallFloatingActionButton(
+                    onClick = {
+                        if (nearLatest) openApps?.invoke() else scope.launch { listState.animateScrollToItem(0) }
+                    },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 8.dp),
+                    shape = CircleShape,
+                    containerColor = AccentPanel,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ) {
+                    Icon(if (nearLatest) Icons.Outlined.GridView else Icons.Outlined.ArrowDownward,
+                        if (nearLatest) "Apps" else "Scroll to latest message")
                 }
             }
         }

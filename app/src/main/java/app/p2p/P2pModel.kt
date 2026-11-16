@@ -13,6 +13,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.SharingStarted
@@ -173,10 +174,16 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                     (data.optInt("nativeChat") == chat || data.optInt("chatmailChat") == chat)
             }
 
+    private val webxdcEventFlow = kotlinx.coroutines.flow.MutableSharedFlow<JSONObject>(extraBufferCapacity = 64,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
+    internal val webxdcEvents = webxdcEventFlow.asSharedFlow()
+
     private fun openChatmail(directory: File): Chatmail = Chatmail(directory).also { core ->
         core.listenForEvents(onMessagesChanged = { changed ->
             nativeChangedMessages.addAll(changed)
             nextNativeSync = 0L
+        }, onWebxdc = { event ->
+            if (chatmail === core) webxdcEventFlow.tryEmit(event)
         }) { event ->
             viewModelScope.launch {
                 val accepted = withContext(Dispatchers.IO) {
@@ -864,6 +871,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                         (message.state == 10 || data.optBoolean("locallyUnread")))
                     .put("replyTo", message.quote?.let(::nativeMessageKey).orEmpty())
                     .put("quoteText", message.quoteText).put("quoteAuthor", message.quoteAuthor)
+                message.webxdcParent?.let { data.put("webxdcParent", it).put("webxdcHref", message.webxdcHref.orEmpty()) }
                 if (outgoingMessage) {
                     data.put("targets", 1).put("chatmailSubmitted", message.state == 26)
                         .put("delivered", if (message.state == 28) 1 else 0)
@@ -2130,6 +2138,32 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         deleteTemporaryDrafts(attachments)
     }
 
+    internal suspend fun openWebxdc(thread: String, id: Int): WebxdcInfo = withChatmail { core ->
+        val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+        val message = core.message(id)
+        require(chat > 9 && message.optInt("chatId") == chat && message.optString("viewType") == "Webxdc") {
+            "This app is no longer in the conversation."
+        }
+        check(message.optString("downloadState") == "Done") { "Download the app before opening it." }
+        WebxdcInfo.from(core.webxdcInfo(id))
+    }
+
+    internal suspend fun webxdcBlob(id: Int, path: String): String = withChatmail { it.webxdcBlob(id, path) }
+    internal suspend fun webxdcUpdates(id: Int, after: Int): String = withChatmail { it.webxdcUpdates(id, after) }
+
+    internal suspend fun webxdcWrite(thread: String, id: Int, write: (Chatmail) -> Unit) = withChatmail { core ->
+        val record = records.get(thread)?.data()
+        val chat = record?.optInt("nativeChat") ?: 0
+        check(chat > 9 && record?.optBoolean("blocked") != true && !groupBlocked(thread) &&
+            core.nativeThread(chat)?.let { it.canSend && !it.request } == true &&
+            core.message(id).let { it.optInt("chatId") == chat && it.optString("viewType") == "Webxdc" }) {
+            "This conversation cannot send app updates."
+        }
+        write(core)
+    }
+
+    internal fun leaveWebxdc(id: Int) = work { withChatmail { it.webxdcLeave(id) } }
+
     private suspend fun sendChatmailDraft(
         chat: Int, thread: String, text: String, replyTo: String?, attachments: List<AttachmentDraft>,
         voicemail: Boolean = false, channelPost: Boolean = false
@@ -2154,7 +2188,11 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                     val caption = text.takeIf { index == 0 }.orEmpty()
                     val file = File(outgoing, offer.getString("id"))
                     val name = offer.getString("name")
-                    val viewType = chatmailAttachmentViewType(offer.getString("mime"), offer.optBoolean("listed"), voicemail)
+                    val viewType = chatmailAttachmentViewType(offer.getString("mime"), offer.optBoolean("listed"), voicemail, name)
+                    if (viewType == "Webxdc") {
+                        require(channel == null) { "Share apps in a chat or group." }
+                        inspectWebxdc(file)
+                    }
                     if (channel != null) core.postToChannel(channel, caption, file, name, viewType)
                     else core.nativeSend(chat, caption, quote.takeIf { index == 0 }, file, name, viewType)
                     save(checkpoint, "native-draft", obj("next" to index + 1))
