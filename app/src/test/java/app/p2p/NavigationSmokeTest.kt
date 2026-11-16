@@ -173,7 +173,7 @@ class NavigationSmokeTest {
         compose.onNodeWithText("Join channel").assertIsDisplayed()
 
         compose.onAllNodesWithText("Talk")[0].performClick()
-        compose.onNodeWithText("VoiceMail").assertIsDisplayed()
+        compose.onNodeWithText("VoiceMail").assertDoesNotExist()
         compose.onNodeWithText("Call").assertIsDisplayed()
         compose.onNodeWithText("Files").assertDoesNotExist()
         compose.onAllNodesWithText("Chats")[0].performClick()

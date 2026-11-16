@@ -1364,17 +1364,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         }
                     }
                     area == Area.Talk -> {
-                        val voicemails = records.filter { it.kind == "file-received" && it.data().optBoolean("voicemail") && !it.data().optBoolean("locallyDeleted") }
-                        TabButtonBar {
-                            PageActionButton("VoiceMail", { modal = "voicemail" }, Modifier.weight(1f)) {
-                                val unheard = voicemails.count { it.data().optBoolean("unread") }
-                                if (unheard > 0) {
-                                    Spacer(Modifier.width(8.dp))
-                                    Badge { Text(unheard.toString()) }
-                                }
-                            }
-                            PageActionButton("Call", { modal = "call-contacts" }, Modifier.weight(1f))
-                        }
+                        PageActionButton("Call", { modal = "call-contacts" },
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp))
                         RecentTalkCalls(records.filter { it.kind == "call-history" }, ::name, ::photo,
                             onClear = { modal = "clear-recent-calls" }) { contact ->
                             requestTalkMic(TalkMicAction.Call, contact)
@@ -1552,7 +1543,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             "clear-recent-calls" -> P2pAlertDialog(
                 onDismissRequest = { modal = null },
                 title = { Text("Clear recent calls?") },
-                text = { Text("This clears call history on this phone. Voicemail stays available.") },
+                text = { Text("This clears call history on this phone.") },
                 dismissButton = { P2pTextButton(onClick = { modal = null }) { Text("Cancel") } },
                 confirmButton = { P2pTextButton(onClick = { model.clearCallHistory(); modal = null }) { Text("Clear recent") } }
             )
