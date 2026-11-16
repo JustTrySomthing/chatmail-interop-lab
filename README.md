@@ -6,14 +6,14 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc52**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc52/P2P-0.7.23-rc52-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc53**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc53/P2P-0.7.23-rc53-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC52 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC53 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
 ### Update from the app
 
-Open **Settings → Updates**, enable **Include release candidates**, and tap **Check now**. RC52 is offered to ARM64 devices running an older Relay Lab build. You can turn on automatic checks in the same menu.
+Open **Settings → Updates**, enable **Include release candidates**, and tap **Check now**. RC53 is offered to ARM64 devices running an older Relay Lab build. You can turn on automatic checks in the same menu.
 
 ## Features
 
@@ -23,11 +23,11 @@ Open **Settings → Updates**, enable **Include release candidates**, and tap **
 - **Talk** with voice and video calls and in-call camera switching.
 - **Media and accessibility** with inline audio, link previews, media trimming and compression, and offline read-aloud.
 
-Relay Lab uses Chatmail Core for interoperability. Cross-app support varies by client version and feature. See [device test status](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc52#device-test-status).
+Relay Lab uses Chatmail Core for interoperability. Cross-app support varies by client version and feature. See [device test status](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc53#device-test-status).
 
 ## Build
 
-Use the [RC52 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc52) for the source of the downloadable APK. Build with JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` and run `./gradlew :app:testDebugUnitTest :app:assembleDebug`.
+Use the [RC53 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc53) for the source of the downloadable APK. Build with JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` and run `./gradlew :app:testDebugUnitTest :app:assembleDebug`.
 
 The debug APK is at `app/build/outputs/apk/debug/app-debug.apk`. Relay Lab uses package `app.p2p.interop`. For separately signed builds, configure `P2P_INTEROP_KEYSTORE` and `P2P_INTEROP_KEY_PASSWORD`.
 
