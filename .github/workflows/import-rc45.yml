@@ -1,0 +1,101 @@
+name: Import P2P rc45 baseline
+
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/import-rc45.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    if: github.repository == 'JustTrySomthing/P2P-Interop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the experimental repository
+        run: |
+          gh auth setup-git
+          gh repo clone "$GITHUB_REPOSITORY" .
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Import and isolate the verified baseline
+        run: |
+          test ! -d app
+          baseline="$(mktemp -d)"
+          curl --fail --silent --show-error --location --retry 2 \
+            https://github.com/JustTrySomthing/P2P-Releases/releases/download/v0.7.23-rc45/P2P-0.7.23-rc45-Workspace-Recovery.zip \
+            -o "$baseline/rc45.zip"
+          echo "e7dc2378ec6b0e293c53b0f5fef7a390e69564f8077ccaaa7462130f80338085  $baseline/rc45.zip" | sha256sum -c
+          unzip -q "$baseline/rc45.zip" -d "$baseline"
+          python3 "$baseline/P2P/scripts/verify-recovery.py"
+          rsync -a --exclude=/README.md --exclude=/CONTINUE-HERE.md --exclude=/REBUILD.md --exclude=/AGENTS.md "$baseline/P2P/" ./
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              file = Path(path)
+              content = file.read_text()
+              assert content.count(old) == 1, (path, old)
+              file.write_text(content.replace(old, new))
+
+          replace('app/build.gradle.kts', 'applicationId = "app.p2p.preview"', 'applicationId = "app.p2p.interop"')
+          replace('app/build.gradle.kts', '["p2pAppLabel"] = "P2P"', '["p2pAppLabel"] = "P2P Interop"')
+          replace('app/build.gradle.kts', 'P2P_KEYSTORE', 'P2P_INTEROP_KEYSTORE')
+          replace('app/build.gradle.kts', 'P2P_KEY_PASSWORD', 'P2P_INTEROP_KEY_PASSWORD')
+          replace('app/build.gradle.kts', '../../signing/p2p-release.p12', '../../signing/p2p-interop.p12')
+          replace('app/src/main/java/app/p2p/UpdateFeed.kt', 'JustTrySomthing/P2P-Releases', 'JustTrySomthing/P2P-Interop')
+          replace('app/src/main/java/app/p2p/AppUpdates.kt', 'getBoolean("automatic", true)', 'getBoolean("automatic", false)')
+          replace('app/src/main/java/app/p2p/AppUpdates.kt', '== "app.p2p.preview"', '== "app.p2p.interop"')
+          PY
+          cat > README.md <<'MARKDOWN'
+          # P2P Interop
+
+          Private Android project for experimenting with Delta Chat and ArcaneChat interoperability. The source starts from the verified [P2P 0.7.23-rc45 workspace](https://github.com/JustTrySomthing/P2P-Releases/releases/tag/v0.7.23-rc45).
+
+          Experimental installations use `app.p2p.interop` and display **P2P Interop**. Use a fresh test profile and separate signing credentials. Automatic update checks default to off. The experimental updater points to this repository.
+
+          ## Build a debug APK
+
+          Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
+
+          ```sh
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug
+          ```
+
+          The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Use `P2P_INTEROP_KEYSTORE` and `P2P_INTEROP_KEY_PASSWORD` for separately signed release builds.
+
+          ## Experiment scope
+
+          Start with standard Chatmail QR invites and encrypted one-to-one messages. Check interoperability in both directions against Delta Chat and ArcaneChat. Evaluate call signaling and live calls after messaging works.
+          MARKDOWN
+          git add -A
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import subprocess
+          from pathlib import Path
+
+          paths = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
+          checks = {}
+          for name in filter(None, paths):
+              if name == 'RECOVERY-FILES.json':
+                  continue
+              path = Path(name)
+              assert path.suffix not in {'.p12', '.jks', '.keystore'}
+              assert path.name not in {'password.txt', 'local.properties'}
+              with path.open('rb') as file:
+                  checks[name] = hashlib.file_digest(file, 'sha256').hexdigest()
+          Path('RECOVERY-FILES.json').write_text(json.dumps({
+              'version': '0.7.23-rc45',
+              'version_code': 81,
+              'sha256': checks,
+          }, indent=2) + '\n')
+          PY
+          git add RECOVERY-FILES.json
+          python3 scripts/verify-recovery.py
+          git diff --cached --stat
+          git -c user.name=github-actions -c user.email=41898282+github-actions[bot]@users.noreply.github.com commit -m "Import P2P rc45 and isolate the experimental app"
+          git push origin HEAD:main
