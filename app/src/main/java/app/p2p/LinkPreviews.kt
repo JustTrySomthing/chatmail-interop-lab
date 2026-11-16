@@ -33,6 +33,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -86,18 +90,44 @@ internal fun inAppBrowserUrl(value: String, upgradeHttp: Boolean = false): Strin
     return "https://$authority$suffix"
 }
 
+private val inlineMarkdown = Regex(
+    """(?<![\p{L}\p{N}\\])([*_]{1,2}|~~|`)(?!\s)([^\n]+?)(?<!\s)\1(?![*_~`\p{L}\p{N}])"""
+)
+
+internal fun formatMessageMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+    var cursor = 0
+    for (match in inlineMarkdown.findAll(text)) {
+        val marker = match.groupValues[1]
+        val style = when (marker) {
+            "**", "__" -> SpanStyle(fontWeight = FontWeight.Bold)
+            "*", "_" -> SpanStyle(fontStyle = FontStyle.Italic)
+            "~~" -> SpanStyle(textDecoration = TextDecoration.LineThrough)
+            "`" -> SpanStyle(fontFamily = FontFamily.Monospace)
+            else -> continue
+        }
+        append(text.substring(cursor, match.range.first))
+        val start = length
+        append(match.groupValues[2])
+        addStyle(style, start, length)
+        cursor = match.range.last + 1
+    }
+    append(text.substring(cursor))
+}
+
 @Composable
 internal fun LinkedMessageText(
     text: String, open: (PreviewLink) -> Unit,
     style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyLarge,
-    background: Color = MaterialTheme.colorScheme.surface
+    background: Color = MaterialTheme.colorScheme.surface,
+    formatMarkdown: Boolean = false
 ) {
     val accent = readableAccent(background, LocalContentColor.current)
     val openLink by rememberUpdatedState(open)
-    val annotated = remember(text, accent) {
+    val annotated = remember(text, accent, formatMarkdown) {
+        val formatted = if (formatMarkdown) formatMessageMarkdown(text) else AnnotatedString(text)
         buildAnnotatedString {
-            append(text)
-            for (match in webLink.findAll(text)) {
+            append(formatted)
+            for (match in webLink.findAll(formatted.text)) {
                 val raw = match.value.trimEnd('.', ',', '!', '?', ')', ']', ';', ':')
                 val link = parsePreviewLink(raw) ?: continue
                 addLink(LinkAnnotation.Clickable(
@@ -124,7 +154,7 @@ internal fun MessageBodyWithPreviews(
             if (parsePreviewLink(raw)?.url?.let(rendered::contains) == true) "" else match.value
         }.trim()
     }
-    if (caption.isNotBlank()) LinkedMessageText(caption, open, background = background)
+    if (caption.isNotBlank()) LinkedMessageText(caption, open, background = background, formatMarkdown = true)
     links.forEach { link -> MessageLinkCard(link, { preview(link) }, { open(link) }) }
 }
 

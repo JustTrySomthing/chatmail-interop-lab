@@ -88,6 +88,7 @@ internal fun ChannelBoard(
     val saveMedia = LocalMediaDownload.current
     val inlineAudio = LocalInlineAudio.current
     var channels by remember { mutableStateOf<List<ChatmailChannel>?>(null) }
+    var reactingTo by remember(page, selected) { mutableStateOf<ChannelPost?>(null) }
     var posts by remember(page, selected) { mutableStateOf<List<ChannelPost>>(emptyList()) }
     var error by remember(page, selected) { mutableStateOf<String?>(null) }
     var actionError by remember(page, selected) { mutableStateOf<String?>(null) }
@@ -151,6 +152,19 @@ internal fun ChannelBoard(
             } finally {
                 busy = false
             }
+        }
+    }
+
+    reactingTo?.let { post ->
+        Sheet("React to post", { reactingTo = null }) {
+            EmojiPicker(Modifier.fillMaxWidth().height(290.dp), insert = { emoji ->
+                reactingTo = null
+                submit { model.reactToChannelPost(post.id, emoji) }
+            }, close = { reactingTo = null })
+            if (post.reactions.containsKey(1)) P2pTextButton(onClick = {
+                reactingTo = null
+                submit { model.reactToChannelPost(post.id, "") }
+            }) { Text("Remove your reaction") }
         }
     }
 
@@ -313,7 +327,7 @@ internal fun ChannelBoard(
                 }
                 items(matches, key = { it.id }) { post ->
                     ChannelPostCard(post, current?.owned == true, profilePhoto.takeIf { current?.owned == true }.orEmpty(),
-                        null, preview, openLink, { openAttachment(post) })
+                        null, preview, openLink, { openAttachment(post) }, { if (!busy) reactingTo = post })
                 }
                 if (hasOlder) item { P2pTextButton(onClick = { limit += 50 }) { Text("Load older posts") } }
             }
@@ -322,7 +336,8 @@ internal fun ChannelBoard(
                     EmptyTabMessage(if (search.isBlank()) "No posts from channels you follow" else "No matching posts")
                 }
                 items(matches, key = { it.id }) { post ->
-                    ChannelPostCard(post, false, "", { selectChannel(post.channelId) }, preview, openLink, { openAttachment(post) })
+                    ChannelPostCard(post, false, "", { selectChannel(post.channelId) }, preview, openLink,
+                        { openAttachment(post) }, { if (!busy) reactingTo = post })
                 }
             }
             page == "Following" -> {
@@ -473,7 +488,7 @@ internal fun SocialPostCard(
 @Composable
 private fun ChannelPostCard(
     post: ChannelPost, owned: Boolean, photo: String, open: (() -> Unit)?, preview: (PreviewLink) -> Unit,
-    openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit
+    openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit, react: () -> Unit
 ) {
     val save = LocalMediaDownload.current
     val colors = MaterialTheme.colorScheme
@@ -488,6 +503,13 @@ private fun ChannelPostCard(
             ChatAttachment(attachment.displayData(post.localFile), post.localFile, !owned,
                 openAttachment, if (post.localFile == null || download == null || save == null) null else ({ save(download) }),
                 playbackKey = "channel:${post.id}", usePlaybackPoster = true)
+        }
+        val reactions = post.reactions.values.flatten().groupingBy { it }.eachCount()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = react) { Icon(Icons.Outlined.EmojiEmotions, "React to post") }
+            if (reactions.isNotEmpty()) Text(reactions.entries.joinToString("  ") { (emoji, count) ->
+                if (count == 1) emoji else "$emoji $count"
+            }, style = MaterialTheme.typography.labelLarge)
         }
         if (owned && post.state == 20) Text("Queued", style = MaterialTheme.typography.labelMedium)
         if (owned && post.state == 24) Text("Send failed", color = colors.error, style = MaterialTheme.typography.labelMedium)

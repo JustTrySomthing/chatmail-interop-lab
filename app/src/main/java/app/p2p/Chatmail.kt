@@ -270,7 +270,22 @@ internal class Chatmail(directory: File) : AutoCloseable {
         }) }
     }
 
-    fun nativeReact(id: Int, emoji: String) { call("send_reaction", id, JSONArray(listOf(emoji))) }
+    fun nativeReact(id: Int, emoji: String) {
+        call("send_reaction", id, JSONArray(if (emoji.isEmpty()) emptyList() else listOf(emoji)))
+    }
+
+    fun editMessage(id: Int, text: String) { call("send_edit_request", id, text) }
+    fun deleteMessageForEveryone(id: Int) { call("delete_messages_for_all", JSONArray(listOf(id))) }
+    fun setMessagePinned(id: Int, pinned: Boolean) { call("set_pinned_message_state", id, pinned) }
+    fun pinnedMessages(chat: Int): List<NativeMessage> {
+        val ids = call("get_pinned_messages", chat) as JSONArray
+        return nativeRows(chat, (0 until ids.length()).map(ids::getInt))
+    }
+    fun saveMessage(id: Int) { call("save_msgs", JSONArray(listOf(id))) }
+    fun savedMessagesChat(): Int = (call("create_chat_by_contact_id", 1) as Number).toInt()
+    fun disappearingTimer(chat: Int): Int = (call("get_chat_ephemeral_timer", chat) as Number).toInt()
+    fun setDisappearingTimer(chat: Int, seconds: Int) { call("set_chat_ephemeral_timer", chat, seconds) }
+    fun setGroupImage(chat: Int, file: File?) { call("set_chat_profile_image", chat, file?.absolutePath) }
 
     fun nativeGroupInvite(chat: Int): String {
         check(nativeThread(chat)?.let { it.group && it.canSend && !it.request } == true) {
@@ -312,6 +327,22 @@ internal class Chatmail(directory: File) : AutoCloseable {
         (members - group.members.toSet()).forEach { call("add_contact_to_chat", id, it) }
         (group.members.toSet() - members).forEach { call("remove_contact_from_chat", id, it) }
         if (description != null) updateChatDescription(id, description)
+    }
+
+    fun exportProfileBackup(directory: File) { call("export_backup", directory.absolutePath, null) }
+    fun importProfileBackup(archive: File) { call("import_backup", archive.absolutePath, null) }
+    fun profileName(): String = call("get_config", "displayname").takeUnless { it == JSONObject.NULL }?.toString().orEmpty()
+
+    fun messageLocation(chat: Int, message: Int, timestamp: Long): Pair<Double, Double>? {
+        val rows = call("get_locations", chat, null, timestamp, timestamp) as JSONArray
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONObject(index) ?: continue
+            if (row.optInt("msgId") != message || !row.optBoolean("isIndependent")) continue
+            val latitude = row.optDouble("latitude")
+            val longitude = row.optDouble("longitude")
+            if (latitude in -90.0..90.0 && longitude in -180.0..180.0) return latitude to longitude
+        }
+        return null
     }
 
     fun isConfigured(): Boolean = call("is_configured") == true
@@ -428,7 +459,8 @@ internal data class ChatmailChannel(
 )
 internal data class ChannelPost(
     val id: Int, val channelId: Int, val channelName: String, val text: String,
-    val time: Long, val state: Int, val attachment: ChatmailAttachment?, val localFile: File? = null
+    val time: Long, val state: Int, val attachment: ChatmailAttachment?, val localFile: File? = null,
+    val reactions: Map<Int, List<String>> = emptyMap()
 )
 internal data class ChannelHistory(val posts: List<ChannelPost>, val hasOlder: Boolean)
 
@@ -449,12 +481,13 @@ internal fun parseChannelPost(message: JSONObject, channel: ChatmailChannel): Ch
     val attachment = readChatmailAttachment(message)
     if (text.isBlank() && attachment == null) return null
     return ChannelPost(id, channel.id, channel.name, text,
-        message.optLong("timestamp") * 1_000L, message.optInt("state"), attachment)
+        message.optLong("timestamp") * 1_000L, message.optInt("state"), attachment,
+        reactions = readNativeReactions(message))
 }
 
 internal data class ChatmailContact(
     val id: Int, val name: String, val bio: String = "", val photoPath: String? = null,
-    val encryptionAvailable: Boolean = false
+    val encryptionAvailable: Boolean = false, val lastSeen: Long = 0L
 )
 
 internal fun parseChatmailContact(data: JSONObject): ChatmailContact? {
@@ -463,7 +496,7 @@ internal fun parseChatmailContact(data: JSONObject): ChatmailContact? {
     val name = data.optString("displayName").ifBlank { "Chatmail contact" }
     return ChatmailContact(id, name, data.optString("status"),
         data.optString("profileImage").takeUnless { data.isNull("profileImage") || it.isBlank() },
-        data.optBoolean("e2eeAvail"))
+        data.optBoolean("e2eeAvail"), data.optLong("lastSeen"))
 }
 
 internal data class ChatmailCallContact(val id: Int, val name: String)

@@ -42,6 +42,8 @@ internal fun FirstRunSetup(
     name: String,
     saveName: (String, () -> Unit) -> Job,
     back: (() -> Unit)? = null,
+    restoreBackup: (() -> Unit)? = null,
+    restoringBackup: Boolean = false,
     finish: () -> Unit
 ) {
     val context = LocalContext.current
@@ -69,7 +71,8 @@ internal fun FirstRunSetup(
     var editing by rememberSaveable { mutableStateOf(name.isBlank()) }
     var draft by rememberSaveable { mutableStateOf(name) }
     var saving by remember { mutableStateOf<Job?>(null) }
-    val busy = saving != null
+    val busy = saving != null || restoringBackup
+    LaunchedEffect(name) { if (name.isNotBlank() && draft.isBlank()) editing = false }
     var background by remember { mutableStateOf(BackgroundMessages.enabled(context)) }
     var batteryExempt by remember { mutableStateOf(BackgroundMessages.batteryExempt(context)) }
     var backgroundError by rememberSaveable { mutableStateOf(false) }
@@ -139,6 +142,10 @@ internal fun FirstRunSetup(
                         Button(onClick = { saving = saveName(draft) { editing = false } },
                             enabled = !busy && draft.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
                             Text(if (name.isBlank()) "Continue" else "Save display name")
+                        }
+                        if (name.isBlank() && restoreBackup != null) {
+                            P2pTextButton(onClick = restoreBackup, enabled = !busy) { Text("Restore Chatmail backup") }
+                            if (restoringBackup) LinearProgressIndicator(Modifier.fillMaxWidth())
                         }
                     } else {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

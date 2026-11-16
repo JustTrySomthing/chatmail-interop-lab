@@ -10,7 +10,8 @@ internal fun nativePeerKey(id: Int): String = "chatmail-peer:$id"
 
 internal data class NativeThread(
     val id: Int, val name: String, val group: Boolean, val members: List<Int>,
-    val canSend: Boolean, val request: Boolean, val archived: Boolean
+    val canSend: Boolean, val request: Boolean, val archived: Boolean,
+    val selfTalk: Boolean = false, val imagePath: String? = null
 ) {
     val contactId: Int? get() = if (group) null else members.singleOrNull()
 }
@@ -19,12 +20,15 @@ internal fun readNativeThread(chat: JSONObject): NativeThread? {
     val id = chat.optInt("id")
     val type = chat.optString("chatType")
     if (id <= 9 || type !in setOf("Single", "Group") || !chat.optBoolean("isEncrypted") ||
-        chat.optBoolean("isDeviceChat") || chat.optBoolean("isSelfTalk")) return null
+        chat.optBoolean("isDeviceChat")) return null
+    val selfTalk = type == "Single" && chat.optBoolean("isSelfTalk")
     val ids = chat.optJSONArray("contactIds")
     val members = (0 until (ids?.length() ?: 0)).mapNotNull { ids?.optInt(it)?.takeIf { id -> id > 9 } }
-    if (type == "Single" && members.size != 1) return null
+    if (selfTalk && (members.isNotEmpty() || ids?.optInt(0) != 1)) return null
+    if (type == "Single" && !selfTalk && members.size != 1) return null
     return NativeThread(id, chat.optString("name").ifBlank { if (type == "Single") "Contact" else "Group" },
-        type == "Group", members, chat.optBoolean("canSend"), chat.optBoolean("isContactRequest"), chat.optBoolean("archived"))
+        type == "Group", members, chat.optBoolean("canSend"), chat.optBoolean("isContactRequest"), chat.optBoolean("archived"),
+        selfTalk, chat.optString("profileImage").takeIf { type == "Group" && !chat.isNull("profileImage") && it.isNotBlank() })
 }
 
 internal data class NativeMessage(
@@ -32,7 +36,8 @@ internal data class NativeMessage(
     val quoteText: String, val quoteAuthor: String, val senderName: String,
     val attachment: ChatmailAttachment?,
     val reactions: Map<Int, List<String>>,
-    val webxdcParent: Int? = null, val webxdcHref: String? = null
+    val webxdcParent: Int? = null, val webxdcHref: String? = null,
+    val edited: Boolean = false, val pinned: Boolean = false, val hasLocation: Boolean = false
 )
 
 internal data class ChatmailAttachment(
@@ -119,21 +124,14 @@ internal fun readNativeMessage(row: JSONObject, chat: Int, webxdcParent: Int? = 
     val text = row.optString("text")
     if (text.startsWith(PACKET_PREFIX)) return null
     val attachment = readChatmailAttachment(row)
-    if (text.isBlank() && attachment == null) return null
-    val reactions = row.optJSONObject("reactions")?.optJSONObject("reactionsByContact")
-    val values = reactions?.keys()?.asSequence()?.mapNotNull { key ->
-        val entries = reactions.optJSONArray(key)
-        val emoji = (0 until (entries?.length() ?: 0)).mapNotNull {
-            entries?.optString(it)?.takeIf(String::isNotBlank)
-        }.distinct()
-        key.toIntOrNull()?.takeIf { emoji.isNotEmpty() }?.let { it to emoji }
-    }?.toMap().orEmpty()
+    if (text.isBlank() && attachment == null && !row.optBoolean("hasLocation")) return null
     val quote = row.optJSONObject("quote")
     return NativeMessage(id, from, text, row.optLong("sortTimestamp", row.optLong("timestamp")) * 1_000L,
         row.optInt("state"), quote?.takeIf { it.optInt("chatId") == chat }?.optInt("messageId")?.takeIf { it > 9 },
         quote?.optString("text").orEmpty(), quote?.optString("authorDisplayName").orEmpty(),
-        row.optJSONObject("sender")?.optString("displayName").orEmpty(), attachment, values,
-        webxdcParent, row.optString("webxdcHref").takeIf { webxdcParent != null && !row.isNull("webxdcHref") })
+        row.optJSONObject("sender")?.optString("displayName").orEmpty(), attachment, readNativeReactions(row),
+        webxdcParent, row.optString("webxdcHref").takeIf { webxdcParent != null && !row.isNull("webxdcHref") },
+        row.optBoolean("isEdited"), row.optBoolean("isPinned"), row.optBoolean("hasLocation"))
 }
 
 internal fun chatmailAttachmentViewType(
@@ -147,4 +145,15 @@ internal fun chatmailAttachmentViewType(
     mime.startsWith("audio/") -> "Audio"
     mime.startsWith("video/") -> "Video"
     else -> "File"
+}
+
+internal fun readNativeReactions(row: JSONObject): Map<Int, List<String>> {
+    val reactions = row.optJSONObject("reactions")?.optJSONObject("reactionsByContact")
+    return reactions?.keys()?.asSequence()?.mapNotNull { key ->
+        val entries = reactions.optJSONArray(key)
+        val emoji = (0 until (entries?.length() ?: 0)).mapNotNull {
+            entries?.optString(it)?.takeIf(String::isNotBlank)
+        }.distinct()
+        key.toIntOrNull()?.takeIf { emoji.isNotEmpty() }?.let { it to emoji }
+    }?.toMap().orEmpty()
 }

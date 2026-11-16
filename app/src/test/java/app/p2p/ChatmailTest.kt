@@ -1,5 +1,6 @@
 package app.p2p
 
+import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -214,6 +215,29 @@ class ChatmailTest {
         assertFalse(nativeThreadKey(12) == nativeMessageKey(12))
         assertTrue(isId(nativeThreadKey(12)))
         assertNull(readNativeThread(raw.put("isEncrypted", false)))
+    }
+
+    @Test
+    fun savedMessagesKeepsASelfChatDistinctFromOtherContacts() {
+        val raw = obj("id" to 12, "name" to "Saved Messages", "chatType" to "Single", "isEncrypted" to true,
+            "contactIds" to JSONArray(listOf(1)), "canSend" to true, "isSelfTalk" to true)
+        val saved = requireNotNull(readNativeThread(raw))
+        assertTrue(saved.selfTalk)
+        assertNull(saved.contactId)
+        assertTrue(saved.canSend)
+        assertNull(readNativeThread(raw.put("isDeviceChat", true)))
+        assertNull(readNativeThread(raw.put("isDeviceChat", false).put("contactIds", JSONArray(listOf(20)))))
+    }
+
+    @Test
+    fun recordsNativeMessageEditsPinsAndLocationOnlyAfterEncryptionCheck() {
+        val raw = obj("id" to 18, "chatId" to 12, "kind" to "message", "fromId" to 20, "showPadlock" to true,
+            "hasLocation" to true, "isEdited" to true, "isPinned" to true)
+        val message = requireNotNull(readNativeMessage(raw, 12))
+        assertTrue(message.edited)
+        assertTrue(message.pinned)
+        assertTrue(message.hasLocation)
+        assertNull(readNativeMessage(raw.put("showPadlock", false), 12))
     }
 
     @Test

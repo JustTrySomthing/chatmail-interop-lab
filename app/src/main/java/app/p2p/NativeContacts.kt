@@ -69,14 +69,14 @@ internal fun NativeContactRows(model: P2pModel, query: String, showEmpty: Boolea
         }, enabled = !opening, shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.surfaceVariant) {
             NativeContactHeader(contact.name, contact.bio, contact.photoPath,
-                Modifier.fillMaxWidth().padding(12.dp))
+                Modifier.fillMaxWidth().padding(12.dp), contact.lastSeen)
         }
     }
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 }
 
 @Composable
-private fun NativeContactHeader(name: String, bio: String, path: String?, modifier: Modifier = Modifier) {
+private fun NativeContactHeader(name: String, bio: String, path: String?, modifier: Modifier, lastSeen: Long) {
     val context = LocalContext.current
     val photo by produceState("", path) {
         value = withContext(Dispatchers.IO) {
@@ -95,6 +95,14 @@ private fun NativeContactHeader(name: String, bio: String, path: String?, modifi
         Column(Modifier.weight(1f)) {
             Text(name, style = contentTextStyle(MaterialTheme.typography.titleMedium))
             if (bio.isNotBlank()) Text(bio, style = contentTextStyle(MaterialTheme.typography.bodyMedium))
+            if (lastSeen in 1..(System.currentTimeMillis() / 1000)) {
+                val date = remember(lastSeen) {
+                    java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM)
+                        .format(java.util.Date(lastSeen * 1000))
+                }
+                Text("Last seen $date", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }

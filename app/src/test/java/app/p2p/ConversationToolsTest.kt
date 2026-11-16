@@ -58,6 +58,14 @@ class ConversationToolsTest {
     }
 
     @Test
+    fun formatsInlineStylesWithoutChangingUnformattedText() {
+        val text = formatMessageMarkdown("**bold** *italic* ~~strike~~ sample_name")
+        assertEquals("bold italic strike sample_name", text.text)
+        assertEquals(3, text.spanStyles.size)
+        assertEquals("sample_name", formatMessageMarkdown("sample_name").text)
+    }
+
+    @Test
     fun appliesQualityFloorsAndPreservesContactCardLines() {
         assertTrue(ratesForMedia(8_000, true).video > ratesForMedia(180_000, true).video)
         assertEquals(48_000, ratesForMedia(600_000, false).audio)

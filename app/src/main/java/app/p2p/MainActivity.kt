@@ -239,8 +239,13 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             return@P2pTheme
         }
         if (!setupComplete || profile.isBlank()) {
+            val restoring by model.backupBusy.collectAsState()
+            val restore = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                if (uri != null) model.importChatmailProfile(uri)
+            }
             Box(Modifier.fillMaxSize()) {
-                FirstRunSetup(profile, model::setName) {
+                FirstRunSetup(profile, model::setName, restoreBackup = { restore.launch(arrayOf("*/*")) },
+                    restoringBackup = restoring) {
                     setup.edit().putBoolean("complete", true).apply()
                     setupComplete = true
                 }
@@ -282,6 +287,37 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             modal = "add-contact"
         }
         var selected by rememberSaveable { mutableStateOf<String?>(null) }
+        var nativeActionBusy by remember { mutableStateOf(false) }
+        var nativeActionError by remember(modal, selected) { mutableStateOf<String?>(null) }
+        val actionScope = rememberCoroutineScope()
+        fun runNativeAction(done: () -> Unit = { modal = null }, operation: suspend () -> Unit) {
+            if (nativeActionBusy) return
+            nativeActionBusy = true
+            nativeActionError = null
+            actionScope.launch {
+                try {
+                    val error = chatAction(operation)
+                    nativeActionError = error
+                    if (error == null) done()
+                    else snack.showSnackbar(error)
+                } finally {
+                    nativeActionBusy = false
+                }
+            }
+        }
+        val exportChatmailBackup = rememberLauncherForActivityResult(
+            ActivityResultContracts.CreateDocument("application/x-tar")
+        ) { uri ->
+            if (uri != null) runNativeAction(done = {}) { model.exportChatmailProfile(uri) }
+        }
+        var groupPhotoTarget by rememberSaveable { mutableStateOf<String?>(null) }
+        val groupPhotoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            val target = groupPhotoTarget
+            groupPhotoTarget = null
+            if (uri != null && target != null) runNativeAction(done = {}) {
+                model.updateNativeGroupImage(target, uri)
+            }
+        }
         var reminderArea by rememberSaveable { mutableStateOf<AlertArea?>(null) }
         var reminderTarget by rememberSaveable { mutableStateOf("") }
         var search by rememberSaveable { mutableStateOf("") }
@@ -308,7 +344,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             postMedia = ArrayList((postMedia + result).distinct())
         }
         val contacts = remember(records) {
-            records.filter { it.kind == "contact" }.sortedWith(
+            records.filter { it.kind == "contact" && !it.data().optBoolean("nativeSelfTalk") }.sortedWith(
                 compareByDescending<Record> { it.data().optBoolean("pinnedContact") }
                     .thenBy { it.data().optString("name").lowercase() })
         }
@@ -326,7 +362,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 ?: records.firstOrNull { it.key == id }?.data()?.optString("name")?.takeIf(String::isNotBlank)
                 ?: "Group member"
         fun photo(id: String) = if (id == peer && id.isNotBlank()) profileData?.optString("photo").orEmpty()
-            else peerProfiles[id]?.optString("photo").orEmpty()
+            else peerProfiles[id]?.optString("photo").orEmpty().ifBlank {
+                groups.firstOrNull { it.key == id }?.data()?.optString("photo").orEmpty()
+            }
         val profilePhotoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             if (uri != null) model.setProfilePhoto(uri)
         }
@@ -880,6 +918,16 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         }) { Text("Copy address") }
                     }
                     FullPageRoute.Backup -> {
+                        Text("Chatmail backup", style = MaterialTheme.typography.titleMedium)
+                        Text("Export your Chatmail profile, conversations and media. The file contains private keys and messages. Store it somewhere private.")
+                        Button(onClick = { exportChatmailBackup.launch("Relay-Lab-Chatmail-backup.tar") },
+                            enabled = !nativeActionBusy && !backupBusy, shape = P2pButtonShape,
+                            modifier = Modifier.fillMaxWidth()) { Text("Export Chatmail backup") }
+                        if (nativeActionBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text("To restore on a fresh install, choose Restore Chatmail backup during setup.",
+                            style = MaterialTheme.typography.bodySmall)
+                        HorizontalDivider()
+                        Text("Earlier P2P backup", style = MaterialTheme.typography.titleMedium)
                         Text("Save your earlier P2P address, contacts, chats, and attachments. This backup excludes Chatmail conversations and channels.")
                         Button(shape = P2pButtonShape, onClick = { modal = "save-password" }, enabled = !backupBusy,
                             modifier = Modifier.fillMaxWidth()) { Text("Create backup") }
@@ -965,9 +1013,15 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             val title = name(id)
                             val hasGroupInfo = group?.data()?.optInt("nativeChat")?.let { it > 9 } == true
-                            val groupInfo = if (hasGroupInfo) {
-                                Modifier.clickable(onClickLabel = "View group info") { modal = "group-info" }
-                            } else Modifier
+                            val hasChatOptions = (records.firstOrNull { it.key == id }?.data()?.optInt("nativeChat") ?: 0) > 9
+                            val groupInfo = when {
+                                hasGroupInfo -> Modifier.clickable(onClickLabel = "View group info") { modal = "group-info" }
+                                hasChatOptions -> Modifier.clickable(onClickLabel = "Chat options") {
+                                    selected = id
+                                    modal = "native-conversation-options"
+                                }
+                                else -> Modifier
+                            }
                             Column(Modifier.weight(1f).then(groupInfo)) {
                                 Text(title, fontWeight = FontWeight.SemiBold, fontSize = 20.sp, maxLines = 1,
                                     overflow = TextOverflow.Ellipsis)
@@ -1130,7 +1184,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         val searchable = if (search.isBlank()) emptyMap() else records.filter {
                             it.kind in listOf("message", "file-received", "file-sent")
                         }.groupBy { it.data().optString("thread") }
-                        val threads = if (isGroup) groups else contacts
+                        val threads = if (isGroup) groups else contacts + records.filter {
+                            it.kind == "contact" && it.data().optBoolean("nativeSelfTalk")
+                        }
                         val threadFolders = remember(records) {
                             records.filter { it.kind == "folder" }
                                 .associate { it.key.removePrefix("folder:") to it.data().optString("name") }
@@ -1454,6 +1510,31 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                                 })
                             }
                         }
+                        if (activeThread && data.optInt("nativeMessage") > 9 && data.optInt("webxdcParent") <= 9) {
+                            add(ItemAction("Save to Saved Messages", Icons.Outlined.BookmarkBorder) {
+                                model.saveNativeMessage(item.key)
+                                modal = null
+                            })
+                            add(ItemAction(if (data.optBoolean("nativePinned")) "Unpin message" else "Pin message",
+                                Icons.Outlined.PushPin) {
+                                model.toggleNativeMessagePin(item.key)
+                                modal = null
+                            })
+                            if (author == peer) {
+                                if (text.isNotBlank() && !data.optBoolean("webxdc")) {
+                                    add(ItemAction("Edit message", Icons.Outlined.Edit) { modal = "native-edit-message" })
+                                }
+                                add(ItemAction("Delete for everyone", Icons.Outlined.DeleteForever) {
+                                    modal = "native-delete-message"
+                                })
+                            }
+                        }
+                        if (data.optBoolean("nativeLocation")) add(ItemAction("Open shared location", Icons.Outlined.Place) {
+                            runNativeAction {
+                                val (latitude, longitude) = model.nativeMessageLocation(item.key)
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:$latitude,$longitude?q=$latitude,$longitude")))
+                            }
+                        })
                         if (post && !ownPost) add(ItemAction("Reply", Icons.AutoMirrored.Outlined.Reply) { modal = "reply" })
                         if (item.kind.startsWith("file-") && mediaKind(data.optString("mime"), data.optString("name")) != null) {
                             add(ItemAction("Download media", Icons.Outlined.Download) {
@@ -1547,6 +1628,79 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 dismissButton = { P2pTextButton(onClick = { modal = null }) { Text("Cancel") } },
                 confirmButton = { P2pTextButton(onClick = { model.clearCallHistory(); modal = null }) { Text("Clear recent") } }
             )
+            "native-conversation-options" -> selected?.let { target ->
+                val chat = records.firstOrNull { it.key == target }?.data()
+                val canChange = chat?.optBoolean("nativeCanSend") == true && !chat.optBoolean("contactRequest") &&
+                    !chat.optBoolean("nativeSelfTalk") && !blocked(target)
+                ItemActionsDialog("Chat options", buildList {
+                    add(ItemAction("Pinned messages", Icons.Outlined.PushPin) { modal = "native-pinned-messages" })
+                    if (canChange) add(ItemAction("Disappearing messages", Icons.Outlined.Timer) {
+                        modal = "native-disappearing-messages"
+                    })
+                }) { modal = null }
+            }
+            "native-pinned-messages" -> selected?.let { target ->
+                Sheet("Pinned messages", { modal = null }) {
+                    val result by produceState<Result<List<NativeMessage>>?>(null, target) {
+                        try { value = Result.success(model.pinnedNativeMessages(target)) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (failure: Exception) { value = Result.failure(failure) }
+                    }
+                    when {
+                        result == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                        result?.isFailure == true -> Text(result?.exceptionOrNull()?.message ?: "Couldn’t load pinned messages.")
+                        result?.getOrNull().isNullOrEmpty() -> Text("No pinned messages")
+                        else -> result?.getOrNull()?.forEach { message ->
+                            val text = message.text.ifBlank { message.attachment?.name.orEmpty() }
+                            Text(text, style = contentTextStyle(MaterialTheme.typography.bodyLarge))
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
+            "native-disappearing-messages" -> selected?.let { target ->
+                Sheet("Disappearing messages", { if (!nativeActionBusy) modal = null }) {
+                    val choices = listOf(0 to "Off", 300 to "5 minutes", 3600 to "1 hour", 86400 to "1 day",
+                        604800 to "1 week", 2419200 to "4 weeks", 31536000 to "1 year")
+                    val result by produceState<Result<Int>?>(null, target) {
+                        try { value = Result.success(model.nativeDisappearingTimer(target)) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (failure: Exception) { value = Result.failure(failure) }
+                    }
+                    val current = result?.getOrNull()
+                    when {
+                        current != null -> {
+                            Text("This timer applies to new messages in this conversation.")
+                            if (choices.none { it.first == current }) Text("Current timer: $current seconds")
+                            choices.forEach { (seconds, label) ->
+                                P2pRow(label, if (seconds == current) "Current setting" else "",
+                                    enabled = !nativeActionBusy) {
+                                    if (seconds == current) modal = null
+                                    else runNativeAction { model.setNativeDisappearingTimer(target, seconds) }
+                                }
+                            }
+                        }
+                        result != null -> Text(result?.exceptionOrNull()?.message ?: "Couldn’t load the timer.")
+                        else -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
+                }
+            }
+            "native-edit-message" -> records.firstOrNull { it.key == selected }?.let { message ->
+                InputDialog("Edit message", "Message", "Save", message.data().optString("text"),
+                    { if (!nativeActionBusy) modal = null }, contentInput = true,
+                    busy = nativeActionBusy, error = nativeActionError) { text ->
+                    runNativeAction { model.editNativeMessage(message.key, text) }
+                }
+            }
+            "native-delete-message" -> selected?.let { key ->
+                P2pAlertDialog(onDismissRequest = { if (!nativeActionBusy) modal = null },
+                    title = { Text("Delete for everyone?") },
+                    text = { Text(nativeActionError ?: "Ask the other chat members’ apps to delete this message.") },
+                    dismissButton = { P2pTextButton(enabled = !nativeActionBusy, onClick = { modal = null }) { Text("Cancel") } },
+                    confirmButton = { P2pTextButton(enabled = !nativeActionBusy, onClick = {
+                        runNativeAction { model.deleteNativeMessageForEveryone(key) }
+                    }) { Text("Delete for everyone") } })
+            }
             "delete-item" -> P2pAlertDialog(onDismissRequest = { modal = null }, title = { Text("Delete this item?") },
                 text = { Text("This deletes only the copy stored on this phone.") },
                 dismissButton = { P2pTextButton(onClick = { modal = null }) { Text("Cancel") } },
@@ -1779,6 +1933,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 Button(onClick = { modal = "add-contact" }) { Text(if (channelInviteOnly) "Back to join channel" else "Back to accept invite") }
             }
             "chat-new" -> Sheet("New chat", { modal = null }) {
+                P2pRow("Saved Messages", "Notes and saved messages", Icons.Outlined.BookmarkBorder,
+                    enabled = !nativeActionBusy) {
+                    runNativeAction(done = {}) { goThread(model.savedMessagesThread()) }
+                }
                 val available = contacts.filterNot { blocked(it.key) || it.data().has("nativeContact") }
                 NativeContactRows(model, "", showEmpty = available.isEmpty()) { id ->
                     messageContact(nativeThreadKey(id))
@@ -1822,8 +1980,21 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         else LinkedMessageText(it, ::openLink)
                     }
                     GroupDescriptionFeedback(description)
+                    P2pTextButton(onClick = {
+                        selected = group.key
+                        modal = "native-conversation-options"
+                    }) { Text("Chat options") }
                     if (peer.isNotBlank() && group.data().optString("owner") == peer) {
                         P2pTextButton(onClick = { selected = group.key; modal = "group-edit" }) { Text("Edit group") }
+                        P2pTextButton(enabled = !nativeActionBusy, onClick = {
+                            groupPhotoTarget = group.key
+                            groupPhotoPicker.launch("image/*")
+                        }) { Text("Choose group photo") }
+                        if (photo(group.key).isNotBlank()) {
+                            P2pTextButton(enabled = !nativeActionBusy, onClick = {
+                                runNativeAction(done = {}) { model.updateNativeGroupImage(group.key, null) }
+                            }) { Text("Remove group photo") }
+                        }
                     }
                 }
             }
@@ -2922,8 +3093,18 @@ internal fun ColumnScope.ThreadView(
                                     }
                                     val body = data.optString(if (isAttachment) "caption" else "text")
                                     MessageBodyWithPreviews(body, preview, openLink, bubbleColor)
+                                    if (data.optBoolean("nativeLocation")) {
+                                        Text("Shared location", style = MaterialTheme.typography.labelMedium)
+                                    }
                                     if (data.optInt("webxdcParent") > 9 && openWebxdc != null) {
                                         P2pTextButton(onClick = { openWebxdc(message) }) { Text("Open app") }
+                                    }
+                                    val details = listOfNotNull(
+                                        "Edited".takeIf { data.optBoolean("nativeEdited") },
+                                        "Pinned".takeIf { data.optBoolean("nativePinned") }
+                                    )
+                                    if (details.isNotEmpty()) {
+                                        Text(details.joinToString(" · "), style = MaterialTheme.typography.labelSmall)
                                     }
                                     val reactions = reactionsByMessage[message.key].orEmpty().values
                                         .map(ReactionMark::emoji).distinct().joinToString(" ")

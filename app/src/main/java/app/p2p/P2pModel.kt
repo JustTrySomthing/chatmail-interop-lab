@@ -523,6 +523,25 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+    internal suspend fun updateNativeGroupImage(thread: String, uri: Uri?) = withChatmail { core ->
+        val chat = writableNativeChat(core, thread)
+        check(chat.group) { "This conversation is not a group." }
+        val file = uri?.let {
+            val photo = requireNotNull(checkedPhoto(prepareProfilePhoto(context, it)))
+            File.createTempFile("group-photo-", ".jpg", context.cacheDir).also { file ->
+                try { file.writeBytes(photo) }
+                catch (failure: Exception) { file.delete(); throw failure }
+            }
+        }
+        try {
+            core.setGroupImage(chat.id, file)
+            core.nativeThread(chat.id)?.let { cacheNativeThread(it, thread) }
+            nextNativeSync = 0L
+        } finally {
+            file?.delete()
+        }
+    }
+
     internal suspend fun nativeGroupInvite(chat: Int): String = withChatmail { it.nativeGroupInvite(chat) }
 
     internal fun addChatmailRelay(code: String, saved: () -> Unit) = work {
@@ -784,6 +803,25 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val saved = records.get(key)
         val data = saved?.data() ?: obj()
         data.put("nativeChat", chat.id).put("contactRequest", chat.request).put("nativeCanSend", chat.canSend)
+        data.put("nativeSelfTalk", chat.selfTalk)
+        if (chat.group) {
+            val path = chat.imagePath
+            if (path == null) {
+                data.remove("nativePhotoPath")
+                data.remove("photo")
+            } else if (path != data.optString("nativePhotoPath")) {
+                try {
+                    val root = File(context.noBackupFilesDir, "chatmail").canonicalFile.toPath()
+                    val image = File(path).canonicalFile
+                    if (image.toPath().startsWith(root) && image.isFile && image.length() in 1..CHATMAIL_FILE_LIMIT) {
+                        data.put("photo", prepareProfilePhoto(context, Uri.fromFile(image)))
+                        data.put("nativePhotoPath", path)
+                    }
+                } catch (failure: Exception) {
+                    AppLog.record(context, "Couldn’t load Chatmail group image", failure)
+                }
+            }
+        }
         if (key == nativeThreadKey(chat.id)) {
             data.put("name", chat.name)
                 .put("members", jsonArray(listOf(peer.value) + chat.members.map(::nativePeerKey)))
@@ -866,6 +904,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 val data = old ?: obj()
                 data.put("nativeMessage", message.id).put("thread", thread).put("author", author)
                     .put("text", message.text).put("caption", message.text)
+                    .put("nativeEdited", message.edited).put("nativePinned", message.pinned)
+                    .put("nativeLocation", message.hasLocation)
                     .put("group", if (chat.group) thread else "")
                     .put("unread", !data.optBoolean("locallyDeleted") &&
                         (message.state == 10 || data.optBoolean("locallyUnread")))
@@ -1271,6 +1311,62 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 password.fill('\u0000')
                 backupWorking.value = false
             }
+        }
+    }
+
+    internal suspend fun exportChatmailProfile(destination: Uri) = withContext(Dispatchers.IO) {
+        check(backupWorking.compareAndSet(false, true)) { "A backup operation is already running." }
+        var folder: File? = null
+        try {
+            val staging = java.nio.file.Files.createTempDirectory(context.cacheDir.toPath(), "chatmail-export-").toFile()
+            folder = staging
+            withChatmail { it.exportProfileBackup(staging) }
+            val archive = requireNotNull(staging.listFiles()?.singleOrNull { it.isFile && it.extension == "tar" }) {
+                "Chatmail did not create a backup."
+            }
+            checkNotNull(context.contentResolver.openOutputStream(destination, "wt")) {
+                "Couldn’t open the backup destination."
+            }.use { output -> archive.inputStream().use { it.copyTo(output) } }
+            notice.value = "Chatmail backup saved."
+        } finally {
+            folder?.deleteRecursively()
+            backupWorking.value = false
+        }
+        Unit
+    }
+
+    internal fun importChatmailProfile(source: Uri) = work {
+        check(backupWorking.compareAndSet(false, true)) { "A backup operation is already running." }
+        try {
+            recoveryLock.withLock {
+                check(records.get("profile")?.data()?.optString("name").isNullOrBlank()) {
+                    "Restore a Chatmail backup during setup on a fresh install."
+                }
+                val directory = java.nio.file.Files.createTempDirectory(context.cacheDir.toPath(), "chatmail-import-").toFile()
+                try {
+                    val staged = File(directory, "chatmail-backup.tar")
+                    checkNotNull(context.contentResolver.openInputStream(source)) { "Couldn’t open the backup." }
+                        .use { input -> staged.outputStream().use { output -> input.copyTo(output) } }
+                    chatmailLock.withLock {
+                        check(records.get("profile")?.data()?.optString("name").isNullOrBlank()) {
+                            "Restore a Chatmail backup before creating a profile."
+                        }
+                        val root = File(context.noBackupFilesDir, "chatmail")
+                        val core = chatmail ?: openChatmail(root).also { chatmail = it }
+                        check(!core.isConfigured()) { "A Chatmail profile is already set up on this install." }
+                        core.importProfileBackup(staged)
+                        val name = core.profileName().trim().take(60).ifBlank { "Chatmail profile" }
+                        save("profile", "profile", obj("name" to name))
+                        nextChatmailConnect = 0L
+                        nextNativeSync = 0L
+                    }
+                } finally {
+                    directory.deleteRecursively()
+                }
+            }
+            notice.value = "Chatmail profile restored."
+        } finally {
+            backupWorking.value = false
         }
     }
 
@@ -2065,6 +2161,95 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             save(key, "message-reaction", reaction)
             targets.forEach { queue(it, reaction) }
         }
+    }
+
+    private suspend fun writableNativeChat(core: Chatmail, thread: String): NativeThread {
+        val record = records.get(thread)?.data()
+        check(record?.optBoolean("blocked") != true && !groupBlocked(thread) &&
+            records.get("folder:$thread")?.data()?.optString("name") != "Trash") {
+            "This conversation is unavailable."
+        }
+        return requireNotNull(core.nativeThread(record?.optInt("nativeChat") ?: 0)
+            ?.takeIf { it.canSend && !it.request }) { "This conversation cannot send yet." }
+    }
+
+    private suspend fun changeNativeMessage(
+        key: String, own: Boolean = false, refreshSingle: Boolean = true, change: (Chatmail, NativeMessage) -> Unit
+    ) = withChatmail { core ->
+        val data = requireNotNull(records.get(key)?.data()) { "This message is unavailable." }
+        val thread = data.optString("thread")
+        val chat = writableNativeChat(core, thread)
+        val message = requireNotNull(core.nativeMessage(chat.id, data.optInt("nativeMessage"))
+            ?.takeIf { it.webxdcParent == null && (!own || it.from == 1) }) { "This message is unavailable." }
+        change(core, message)
+        if (refreshSingle) refreshAfterNativeSend(core, chat.id, thread, message.id)
+        else updateNativeHistory(core, chat, thread, 25, cached = records.threadItems().filter {
+            it.data().optString("thread") == thread
+        })
+        nextNativeSync = 0L
+    }
+
+    internal suspend fun editNativeMessage(key: String, draft: String) {
+        val text = draft.trim()
+        require(text.isNotEmpty() && text.length <= INTEROP_TEXT_LIMIT) { "Enter up to $INTEROP_TEXT_LIMIT characters." }
+        changeNativeMessage(key, own = true) { core, message -> core.editMessage(message.id, text) }
+    }
+
+    internal suspend fun deleteNativeMessageForEveryone(key: String) =
+        changeNativeMessage(key, own = true, refreshSingle = false) { core, message ->
+            core.deleteMessageForEveryone(message.id)
+        }
+
+    internal fun toggleNativeMessagePin(key: String) = work {
+        changeNativeMessage(key) { core, message -> core.setMessagePinned(message.id, !message.pinned) }
+    }
+
+    internal fun saveNativeMessage(key: String) = work {
+        changeNativeMessage(key) { core, message -> core.saveMessage(message.id) }
+        notice.value = "Added to Saved Messages."
+    }
+
+    internal suspend fun savedMessagesThread(): String = withChatmail { core ->
+        val chat = requireNotNull(core.nativeThread(core.savedMessagesChat())?.takeIf { it.selfTalk })
+        cacheNativeThread(chat)
+        refreshAfterNativeSend(core, chat.id, nativeThreadKey(chat.id))
+        nativeThreadKey(chat.id)
+    }
+
+    internal suspend fun pinnedNativeMessages(thread: String): List<NativeMessage> = withChatmail { core ->
+        val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+        check(core.nativeThread(chat) != null) { "This conversation is unavailable." }
+        core.pinnedMessages(chat)
+    }
+
+    internal suspend fun nativeDisappearingTimer(thread: String): Int = withChatmail { core ->
+        val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+        check(core.nativeThread(chat) != null) { "This conversation is unavailable." }
+        core.disappearingTimer(chat)
+    }
+
+    internal suspend fun setNativeDisappearingTimer(thread: String, seconds: Int) = withChatmail { core ->
+        val chat = writableNativeChat(core, thread)
+        core.setDisappearingTimer(chat.id, seconds)
+    }
+
+    internal suspend fun nativeMessageLocation(key: String): Pair<Double, Double> = withChatmail { core ->
+        val row = requireNotNull(records.get(key)?.data()) { "This message is unavailable." }
+        val thread = row.optString("thread")
+        val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+        val id = row.optInt("nativeMessage")
+        val message = core.message(id)
+        require(id > 9 && chat > 9 && message.optInt("chatId") == chat &&
+            isEncryptedChatmailMessage(message, chat) && message.optBoolean("hasLocation")) {
+            "This message has no shared location."
+        }
+        requireNotNull(core.messageLocation(chat, id, message.getLong("timestamp"))) { "This location is unavailable." }
+    }
+
+    internal suspend fun reactToChannelPost(id: Int, emoji: String) = withChatmail { core ->
+        require(emoji.isEmpty() || isPickerEmoji(context, emoji)) { "Choose an emoji." }
+        check(core.channelPost(id) != null) { "This post is unavailable." }
+        core.nativeReact(id, emoji)
     }
 
     private suspend fun recipients(thread: String): List<String> {

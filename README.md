@@ -32,6 +32,14 @@ Verified Chatmail mappings let earlier one-to-one conversations use Core while r
 
 Use the shared Chatmail Core adapter for both Delta Chat and ArcaneChat. Chats, Groups, Channels, and Talk share Core account access. Contact profiles use the same parser, and all three SecureJoin invite screens share the QR and link controls. Keep Relay Lab presentation and media tools in the app. The signed P2P path supports earlier conversations, invites, and backups. Keep new interoperability features on the Core path.
 
+## Chatmail controls and recovery
+
+Long-press a message for editing, deletion for everyone, shared pinning, and saving to Saved Messages. Open Saved Messages from **Start a chat**. Tap the conversation title for Chat options. Groups include Chat options inside Group info. Chat options has the disappearing-message timer and the shared pin list. Long-press a message containing a point location to open it in a maps app. Chats render basic inline Markdown formatting.
+
+In Group info, choose or remove a group photo. On a channel post, use the emoji button to send or remove your reaction. The Chatmail contact list shows the day a contact was last seen when Core reports it.
+
+In **Settings → Backup**, export a standard Chatmail archive that includes the profile and its history. It contains private keys and messages, so keep it in private storage. Choose **Restore Chatmail backup** during setup on a fresh install to import an archive. Existing installations retain their profile and use the existing P2P backup controls for earlier P2P data. Profile switching and QR-based second-device transfer are pending.
+
 ## Device test status
 
 Use fresh profiles and record the client versions and networks used. SecureJoin can continue after the app starts the handshake. The table records device testing separately from build and unit checks. Group invitations, membership changes, and exchange of text, replies, files, and reactions still need cross-client device tests.
