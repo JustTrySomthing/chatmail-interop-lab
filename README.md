@@ -53,7 +53,7 @@ Read Aloud uses the included offline voices and existing speech animation for me
 
 ## Talk calls
 
-Talk uses Chatmail Core for call signaling and relay configuration. It bundles the shared Delta Chat and ArcaneChat Android v2.69.0 WebRTC client and uses their WebRTC 129 dependency. Calls start with the camera off. During a connected call, tap the camera icon to turn video on or off. Video capture stops when Relay Lab goes to the background.
+Talk uses Chatmail Core for call signaling and relay configuration. It bundles the shared Delta Chat and ArcaneChat Android v2.69.0 WebRTC client and uses their WebRTC 129 dependency. Calls start with the camera off. During a connected call, tap the camera icon to turn video on or off. With video on, use the camera switch to change lenses. The screen follows Android’s auto-rotate setting and keeps the camera active during rotation. Video capture stops when Relay Lab goes to the background. App Log records outgoing video resolution and frame rate for troubleshooting.
 
 | Client | Relay Lab calls client | Client calls Relay Lab |
 | --- | --- | --- |

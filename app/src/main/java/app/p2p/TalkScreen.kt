@@ -163,7 +163,8 @@ private fun RecentTalkCallRow(
 @Composable
 internal fun TalkCallPanel(
     call: TalkCall, name: String, photo: String, end: () -> Unit,
-    answer: () -> Unit, speaker: () -> Unit, mute: () -> Unit, camera: () -> Unit, message: (() -> Unit)?
+    answer: () -> Unit, speaker: () -> Unit, mute: () -> Unit, camera: () -> Unit,
+    switchCamera: () -> Unit, message: (() -> Unit)?
 ) {
     val colors = MaterialTheme.colorScheme
     val pending = call.phase == TalkPhase.Connecting || call.phase == TalkPhase.Incoming
@@ -189,7 +190,7 @@ internal fun TalkCallPanel(
         }
         if (mainVideo != null) {
             FullScreenTalkVideo(call, name, elapsed, mainVideo, local.takeIf { remote != null }, remote == null,
-                camera, mute, speaker, end)
+                camera, switchCamera, mute, speaker, end)
             return@Dialog
         }
         Surface(Modifier.padding(horizontal = 20.dp).widthIn(max = 424.dp).fillMaxWidth(),
@@ -276,13 +277,14 @@ internal fun TalkCallPanel(
 
 @Composable
 private fun FullScreenTalkVideo(
-    call: TalkCall, name: String, elapsed: Long, mainVideo: VideoTrack, corner: VideoTrack?, mirror: Boolean,
-    camera: () -> Unit, mute: () -> Unit, speaker: () -> Unit, end: () -> Unit
+    call: TalkCall, name: String, elapsed: Long, mainVideo: VideoTrack, corner: VideoTrack?, localMain: Boolean,
+    camera: () -> Unit, switchCamera: () -> Unit, mute: () -> Unit, speaker: () -> Unit, end: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
     val overlay = Color.Black.copy(alpha = 0.68f)
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        TalkVideo(mainVideo, Modifier.matchParentSize(), mirror, corner = false)
+        TalkVideo(mainVideo, Modifier.matchParentSize(), mirror = localMain && call.frontCamera,
+            localPreview = localMain, corner = false)
         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)) {
             Surface(Modifier.align(Alignment.TopStart).widthIn(max = 208.dp), color = overlay,
                 contentColor = Color.White, shape = RoundedCornerShape(14.dp)) {
@@ -294,18 +296,26 @@ private fun FullScreenTalkVideo(
             }
             corner?.let {
                 TalkVideo(it, Modifier.align(Alignment.TopEnd).width(104.dp).aspectRatio(3f / 4f),
-                    mirror = true, corner = true)
+                    mirror = call.frontCamera, localPreview = true, corner = true)
             }
             Surface(Modifier.align(Alignment.BottomCenter), color = overlay,
                 contentColor = Color.White, shape = CircleShape) {
                 Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                    IconButton(onClick = camera, modifier = Modifier.semantics {
+                    IconButton(onClick = camera, enabled = !call.switchingCamera, modifier = Modifier.semantics {
                         stateDescription = if (call.camera) "On" else "Off"
                     }) {
                         Icon(if (call.camera) Icons.Outlined.Videocam else Icons.Outlined.VideocamOff,
                             if (call.camera) "Turn camera off" else "Turn camera on",
                             tint = if (call.camera) Color.White else Color.LightGray)
+                    }
+                    if (call.camera) {
+                        IconButton(onClick = switchCamera, enabled = !call.switchingCamera, modifier = Modifier.semantics {
+                            stateDescription = if (call.frontCamera) "Front camera" else "Rear camera"
+                        }) {
+                            Icon(Icons.Outlined.FlipCameraAndroid,
+                                if (call.frontCamera) "Switch to rear camera" else "Switch to front camera")
+                        }
                     }
                     IconButton(onClick = mute) {
                         Icon(if (call.muted) Icons.Outlined.MicOff else Icons.Outlined.Mic,
@@ -401,14 +411,13 @@ internal fun recentCallTime(time: Long): String {
 }
 
 @Composable
-private fun TalkVideo(track: VideoTrack, modifier: Modifier, mirror: Boolean, corner: Boolean) {
+private fun TalkVideo(track: VideoTrack, modifier: Modifier, mirror: Boolean, localPreview: Boolean, corner: Boolean) {
     val context = LocalContext.current
     val renderer = remember(track, corner) {
         SurfaceViewRenderer(context).apply { if (corner) setZOrderMediaOverlay(true) }
     }
     DisposableEffect(track, renderer) {
         renderer.init(EglUtils.getEglBase().eglBaseContext, null)
-        renderer.setMirror(mirror)
         renderer.setScalingType(if (corner) RendererCommon.ScalingType.SCALE_ASPECT_FIT
             else RendererCommon.ScalingType.SCALE_ASPECT_FILL)
         renderer.setEnableHardwareScaler(true)
@@ -419,8 +428,8 @@ private fun TalkVideo(track: VideoTrack, modifier: Modifier, mirror: Boolean, co
         }
     }
     key(track, corner) {
-        AndroidView(factory = { renderer }, modifier = modifier.semantics {
-            contentDescription = if (mirror) "Your camera" else "Remote camera"
+        AndroidView(factory = { renderer }, update = { it.setMirror(mirror) }, modifier = modifier.semantics {
+            contentDescription = if (localPreview) "Your camera" else "Remote camera"
         })
     }
 }

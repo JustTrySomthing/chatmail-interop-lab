@@ -44,6 +44,8 @@ internal data class TalkCall(
     val displayName: String = "",
     val startsWithVideo: Boolean = false,
     val camera: Boolean = false,
+    val frontCamera: Boolean = true,
+    val switchingCamera: Boolean = false,
     val localVideo: VideoTrack? = null,
     val remoteVideo: VideoTrack? = null,
     val remoteCamera: Boolean = false
@@ -246,18 +248,49 @@ internal class TalkCalls(
     }
 
     fun toggleCamera() {
-        val call = current.value?.takeIf { it.phase == TalkPhase.Active } ?: return
+        val call = current.value?.takeIf { it.phase == TalkPhase.Active && !it.switchingCamera } ?: return
+        setCameraEnabled(call, !call.camera)
+    }
+
+    private fun setCameraEnabled(call: TalkCall, enabled: Boolean) {
         val manager = media ?: return
         val rtc = client ?: return
-        if (call.camera) {
+        if (enabled) {
+            if (!manager.startVideoCapture()) return
+            rtc.setVideoEnabled(true)
+        } else {
             rtc.setVideoEnabled(false)
             manager.stopVideoCapture()
-        } else if (!manager.startVideoCapture()) return
-        else rtc.setVideoEnabled(true)
-        current.value = call.copy(camera = !call.camera)
-        rtc.sendMutedState(!call.muted, !call.camera)
+        }
+        current.value = call.copy(camera = enabled, frontCamera = manager.isFrontCamera, switchingCamera = false)
+        rtc.sendMutedState(!call.muted, enabled)
         videoStats?.cancel()
-        videoStats = if (call.camera) null else sampleOutgoingVideo(call.id, rtc)
+        videoStats = if (enabled) sampleOutgoingVideo(call.id, rtc) else null
+    }
+
+    fun switchCamera() {
+        val call = current.value?.takeIf { it.phase == TalkPhase.Active && it.camera && !it.switchingCamera } ?: return
+        val manager = media ?: return
+        current.value = call.copy(switchingCamera = true)
+        manager.switchCamera(object : MediaStreamManager.CameraSwitchCallback {
+            override fun onCameraSwitch(isFrontCamera: Boolean) {
+                scope.launch {
+                    val currentCall = current.value?.takeIf { it.id == call.id && it.camera && it.switchingCamera }
+                        ?: return@launch
+                    current.value = currentCall.copy(frontCamera = isFrontCamera, switchingCamera = false)
+                    videoStats?.cancel()
+                    videoStats = client?.let { sampleOutgoingVideo(call.id, it) }
+                }
+            }
+
+            override fun onError(error: String) {
+                scope.launch {
+                    val currentCall = current.value?.takeIf { it.id == call.id && it.switchingCamera } ?: return@launch
+                    current.value = currentCall.copy(switchingCamera = false)
+                    AppLog.record(context, "Talk: couldn’t switch cameras")
+                }
+            }
+        })
     }
 
     private fun sampleOutgoingVideo(id: String, rtc: WebRTCClient): Job = scope.launch {
@@ -325,7 +358,7 @@ internal class TalkCalls(
     }
 
     fun onAppHidden() {
-        if (current.value?.camera == true) toggleCamera()
+        current.value?.takeIf { it.camera }?.let { setCameraEnabled(it, false) }
         silence()
     }
 

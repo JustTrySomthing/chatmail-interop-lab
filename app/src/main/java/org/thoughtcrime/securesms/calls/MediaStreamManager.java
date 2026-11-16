@@ -263,6 +263,7 @@ public class MediaStreamManager {
 
     if (!(videoCapturer instanceof CameraVideoCapturer)) {
       Log.e(TAG, "switchCamera called but videoCapturer is not a CameraVideoCapturer");
+      if (callback != null) callback.onError("Camera does not support switching");
       return;
     }
 

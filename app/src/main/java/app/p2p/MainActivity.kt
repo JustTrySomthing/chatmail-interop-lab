@@ -168,7 +168,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         readAloud.stop()
-        model.setForeground(false)
+        // Android restarts the activity on rotation while the call stays in the foreground.
+        if (!isChangingConfigurations) model.setForeground(false)
         super.onStop()
     }
 
@@ -1355,7 +1356,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     else ({ requestTalkMic(TalkMicAction.Message, call.contact) })
                 TalkCallPanel(call, call.displayName.ifBlank { name(call.contact) }, photo(call.contact), model.talk::end,
                     { requestTalkMic(TalkMicAction.Answer, call.id) }, model.talk::toggleSpeaker, model.talk::toggleMute,
-                    ::toggleCallCamera, leaveMessage)
+                    ::toggleCallCamera, model.talk::switchCamera, leaveMessage)
             }
         }
 
