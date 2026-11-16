@@ -1,6 +1,6 @@
 # Relay Lab
 
-[**Download the latest Relay Lab APK**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc49/P2P-0.7.23-rc49-ARM64-Preview.apk) · 0.7.23-rc49 ARM64 preview
+[**Download the latest Relay Lab APK**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc50/P2P-0.7.23-rc50-ARM64-Preview.apk) · 0.7.23-rc50 ARM64 preview
 
 Private Android project for experimenting with Delta Chat and ArcaneChat interoperability. The source starts from the verified [P2P 0.7.23-rc45 workspace](https://github.com/JustTrySomthing/P2P-Releases/releases/tag/v0.7.23-rc45).
 
