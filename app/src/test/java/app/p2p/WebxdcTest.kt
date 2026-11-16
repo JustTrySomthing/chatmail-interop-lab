@@ -1,6 +1,10 @@
 package app.p2p
 
+import android.Manifest
 import android.net.Uri
+import android.webkit.PermissionRequest
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -33,6 +37,52 @@ class WebxdcTest {
         assertNull(path("https://$host/%2e%2e/index.html"))
         assertNull(path("https://rl-test-msg13.localhost/index.html"))
         assertNull(path("file:///index.html"))
+    }
+
+    @Test fun cameraAndMicrophoneAreTheOnlyWebxdcCaptureResources() {
+        val host = "rl-test-msg12.localhost"
+        fun permissions(url: String, vararg resources: String) =
+            webxdcCapturePermissions(Uri.parse(url), host, arrayOf(*resources))
+        val video = PermissionRequest.RESOURCE_VIDEO_CAPTURE
+        val audio = PermissionRequest.RESOURCE_AUDIO_CAPTURE
+        assertEquals(listOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO),
+            permissions("https://$host", video, audio))
+        assertNull(permissions("http://$host", video))
+        assertNull(permissions("https://rl-test-msg13.localhost", video))
+        assertNull(permissions("https://$host:443", video))
+        assertNull(permissions("https://$host", video, "new-unknown-resource"))
+        assertNull(permissions("https://$host", PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID))
+    }
+
+    @Test fun webxdcCaptureRequiresConsentAndRejectsHiddenOrCanceledRequests() {
+        val host = "rl-test-msg12.localhost"
+        val application = RuntimeEnvironment.getApplication()
+        shadowOf(application).grantPermissions(Manifest.permission.CAMERA)
+        val access = WebxdcCaptureAccess(application, host)
+        class Request : PermissionRequest() {
+            var granted: List<String>? = null
+            var denied = false
+            override fun getOrigin() = Uri.parse("https://$host")
+            override fun getResources() = arrayOf(RESOURCE_VIDEO_CAPTURE)
+            override fun grant(resources: Array<String>) { granted = resources.toList() }
+            override fun deny() { denied = true }
+        }
+        val hidden = Request()
+        access.receive(hidden, foreground = false)
+        assertTrue(hidden.denied)
+        val canceled = Request()
+        access.receive(canceled, foreground = true)
+        assertNull(canceled.granted)
+        access.canceled(canceled)
+        access.approve(foreground = true) { fail("No pending request") }
+        assertNull(canceled.granted)
+        val allowed = Request()
+        access.receive(allowed, foreground = true)
+        assertEquals(listOf(Manifest.permission.CAMERA), access.promptPermissions)
+        assertNull(allowed.granted)
+        access.approve(foreground = true) { fail("Android camera access is already granted") }
+        assertEquals(listOf(PermissionRequest.RESOURCE_VIDEO_CAPTURE), allowed.granted)
+        assertTrue(access.authorized)
     }
 
     @Test fun preservesNativeWebxdcTypeEvenForGenericFilePicker() {

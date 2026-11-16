@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.net.Uri
 import android.util.Base64
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.*
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -48,7 +49,7 @@ private val sandboxHeaders = mapOf(
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; connect-src 'self' data: blob:; " +
         "img-src 'self' data: blob:; media-src 'self' data: blob:; frame-src 'self' data: blob:; " +
         "worker-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'; webrtc 'block';"),
-    "Permissions-Policy" to "camera=(), microphone=(), geolocation=(), accelerometer=(), gyroscope=(), magnetometer=()",
+    "Permissions-Policy" to "camera=(self), microphone=(self), geolocation=(), accelerometer=(), gyroscope=(), magnetometer=()",
     "X-DNS-Prefetch-Control" to "off",
     "X-Content-Type-Options" to "nosniff",
     "Cache-Control" to "no-store"
@@ -186,6 +187,31 @@ private fun ColumnScope.SandboxedWebxdc(
     var ready by remember(id) { mutableStateOf(false) }
     var startError by remember(id) { mutableStateOf(false) }
     var fileCallback by remember(id) { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    val capture = remember(id, host) { WebxdcCaptureAccess(context, host) }
+    val destroyed = remember(id) { AtomicBoolean(false) }
+    fun captureInForeground(): Boolean = live.get() && !rendererFailed && isVisible &&
+        lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+    val capturePermissionsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        capture.androidResult(captureInForeground())
+    }
+    fun releaseBrowser(web: WebView) {
+        if (!destroyed.compareAndSet(false, true)) return
+        live.set(false)
+        capture.deny()
+        fileCallback?.onReceiveValue(null)
+        fileCallback = null
+        if (!rendererFailed) {
+            web.removeJavascriptInterface("InternalJSApi")
+            web.stopLoading()
+        }
+        (web.parent as? ViewGroup)?.removeView(web)
+        web.destroy()
+        view = null
+    }
+    fun endCapture(browser: WebView?) {
+        browser?.let(::releaseBrowser)
+        closeAction()
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
             ?.filter { it.scheme == "content" }?.toTypedArray()
@@ -233,15 +259,25 @@ private fun ColumnScope.SandboxedWebxdc(
         val browser = view
         val observer = LifecycleEventObserver { _, event ->
             if (live.get() && visible && !rendererFailed) when (event) {
-                Lifecycle.Event.ON_RESUME -> browser?.onResume()
-                Lifecycle.Event.ON_PAUSE -> browser?.onPause()
+                Lifecycle.Event.ON_RESUME -> {
+                    browser?.onResume()
+                    capture.settle(captureInForeground())
+                }
+                Lifecycle.Event.ON_PAUSE -> {
+                    if (capture.authorized) endCapture(browser)
+                    else browser?.onPause()
+                }
                 else -> Unit
             }
         }
         if (visible) lifecycle.addObserver(observer)
         else {
-            browser?.onPause()
-            browser?.clearFocus()
+            capture.deny()
+            if (capture.authorized) endCapture(browser)
+            else {
+                browser?.onPause()
+                browser?.clearFocus()
+            }
             fileCallback?.onReceiveValue(null)
             fileCallback = null
             if (speech?.active?.startsWith(speechPrefix) == true) speech.stop()
@@ -305,7 +341,13 @@ private fun ColumnScope.SandboxedWebxdc(
                     }
                 }
                 web.webChromeClient = object : WebChromeClient() {
-                    override fun onPermissionRequest(request: PermissionRequest) = request.deny()
+                    override fun onPermissionRequest(request: PermissionRequest) {
+                        capture.receive(request, captureInForeground())
+                    }
+
+                    override fun onPermissionRequestCanceled(request: PermissionRequest) {
+                        capture.canceled(request)
+                    }
                     override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>,
                                                    params: FileChooserParams): Boolean {
                         if (!isVisible) {
@@ -339,17 +381,16 @@ private fun ColumnScope.SandboxedWebxdc(
                 web.loadUrl("https://$host$BOOTSTRAP_PATH?i=0&h=$guard&href=$entry")
             }
         },
-        update = { web -> web.visibility = if (visible) View.VISIBLE else View.INVISIBLE },
-        onRelease = { web ->
-            live.set(false)
-            fileCallback?.onReceiveValue(null)
-            fileCallback = null
-            web.removeJavascriptInterface("InternalJSApi")
-            web.stopLoading()
-            web.destroy()
-            view = null
-        }
+        update = { web ->
+            if (!destroyed.get()) web.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+        },
+        onRelease = ::releaseBrowser
     )
+    if (visible && !rendererFailed) capture.promptPermissions?.let { permissions ->
+        WebxdcCapturePrompt(info.name, permissions,
+            approve = { capture.approve(captureInForeground()) { capturePermissionsLauncher.launch(it) } },
+            deny = capture::deny)
+    }
     DisposableEffect(id) {
         onDispose {
             live.set(false)
