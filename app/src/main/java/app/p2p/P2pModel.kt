@@ -9,7 +9,9 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -2739,6 +2741,8 @@ class P2pModel internal constructor(application: Application, internal val profi
     private suspend fun stageFile(
         attachment: AttachmentDraft, thread: String, group: String, post: String = "", policy: OutgoingMediaPolicy
     ): JSONObject {
+        val operation = currentCoroutineContext()
+        operation.ensureActive()
         val id = newId()
         var name = attachment.label
         var mime = attachment.mime
@@ -2748,7 +2752,8 @@ class P2pModel internal constructor(application: Application, internal val profi
             context.contentResolver.openInputStream(attachment.uri)?.use { input ->
                 source.outputStream().buffered().use { output ->
                     java.security.DigestInputStream(input, originalHash).copyBoundedTo(
-                        output, NATIVE_ATTACHMENT_FILE_LIMIT, "This attachment is too large.", bufferSize = 128 * 1024
+                        output, NATIVE_ATTACHMENT_FILE_LIMIT, "This attachment is too large.",
+                        bufferSize = 128 * 1024, checkActive = operation::ensureActive
                     )
                 }
             } ?: error("Couldn’t open " + name)
@@ -2758,13 +2763,22 @@ class P2pModel internal constructor(application: Application, internal val profi
                 originalHash.digest().hex()
             } else {
                 try {
-                    if (!compressed.file.renameTo(source)) compressed.file.copyTo(source, overwrite = true)
+                    operation.ensureActive()
+                    if (!compressed.file.renameTo(source)) {
+                        compressed.file.inputStream().use { input ->
+                            source.outputStream().use { output ->
+                                input.copyBoundedTo(output, NATIVE_ATTACHMENT_FILE_LIMIT, "This attachment is too large.",
+                                    bufferSize = 128 * 1024, checkActive = operation::ensureActive)
+                            }
+                        }
+                    }
                     name = name.substringBeforeLast('.', name) + "." + compressed.extension
                     mime = compressed.mime
                     val finalHash = MessageDigest.getInstance("SHA-256")
                     source.inputStream().buffered().use { input ->
                         val buffer = ByteArray(128 * 1024)
                         while (true) {
+                            operation.ensureActive()
                             val count = input.read(buffer)
                             if (count < 0) break
                             finalHash.update(buffer, 0, count)
@@ -2775,6 +2789,7 @@ class P2pModel internal constructor(application: Application, internal val profi
                     compressed.file.delete()
                 }
             }
+            operation.ensureActive()
             require(source.length() <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment is too large." }
             return obj("type" to "offer", "id" to id, "name" to name, "mime" to mime,
                 "size" to source.length(), "digest" to hash, "thread" to thread,

@@ -3,10 +3,15 @@ package app.p2p
 import android.graphics.ImageDecoder
 import android.graphics.drawable.AnimatedImageDrawable
 import android.net.Uri
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Base64
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
@@ -24,6 +29,28 @@ internal fun exampleAnimatedWebP(): ByteArray = Base64.getDecoder().decode(
 @Config(sdk = [34])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AttachmentCompressionTest {
+    @Test
+    fun attachmentCopyStopsAfterCancellationDuringAProviderRead() {
+        val job = Job()
+        var reads = 0
+        val input = object : InputStream() {
+            override fun read() = error("Expected buffered reads")
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                reads++
+                if (reads == 2) job.cancel()
+                check(reads <= 2) { "The copy continued after cancellation." }
+                buffer[offset] = reads.toByte()
+                return 1
+            }
+        }
+        val output = ByteArrayOutputStream()
+        assertThrows(CancellationException::class.java) {
+            input.copyBoundedTo(output, 10, "Too large", checkActive = job::ensureActive)
+        }
+        assertEquals(2, reads)
+        assertArrayEquals(byteArrayOf(1), output.toByteArray())
+    }
+
     @Test
     fun recognizesSharedVideosWithGenericMimeTypesAndPreservesExtensions() {
         assertEquals("video/quicktime", attachmentMime("clip.MOV", "application/octet-stream"))

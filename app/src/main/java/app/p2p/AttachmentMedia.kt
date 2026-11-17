@@ -23,6 +23,7 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -246,48 +247,52 @@ internal class AttachmentCompressor(private val context: Context) {
         item: MediaItem, video: VideoPass?, hasAudio: Boolean, hdr: Int, output: File, flatten: Boolean
     ): Int? = withTimeoutOrNull(12 * 60_000L) {
         withContext(Dispatchers.Main.immediate) {
-            suspendCancellableCoroutine<Int> { ready ->
-                try {
-                    val edited = EditedMediaItem.Builder(item)
-                        .setRemoveVideo(video == null)
-                        .setRemoveAudio(!hasAudio)
-                        .setFlattenForSlowMotion(video != null && flatten)
-                        .setEffects(Effects(emptyList(), video?.let {
-                            listOf(Presentation.createForWidthAndHeight(it.width, it.height, Presentation.LAYOUT_SCALE_TO_FIT))
-                        }.orEmpty()))
-                        .build()
-                    val composition = Composition.Builder(EditedMediaItemSequence.Builder(edited).build())
-                        .setHdrMode(hdr)
-                        .build()
-                    val transformer = Transformer.Builder(context).apply {
-                        setAudioMimeType(MimeTypes.AUDIO_AAC)
-                        if (video != null) {
-                            setVideoMimeType(MimeTypes.VIDEO_H264)
-                            setPortraitEncodingEnabled(true)
-                            setMaxDelayBetweenMuxerSamplesMs(60_000)
-                            setEncoderFactory(DefaultEncoderFactory.Builder(context)
-                                .setRequestedAudioEncoderSettings(AudioEncoderSettings.Builder().setBitrate(96_000).build())
-                                .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(video.bitrate)
-                                    .setiFrameIntervalSeconds(2f).build())
-                                .setEnableFallback(true)
-                                .build())
-                        }
-                        addListener(object : Transformer.Listener {
-                            override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                                if (ready.isActive) ready.resume(0)
+            var transformer: Transformer? = null
+            try {
+                suspendCancellableCoroutine<Int> { ready ->
+                    try {
+                        val edited = EditedMediaItem.Builder(item)
+                            .setRemoveVideo(video == null)
+                            .setRemoveAudio(!hasAudio)
+                            .setFlattenForSlowMotion(video != null && flatten)
+                            .setEffects(Effects(emptyList(), video?.let {
+                                listOf(Presentation.createForWidthAndHeight(it.width, it.height, Presentation.LAYOUT_SCALE_TO_FIT))
+                            }.orEmpty()))
+                            .build()
+                        val composition = Composition.Builder(EditedMediaItemSequence.Builder(edited).build())
+                            .setHdrMode(hdr)
+                            .build()
+                        val exporter = Transformer.Builder(context).apply {
+                            setAudioMimeType(MimeTypes.AUDIO_AAC)
+                            if (video != null) {
+                                setVideoMimeType(MimeTypes.VIDEO_H264)
+                                setPortraitEncodingEnabled(true)
+                                setMaxDelayBetweenMuxerSamplesMs(60_000)
+                                setEncoderFactory(DefaultEncoderFactory.Builder(context)
+                                    .setRequestedAudioEncoderSettings(AudioEncoderSettings.Builder().setBitrate(96_000).build())
+                                    .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(video.bitrate)
+                                        .setiFrameIntervalSeconds(2f).build())
+                                    .setEnableFallback(true)
+                                    .build())
                             }
-                            override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
-                                if (ready.isActive) ready.resume(exportException.errorCode)
-                            }
-                        })
-                    }.build()
-                    ready.invokeOnCancellation {
-                        android.os.Handler(android.os.Looper.getMainLooper()).post { runCatching { transformer.cancel() } }
+                            addListener(object : Transformer.Listener {
+                                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                                    if (ready.isActive) ready.resume(0)
+                                }
+                                override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+                                    if (ready.isActive) ready.resume(exportException.errorCode)
+                                }
+                            })
+                        }.build()
+                        transformer = exporter
+                        exporter.start(composition, output.absolutePath)
+                    } catch (_: RuntimeException) {
+                        if (ready.isActive) ready.resume(-1)
                     }
-                    transformer.start(composition, output.absolutePath)
-                } catch (_: RuntimeException) {
-                    if (ready.isActive) ready.resume(-1)
                 }
+            } catch (cancelled: CancellationException) {
+                runCatching { transformer?.cancel() }
+                throw cancelled
             }
         }
     }.let { status -> if (status == 0) null else status ?: ExportException.ERROR_CODE_MUXING_TIMEOUT }

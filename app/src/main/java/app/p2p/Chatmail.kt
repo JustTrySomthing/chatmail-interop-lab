@@ -18,11 +18,15 @@ internal const val PACKET_PREFIX = "P2P/1 "
 private val MESSAGE_EVENTS = setOf("IncomingMsg", "MsgsChanged", "MsgsNoticed", "MsgDelivered", "MsgFailed",
     "MsgRead", "ChatModified", "ChatlistChanged", "ReactionsChanged")
 
-internal fun InputStream.copyBoundedTo(output: OutputStream, limit: Long, error: String, bufferSize: Int = 8192): Long {
+internal fun InputStream.copyBoundedTo(
+    output: OutputStream, limit: Long, error: String, bufferSize: Int = 8192, checkActive: () -> Unit = {}
+): Long {
     val buffer = ByteArray(bufferSize)
     var bytes = 0L
+    checkActive()
     while (true) {
         val count = read(buffer)
+        checkActive()
         if (count < 0) return bytes
         bytes += count
         check(bytes <= limit) { error }
