@@ -15,6 +15,10 @@ import android.net.Uri
 import androidx.core.app.Person
 import androidx.core.app.NotificationCompat
 import androidx.core.content.edit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 
 internal enum class AlertArea(val channel: String, val label: String) {
     CHATS("p2p_chats", "Chat messages"),
@@ -165,8 +169,22 @@ class TalkDeclineReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in setOf(LocalAlerts.ACTION_DECLINE, TalkCallService.ACTION_END)) return
         val call = intent.getStringExtra(LocalAlerts.EXTRA_TARGET)?.takeIf(::isId) ?: return
-        val model = (context.applicationContext as P2pApplication).model
+        val app = context.applicationContext as P2pApplication
+        val model = app.model
         val owner = intent.getStringExtra(EXTRA_PROFILE) ?: PRIMARY_PROFILE
+        if (intent.action == LocalAlerts.ACTION_DECLINE && app.profiles.hasIncomingCall(owner, call)) {
+            val pending = goAsync()
+            CoroutineScope(Dispatchers.Main.immediate).launch {
+                try {
+                    withTimeout(8_000L) { app.profiles.declineIncomingCall(owner, call) }
+                } catch (failure: Exception) {
+                    AppLog.record(app, "Couldn’t decline the incoming profile call", failure)
+                } finally {
+                    pending.finish()
+                }
+            }
+            return
+        }
         if (owner != model.profileId || model.retiring) return
         LocalAlerts(context, owner).clear(AlertArea.TALK, call)
         model.talk.let { talk ->

@@ -71,7 +71,10 @@ internal data class RelayProfileOption(val id: String, val name: String, val ena
 
 internal class RelayProfiles(private val application: Application) {
     private val selection = ProfileSelection(application)
-    private val active = MutableStateFlow(P2pModel(application, selection.active()))
+    private val incomingCalls = ProfileCallInbox()
+    private fun newModel(id: String, background: Boolean = false) =
+        P2pModel(application, id, background, ::onCallEvent)
+    private val active = MutableStateFlow(newModel(selection.active()))
     val model = active.asStateFlow()
     private val changing = MutableStateFlow(false)
     val switching = changing.asStateFlow()
@@ -82,6 +85,51 @@ internal class RelayProfiles(private val application: Application) {
 
     fun acceptsAlerts(id: String) = selection.isEnabled(id)
 
+    private fun onCallEvent(profile: String, event: ChatmailCallEvent, caller: ChatmailCallContact?) {
+        if (event.kind == "CallEnded" || event.kind == "IncomingCallAccepted") {
+            clearIncomingCall(incomingCalls.withdraw(profile, event.id))
+            return
+        }
+        if (event.kind != "IncomingCall" || profile == active.value.profileId ||
+            caller == null || !selection.isEnabled(profile)) return
+        val call = incomingCalls.offer(profile, event, System.currentTimeMillis()) ?: return
+        val profileName = workers[profile]?.items?.value?.firstOrNull { it.kind == "profile" }
+            ?.data()?.optString("name").orEmpty()
+        val type = if (event.video) "Incoming video call" else "Incoming Talk call"
+        LocalAlerts(application, profile).show(AlertArea.TALK, call.token, caller.name,
+            if (profileName.isBlank()) type else "$type · $profileName", expiresAt = call.expiresAt)
+    }
+
+    private fun clearIncomingCall(call: ProfileIncomingCall?) {
+        if (call != null) LocalAlerts(application, call.profile).clear(AlertArea.TALK, call.token)
+    }
+
+    @MainThread
+    fun hasIncomingCall(profile: String, token: String): Boolean =
+        selection.isEnabled(profile) && incomingCalls.find(profile, token, System.currentTimeMillis()) != null
+
+    @MainThread
+    suspend fun openIncomingCall(profile: String, token: String): String =
+        requireNotNull(switchProfile(profile, token)) { "The incoming call is no longer ringing." }
+
+    @MainThread
+    suspend fun declineIncomingCall(profile: String, token: String) {
+        workerLock.withLock {
+            val call = incomingCalls.find(profile, token, System.currentTimeMillis()) ?: return
+            if (!selection.isEnabled(profile)) return
+            val owner = if (active.value.profileId == profile) active.value else workers[profile]
+            if (owner != null) owner.declineProfileCall(call)
+            else withContext(Dispatchers.IO) {
+                val path = ProfileStorage(application, profile).noBackup("chatmail")
+                if (path.isDirectory) Chatmail(path).use { core ->
+                    if (core.isRingingCall(call.message)) core.endCall(call.message)
+                }
+            }
+            clearIncomingCall(incomingCalls.withdraw(profile, call.message))
+        }
+        BackgroundMessages.start(application, catchUp = true)
+    }
+
     private suspend fun reconcileWorkers() {
         val wanted = if (backgroundSessions > 0) selection.ids().filterTo(mutableSetOf()) { id ->
             id != active.value.profileId && selection.isEnabled(id) &&
@@ -91,7 +139,7 @@ internal class RelayProfiles(private val application: Application) {
             if (id !in wanted) workers.remove(id)?.retireForProfileSwitch()
         }
         for (id in wanted - workers.keys) {
-            workers[id] = P2pModel(application, id, backgroundOnly = true).also { it.enableBackgroundSync() }
+            workers[id] = newModel(id, background = true).also { it.enableBackgroundSync() }
         }
     }
 
@@ -125,7 +173,10 @@ internal class RelayProfiles(private val application: Application) {
         workerLock.withLock {
             selection.setEnabled(id, enabled)
             reconcileWorkers()
-            if (!enabled) runCatching { LocalAlerts(application, id).clearProfileAlerts() }
+            if (!enabled) {
+                incomingCalls.withdraw(id)
+                runCatching { LocalAlerts(application, id).clearProfileAlerts() }
+            }
         }
     }
 
@@ -163,22 +214,40 @@ internal class RelayProfiles(private val application: Application) {
 
     @MainThread
     suspend fun switchTo(target: String?) {
-        val previous = active.value
-        if (target == previous.profileId) return
+        switchProfile(target, null)
+    }
+
+    private suspend fun switchProfile(target: String?, token: String?): String? {
+        if (target == active.value.profileId && token == null) return null
         check(changing.compareAndSet(false, true)) { "Relay Lab is already switching profiles." }
         try {
-            withContext(NonCancellable) {
+            return withContext(NonCancellable) {
                 workerLock.withLock {
-                    previous.checkCanSwitchProfiles()
-                    val next = selection.select(target)
-                    workers.remove(next)?.retireForProfileSwitch()
-                    previous.retireForProfileSwitch()
-                    active.value = P2pModel(application, next).also { it.setForeground(foreground) }
-                    reconcileWorkers()
+                    val previous = active.value
+                    val incoming = if (token == null) null else {
+                        val profile = requireNotNull(target)
+                        if (!selection.isEnabled(profile)) return@withLock null
+                        incomingCalls.find(profile, token, System.currentTimeMillis()) ?: return@withLock null
+                    }
+                    if (target != previous.profileId) {
+                        previous.checkCanSwitchProfiles()
+                        val next = selection.select(target)
+                        workers.remove(next)?.retireForProfileSwitch()
+                        previous.retireForProfileSwitch()
+                        active.value = newModel(next).also { it.setForeground(foreground) }
+                        reconcileWorkers()
+                    }
+                    if (incoming == null) return@withLock null
+                    try {
+                        active.value.resumeProfileCall(incoming)
+                    } finally {
+                        clearIncomingCall(incomingCalls.withdraw(incoming.profile, incoming.message))
+                    }
                 }
             }
         } finally {
             changing.value = false
+            active.value.setForeground(foreground)
         }
     }
 }

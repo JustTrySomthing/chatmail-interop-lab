@@ -98,6 +98,9 @@ internal class Chatmail(directory: File) : AutoCloseable {
     fun isRingingCall(id: Int): Boolean = (call("call_info", id) as JSONObject)
         .optJSONObject("state")?.optString("kind") == "Alerting"
 
+    fun ringingOffer(call: ProfileIncomingCall): ChatmailCallEvent? =
+        readRingingProfileOffer(call, this.call("call_info", call.message) as JSONObject)
+
     fun profileNeedsSync(revision: Long): Boolean = profileRevision != revision
 
     fun applyProfile(revision: Long, bio: String?, avatar: File?, updateAvatar: Boolean) {

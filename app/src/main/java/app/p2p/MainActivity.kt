@@ -127,6 +127,7 @@ class MainActivity : ComponentActivity() {
     private val shared = MutableStateFlow<List<Uri>>(emptyList())
     private val alert = MutableStateFlow<AlertRoute?>(null)
     private val otherProfileAlert = MutableStateFlow<Pair<String, AlertRoute>?>(null)
+    private val incomingProfileCall = MutableStateFlow<Pair<String, AlertRoute>?>(null)
     private val openUpdates = MutableStateFlow(false)
     private val incomingSecureJoin = MutableStateFlow<String?>(null)
 
@@ -141,7 +142,9 @@ class MainActivity : ComponentActivity() {
     private fun acceptAlert(intent: Intent?) {
         val route = LocalAlerts.read(intent)
         val owner = intent?.getStringExtra(EXTRA_PROFILE) ?: PRIMARY_PROFILE
-        alert.value = route?.takeIf { owner == model.profileId && !model.retiring }
+        val pendingCall = route?.takeIf { it.area == AlertArea.TALK && profiles.hasIncomingCall(owner, it.target) }
+        if (pendingCall != null) incomingProfileCall.value = owner to pendingCall
+        alert.value = route?.takeIf { pendingCall == null && owner == model.profileId && !model.retiring }
         otherProfileAlert.value = route?.takeIf { owner != model.profileId && it.area != AlertArea.TALK && profiles.acceptsAlerts(owner) }
             ?.let { owner to it }
     }
@@ -170,6 +173,24 @@ class MainActivity : ComponentActivity() {
             var profileError by remember { mutableStateOf<String?>(null) }
             val profileScope = rememberCoroutineScope()
             LaunchedEffect(pendingAlert) { if (pendingAlert != null) profilesOpen = true }
+            val profileCall by incomingProfileCall.collectAsState()
+            LaunchedEffect(profileCall) {
+                val request = profileCall ?: return@LaunchedEffect
+                val (owner, call) = request
+                try {
+                    val currentId = profiles.openIncomingCall(owner, call.target)
+                    resetProfileNavigation()
+                    profilesOpen = false
+                    alert.value = call.copy(target = currentId)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    android.widget.Toast.makeText(this@MainActivity,
+                        failure.message ?: "Couldn’t open the incoming call.", android.widget.Toast.LENGTH_SHORT).show()
+                } finally {
+                    incomingProfileCall.compareAndSet(request, null)
+                }
+            }
             if (switching) {
                 P2pTheme(Appearance.read(null)) {
                     Box(Modifier.fillMaxSize().background(Base), contentAlignment = Alignment.Center) {
@@ -198,12 +219,8 @@ class MainActivity : ComponentActivity() {
                                 try {
                                     readAloud.stop()
                                     profiles.switchTo(target)
-                                    shared.value = emptyList()
-                                    incomingSecureJoin.value = null
-                                    openUpdates.value = false
+                                    resetProfileNavigation()
                                     alert.value = pendingAlert?.takeIf { it.first == target }?.second
-                                    otherProfileAlert.value = null
-                                    setIntent(Intent(Intent.ACTION_MAIN).setClass(this@MainActivity, MainActivity::class.java))
                                     profilesOpen = false
                                     BackgroundMessages.start(this@MainActivity, catchUp = true)
                                 } catch (cancelled: CancellationException) {
@@ -221,6 +238,14 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun resetProfileNavigation() {
+        shared.value = emptyList()
+        incomingSecureJoin.value = null
+        openUpdates.value = false
+        otherProfileAlert.value = null
+        setIntent(Intent(Intent.ACTION_MAIN).setClass(this, MainActivity::class.java))
     }
 
     override fun onNewIntent(intent: Intent) {

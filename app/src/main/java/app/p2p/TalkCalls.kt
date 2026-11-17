@@ -120,7 +120,13 @@ internal class TalkCalls(
         }
     }
 
-    suspend fun event(event: ChatmailCallEvent, caller: ChatmailCallContact? = null) {
+    fun incomingIdFor(nativeMessage: Int): String? =
+        current.value?.takeIf { messageId == nativeMessage && it.phase == TalkPhase.Incoming }?.id
+
+    suspend fun event(
+        event: ChatmailCallEvent, caller: ChatmailCallContact? = null,
+        incomingId: String? = null, expiresAt: Long = System.currentTimeMillis() + TALK_RING_MS
+    ) {
         if (messageId == 0 && chatId == event.chatId && current.value?.outgoing == true &&
             event.kind in setOf("OutgoingCallAccepted", "CallEnded")) {
             deferredEvent = event
@@ -128,19 +134,20 @@ internal class TalkCalls(
         }
         when (event.kind) {
             "IncomingCall" -> {
-                if (caller == null) return
+                val remaining = expiresAt - System.currentTimeMillis()
+                if (caller == null || remaining <= 0L) return
                 if (busy()) {
                     if (messageId != event.id) runCatching { terminate(event.id) }
                     return
                 }
-                val id = newId()
+                val id = incomingId ?: newId()
                 chatId = event.chatId
                 messageId = event.id
                 incomingOffer = event.sdp
                 current.value = TalkCall(id, "chatmail:${event.chatId}", TalkPhase.Incoming, outgoing = false,
                     displayName = caller.name, startsWithVideo = event.video, remoteCamera = event.video)
-                armTimeout(id, TALK_RING_MS, "Missed call")
-                incomingAlert(id, System.currentTimeMillis() + TALK_RING_MS)
+                armTimeout(id, remaining, "Missed call")
+                incomingAlert(id, expiresAt)
             }
             "OutgoingCallAccepted" -> if (messageId == event.id && chatId == event.chatId) {
                 current.value?.let {

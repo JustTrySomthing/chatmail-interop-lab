@@ -106,8 +106,9 @@ private val notificationTypes = setOf("message", "messageReaction", "offer", "fr
 internal data class SheetSubmission(val sheet: String, val recipient: String? = null, val finished: Boolean = false,
     val error: String? = null)
 
-class P2pModel(application: Application, internal val profileId: String = PRIMARY_PROFILE,
-    private val backgroundOnly: Boolean = false
+class P2pModel internal constructor(application: Application, internal val profileId: String = PRIMARY_PROFILE,
+    private val backgroundOnly: Boolean = false,
+    private val profileCallEvent: (String, ChatmailCallEvent, ChatmailCallContact?) -> Unit = { _, _, _ -> }
 ) : AndroidViewModel(application) {
     private val context = application
     internal val storage = ProfileStorage(application, profileId)
@@ -183,6 +184,8 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     internal val webxdcEvents = webxdcEventFlow.asSharedFlow()
 
+    private val incomingCoreEvents = Channel<Pair<Chatmail, ChatmailCallEvent>>(Channel.UNLIMITED)
+
     private fun openChatmail(directory: File): Chatmail {
         directory.parentFile?.mkdirs()
         return Chatmail(directory).also(::listenForChatmailEvents)
@@ -194,26 +197,41 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
             nextNativeSync = 0L
         }, onWebxdc = { event ->
             if (chatmail === core) webxdcEventFlow.tryEmit(event)
-        }) { event ->
-            if (backgroundOnly) return@listenForEvents
-            viewModelScope.launch {
-                val accepted = withContext(Dispatchers.IO) {
-                    chatmailLock.withLock {
-                        if (retiring || chatmail !== core) return@withLock false to null
-                        val caller = if (event.kind == "IncomingCall" && !isBlockedChatmailContact(event.chatId)) {
-                            try {
-                                core.callContact(event.chatId)?.takeIf { core.isRingingCall(event.id) }
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (_: Exception) {
-                                null
-                            }
-                        } else null
-                        true to caller
-                    }
-                }
-                if (accepted.first && !retiring) talk.event(event, accepted.second)
+        }) { event -> incomingCoreEvents.trySend(core to event) }
+    }
+
+    private suspend fun handleChatmailCall(core: Chatmail, event: ChatmailCallEvent) {
+        val caller = withContext(Dispatchers.IO) {
+            chatmailLock.withLock {
+                if (retiring || chatmail !== core) return@withLock null
+                if (event.kind == "IncomingCall" && !isBlockedChatmailContact(event.chatId)) {
+                    core.callContact(event.chatId)?.takeIf { core.isRingingCall(event.id) }
+                } else null
             }
+        }
+        if (retiring || chatmail !== core) return
+        profileCallEvent(profileId, event, caller)
+        if (!backgroundOnly) talk.event(event, caller)
+    }
+
+    internal suspend fun resumeProfileCall(call: ProfileIncomingCall): String? = withActiveSync {
+        check(call.profile == profileId)
+        val incoming = withChatmail { core ->
+            val event = core.ringingOffer(call)
+            val caller = if (event != null && !isBlockedChatmailContact(call.chat)) core.callContact(call.chat) else null
+            if (event != null && caller != null) event to caller else null
+        } ?: return@withActiveSync null
+        val pending = talk.incomingIdFor(call.message)
+        if (pending != null) return@withActiveSync pending
+        if (talk.state.value?.phase?.let { it != TalkPhase.Finished } == true) return@withActiveSync null
+        talk.event(incoming.first, incoming.second, call.token, call.expiresAt)
+        talk.incomingIdFor(call.message)
+    }
+
+    internal suspend fun declineProfileCall(call: ProfileIncomingCall) = withActiveSync {
+        check(call.profile == profileId)
+        withChatmail { core ->
+            if (core.isRingingCall(call.message)) core.endCall(call.message)
         }
     }
 
@@ -256,7 +274,7 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
     private val partial = storage.files("partial").apply { mkdirs() }
 
     private val chatmailLock = Mutex()
-    private var chatmail: Chatmail? = null
+    @Volatile private var chatmail: Chatmail? = null
     private var chatmailNetwork: Network? = null
     @Volatile private var selectedNetwork: EngineRoute? = null
     @Volatile private var nextNativeSync = 0L
@@ -277,6 +295,17 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
     @Volatile private var engineRoute: EngineRoute? = null
 
     init {
+        viewModelScope.launch {
+            for ((core, event) in incomingCoreEvents) {
+                try {
+                    handleChatmailCall(core, event)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    AppLog.record(context, "Chatmail call event couldn’t be handled.", failure)
+                }
+            }
+        }
         work {
             val networkChanges = Channel<Unit>(Channel.CONFLATED)
             val networkObserver = runCatching {
@@ -1671,6 +1700,7 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
 
     internal suspend fun retireForProfileSwitch() {
         retiring = true
+        incomingCoreEvents.cancel()
         setForeground(false)
         val scopeJob = checkNotNull(viewModelScope.coroutineContext[Job])
         scopeJob.cancel()
