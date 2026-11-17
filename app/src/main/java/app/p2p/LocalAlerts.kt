@@ -52,11 +52,63 @@ internal object AppAlertMute {
     }
 }
 
+internal enum class AlertPreview(val label: String) {
+    FULL("Name and message"), NAME("Name only"), PRIVATE("Neither")
+}
+
+internal object NotificationPreferences {
+    private fun prefs(context: Context) = context.getSharedPreferences("alert-preferences", Context.MODE_PRIVATE)
+
+    fun preview(context: Context) = AlertPreview.entries.firstOrNull {
+        it.name == prefs(context).getString("preview", AlertPreview.FULL.name)
+    } ?: AlertPreview.FULL
+
+    fun setPreview(context: Context, value: AlertPreview) {
+        prefs(context).edit { putString("preview", value.name) }
+        if (value != AlertPreview.FULL) {
+            val manager = context.getSystemService(NotificationManager::class.java)
+            manager.activeNotifications.filter { alert ->
+                AlertArea.entries.any { it != AlertArea.TALK && it.channel == alert.notification.channelId }
+            }.forEach { manager.cancel(it.tag, it.id) }
+        }
+    }
+
+    fun inChatSounds(context: Context) = prefs(context).getBoolean("in-chat-sounds", true)
+
+    fun setInChatSounds(context: Context, enabled: Boolean) {
+        prefs(context).edit { putBoolean("in-chat-sounds", enabled) }
+    }
+}
+
+internal data class ProfileAlertPreferences(val mentions: Boolean, val calls: Boolean)
+
 internal data class AlertRoute(val area: AlertArea, val target: String, val answer: Boolean = false, val replyTo: String? = null)
 
 internal class LocalAlerts(private val context: Context, private val profileId: String = PRIMARY_PROFILE) {
     private val tag = profileId.takeUnless { it == PRIMARY_PROFILE }
     private val manager get() = context.getSystemService(NotificationManager::class.java)
+
+    private var lastInChatSound = -3_000L
+
+    fun playInChatSound(area: AlertArea) {
+        if (!enabled() || !NotificationPreferences.inChatSounds(context) ||
+            QuietHours.read(context).active() || manager.currentInterruptionFilter != NotificationManager.INTERRUPTION_FILTER_ALL) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastInChatSound < 3_000L) return
+        registerChannels()
+        val channel = manager.getNotificationChannel(area.channel) ?: return
+        val sound = channel.sound ?: return
+        if (channel.importance == NotificationManager.IMPORTANCE_NONE) return
+        AppAlertMute.deliver(context) {
+            runCatching {
+                RingtoneManager.getRingtone(context, sound)?.apply {
+                    audioAttributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION).build()
+                    play()
+                }
+            }
+            lastInChatSound = now
+        }
+    }
 
     fun enabled() = manager.areNotificationsEnabled() && permitted()
 
@@ -93,10 +145,16 @@ internal class LocalAlerts(private val context: Context, private val profileId: 
             .setContentTitle("Relay Lab")
             .setContentText(area.label)
             .build()
+        val preview = if (area == AlertArea.TALK) AlertPreview.FULL else NotificationPreferences.preview(context)
         val notification = NotificationCompat.Builder(context, area.channel)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(title)
-            .setContentText(body)
+            .setContentTitle(if (preview == AlertPreview.PRIVATE) "Relay Lab" else title)
+            .setContentText(if (preview == AlertPreview.FULL) body else area.label)
+            .apply {
+                if (preview == AlertPreview.FULL && area in setOf(AlertArea.CHATS, AlertArea.GROUPS)) {
+                    setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                }
+            }
             .setContentIntent(open)
             .setSilent(quiet)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)

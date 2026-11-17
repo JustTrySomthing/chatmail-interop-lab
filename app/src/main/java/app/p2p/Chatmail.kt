@@ -8,7 +8,6 @@ import java.io.OutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-internal const val CHATMAIL_FILE_LIMIT = 20_000_000L
 // Delta Chat and ArcaneChat Android use this local picker ceiling. Relay limits apply during delivery.
 internal const val NATIVE_ATTACHMENT_FILE_LIMIT = 1024L * 1024 * 1024
 
@@ -331,6 +330,21 @@ internal class Chatmail(directory: File) : AutoCloseable {
         call("send_reaction", id, JSONArray(if (emoji.isEmpty()) emptyList() else listOf(emoji)))
     }
 
+    fun alertPreferences() = ProfileAlertPreferences(
+        mentions = mentionsNotifyWhenMuted(),
+        calls = call("get_config", "who_can_call_me") != "2"
+    )
+
+    fun mentionsNotifyWhenMuted(): Boolean = call("get_config", "ui.mute_mentions_if_muted") != "1"
+
+    fun setMentionAlerts(enabled: Boolean) {
+        call("set_config", "ui.mute_mentions_if_muted", if (enabled) "0" else "1")
+    }
+
+    fun setCallAlerts(enabled: Boolean) {
+        call("set_config", "who_can_call_me", if (enabled) "1" else "2")
+    }
+
     fun readReceiptsEnabled(): Boolean = call("get_config", "mdns_enabled") == "1"
     fun setReadReceipts(enabled: Boolean) { call("set_config", "mdns_enabled", if (enabled) "1" else "0") }
 
@@ -471,7 +485,6 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     fun webxdcInfo(id: Int): JSONObject = (call("get_webxdc_info", id) as JSONObject)
         .put("selfName", displayName ?: (call("get_config", "displayname") as? String).orEmpty())
-    fun webxdcBlob(id: Int, path: String): String = call("get_webxdc_blob", id, path) as String
     fun webxdcUpdates(id: Int, after: Int): String = call("get_webxdc_status_updates", id, after) as String
     fun webxdcUpdate(id: Int, update: String) { call("send_webxdc_status_update", id, update, null) }
     fun webxdcAdvertise(id: Int) { call("send_webxdc_realtime_advertisement", id) }
@@ -674,5 +687,5 @@ internal fun isPendingChatmailSend(message: JSONObject, chat: Int, transfer: Str
         message.optInt("state") == 20 && message.optString("text").startsWith(PACKET_PREFIX + transfer + "\n")
 
 internal fun chatmailDownloadAllowed(offer: JSONObject, message: JSONObject): Boolean =
-    offer.optLong("size", -1) in 0..CHATMAIL_FILE_LIMIT &&
-        message.optLong("fileBytes", -1) in 0..CHATMAIL_FILE_LIMIT
+    offer.optLong("size", -1) in 0..NATIVE_ATTACHMENT_FILE_LIMIT &&
+        message.optLong("fileBytes", -1) in 0..NATIVE_ATTACHMENT_FILE_LIMIT

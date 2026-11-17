@@ -80,7 +80,7 @@ class WebxdcTest {
 
     @Test fun nativeSizeGuardAcceptsFilesAboveTheLegacyLimit() {
         val input = object : java.io.InputStream() {
-            private var remaining = CHATMAIL_FILE_LIMIT + 1
+            private var remaining = 20_000_001L
             override fun read() = error("Expected buffered reads")
             override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
                 if (remaining == 0L) return -1
@@ -94,8 +94,31 @@ class WebxdcTest {
             override fun write(value: Int) = error("Expected buffered writes")
             override fun write(buffer: ByteArray, offset: Int, length: Int) { written += length }
         }
-        assertEquals(CHATMAIL_FILE_LIMIT + 1, input.copyBoundedTo(output, NATIVE_ATTACHMENT_FILE_LIMIT, "Too large"))
-        assertEquals(CHATMAIL_FILE_LIMIT + 1, written)
+        assertEquals(20_000_001L, input.copyBoundedTo(output, NATIVE_ATTACHMENT_FILE_LIMIT, "Too large"))
+        assertEquals(20_000_001L, written)
+    }
+
+    @Test fun streamsLargeWebxdcAssetsAndDecodedExports() {
+        val file = File.createTempFile("webxdc-large-", ".xdc")
+        try {
+            val sample = ByteArray(1024 * 1024) { (it % 251).toByte() }
+            ZipOutputStream(file.outputStream()).use { zip ->
+                zip.putNextEntry(ZipEntry("index.html"))
+                zip.write("<html></html>".toByteArray())
+                zip.closeEntry()
+                zip.putNextEntry(ZipEntry("large.bin"))
+                repeat(33) { zip.write(sample) }
+                zip.closeEntry()
+            }
+            inspectWebxdc(file)
+            openWebxdcAsset(file, "/large.bin").use { input ->
+                val first = input.readNBytes(sample.size)
+                assertArrayEquals(sample, first)
+                assertEquals(32L * sample.size, input.transferTo(java.io.OutputStream.nullOutputStream()))
+            }
+            val encoded = java.util.Base64.getEncoder().encodeToString(sample)
+            openWebxdcExport(encoded).use { input -> assertArrayEquals(sample, input.readBytes()) }
+        } finally { file.delete() }
     }
 
     @Test fun resourceRequestsStayOnTheExactInstanceOrigin() {

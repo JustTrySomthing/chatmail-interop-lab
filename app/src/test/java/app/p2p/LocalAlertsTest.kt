@@ -35,6 +35,25 @@ class LocalAlertsTest {
     }
 
     @Test
+    fun notificationPreviewControlsHidePreviouslyPostedAndNewMessageDetails() {
+        val app = RuntimeEnvironment.getApplication()
+        shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = shadowOf(app.getSystemService(NotificationManager::class.java))
+        val alerts = LocalAlerts(app)
+        fun post() = alerts.show(AlertArea.CHATS, "contact-id", "Pat", "Private message")
+        post()
+        NotificationPreferences.setPreview(app, AlertPreview.NAME)
+        assertEquals(0, manager.allNotifications.size)
+        post()
+        assertEquals("Pat", manager.allNotifications.single().extras.getString(Notification.EXTRA_TITLE))
+        assertEquals("Chat messages", manager.allNotifications.single().extras.getString(Notification.EXTRA_TEXT))
+        NotificationPreferences.setPreview(app, AlertPreview.PRIVATE)
+        post()
+        assertEquals("Relay Lab", manager.allNotifications.single().extras.getString(Notification.EXTRA_TITLE))
+        assertEquals("Chat messages", manager.allNotifications.single().extras.getString(Notification.EXTRA_TEXT))
+    }
+
+    @Test
     fun overnightHoursUseTheDayTheScheduleStarted() {
         val mondayNight = java.util.GregorianCalendar(2026, 10, 9, 22, 0)
         val tuesdayMorning = java.util.GregorianCalendar(2026, 10, 10, 7, 59)

@@ -425,5 +425,5 @@ private fun ZoomPhoto(file: File, title: String, download: () -> Unit) {
 
 
 internal fun shouldFetchInlineMedia(data: org.json.JSONObject): Boolean =
-    !data.optBoolean("listed") && data.optLong("size", -1) in 0..CHATMAIL_FILE_LIMIT &&
+    !data.optBoolean("listed") && data.optLong("size", -1) in 0..NATIVE_ATTACHMENT_FILE_LIMIT &&
         mediaKind(data.optString("mime"), data.optString("name")) != null

@@ -62,6 +62,20 @@ internal fun describeAttachment(context: Context, uri: Uri, asFile: Boolean, lab
     return AttachmentDraft(uri, name.take(180), type ?: "application/octet-stream", asFile)
 }
 
+internal object MediaCompression {
+    private fun preferences(context: Context) = context.getSharedPreferences("media-compression", Context.MODE_PRIVATE)
+
+    fun enabled(context: Context) = preferences(context).getBoolean("automatic", true)
+
+    fun setEnabled(context: Context, enabled: Boolean) {
+        preferences(context).edit().putBoolean("automatic", enabled).apply()
+    }
+}
+
+internal fun shouldPrepareMedia(media: AttachmentDraft, bytes: Long, automatic: Boolean): Boolean =
+    !media.asFile && media.mime != "image/gif" &&
+        (media.range != null || automatic && bytes > 1_000_000L)
+
 internal data class CompressionRates(val audio: Int, val video: Int)
 internal fun ratesForMedia(durationMs: Long, video: Boolean): CompressionRates {
     val bitsPerSecond = 8_000_000L * 1_000 / durationMs.coerceAtLeast(1_000)
@@ -74,11 +88,11 @@ internal data class PreparedMedia(val file: File, val mime: String, val extensio
 @OptIn(UnstableApi::class)
 internal class AttachmentCompressor(private val context: Context) {
     suspend fun compress(input: File, media: AttachmentDraft): PreparedMedia? {
-        if (media.asFile || media.mime == "image/gif") return null
+        val automatic = MediaCompression.enabled(context)
+        if (!shouldPrepareMedia(media, input.length(), automatic)) return null
         return when {
-            media.mime.startsWith("image/") && input.length() > 1_000_000L && !isAnimatedWebP(input) -> shrinkImage(input)
-            (media.mime.startsWith("video/") || media.mime.startsWith("audio/")) &&
-                (input.length() > 1_000_000L || media.range != null) -> shrinkMotion(input, media)
+            media.mime.startsWith("image/") && !isAnimatedWebP(input) -> shrinkImage(input)
+            media.mime.startsWith("video/") || media.mime.startsWith("audio/") -> shrinkMotion(input, media, automatic)
             else -> null
         }
     }
@@ -117,7 +131,7 @@ internal class AttachmentCompressor(private val context: Context) {
         }
     }
 
-    private suspend fun shrinkMotion(input: File, media: AttachmentDraft): PreparedMedia? {
+    private suspend fun shrinkMotion(input: File, media: AttachmentDraft, automatic: Boolean): PreparedMedia? {
         val video = media.mime.startsWith("video/")
         val info = runCatching {
             MediaMetadataRetriever().use { retriever ->
@@ -139,8 +153,10 @@ internal class AttachmentCompressor(private val context: Context) {
             }
         }.build()
         val item = MediaItem.Builder().setUri(Uri.fromFile(input)).setClippingConfiguration(clip).build()
-        val samples = SonicAudioProcessor().apply { setOutputSampleRateHz(32_000) }
-        val effects = Effects(listOf(samples), if (video) listOf(Presentation.createForHeight(info.second.coerceIn(2, 480))) else emptyList())
+        val effects = if (automatic) {
+            val samples = SonicAudioProcessor().apply { setOutputSampleRateHz(32_000) }
+            Effects(listOf(samples), if (video) listOf(Presentation.createForHeight(info.second.coerceIn(2, 480))) else emptyList())
+        } else Effects(emptyList(), emptyList())
         val edited = EditedMediaItem.Builder(item).setRemoveVideo(!video).setEffects(effects).build()
         val rates = ratesForMedia(if (range == null) info.first else minOf(range.endMs, info.first) - range.startMs, video)
         val suffix = if (video) ".mp4" else ".m4a"
@@ -152,9 +168,12 @@ internal class AttachmentCompressor(private val context: Context) {
                     suspendCancellableCoroutine { ready ->
                         val builder = Transformer.Builder(context)
                             .setAudioMimeType(MimeTypes.AUDIO_AAC)
-                            .setEncoderFactory(DefaultEncoderFactory.Builder(context)
-                                .setRequestedAudioEncoderSettings(AudioEncoderSettings.Builder().setBitrate(rates.audio).build())
-                                .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(rates.video).build()).build())
+                            .apply {
+                                if (automatic) setEncoderFactory(DefaultEncoderFactory.Builder(context)
+                                    .setRequestedAudioEncoderSettings(AudioEncoderSettings.Builder().setBitrate(rates.audio).build())
+                                    .setRequestedVideoEncoderSettings(VideoEncoderSettings.Builder().setBitrate(rates.video).build())
+                                    .build())
+                            }
                             .addListener(object : Transformer.Listener {
                                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                                     if (ready.isActive) ready.resume(true)

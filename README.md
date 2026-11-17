@@ -61,6 +61,14 @@ Verified Chatmail mappings let earlier one-to-one conversations use Core while r
 
 Use the shared Chatmail Core adapter for both Delta Chat and ArcaneChat. Chats, Groups, Channels, and Talk share Core account access. Contact profiles use the same parser, and all three SecureJoin invite screens share the QR and link controls. Keep Relay Lab presentation and media tools in the app. The signed P2P path supports earlier conversations, invites, and backups. Keep new interoperability features on the Core path.
 
+## Help, compression, and notifications
+
+Open **Settings → Help** to search the in-app guide. **Settings → Compression** controls Relay Lab’s automatic media compression. It starts on. Use **Other File Type** to send an individual attachment as-is. An explicit trim still creates a new clip.
+
+**Settings → Notifications** controls alert previews, sounds while a chat is open, replies in muted groups, and incoming calls. Android’s category settings control sound, vibration, and priority for chat, group, and call notifications. Background delivery uses the existing Chatmail connection and scheduled checks. Turn on **Reliable background connection** if you want an ongoing Android notification for a continuous connection.
+
+Relay Lab follows the 1 GiB local Android attachment ceiling used by Delta Chat and ArcaneChat. Relays can reject smaller messages according to their own limits. Webxdc assets stream from the local package, and app-exported files use the same attachment ceiling as a file picked in Android.
+
 ## Chatmail controls and recovery
 
 Long-press a message for editing, deletion for everyone, shared pinning, and saving to Saved Messages. Open Saved Messages from **Start a chat**. Tap the conversation title for Chat options. Groups include Chat options inside Group info. Chat options has the disappearing-message timer and the shared pin list. Long-press a message containing a point location to open it in a maps app. Chats render basic inline Markdown formatting and loop Telegram TGS stickers. SVG attachments open in the media viewer.

@@ -83,10 +83,11 @@ class MediaRoutingTest {
 
     @Test
     fun automaticallyFetchesInlineMediaButLeavesOriginalFilesForManualDownload() {
-        val attachment = obj("mime" to "video/mp4", "name" to "Clip.mp4", "size" to CHATMAIL_FILE_LIMIT)
+        val attachment = obj("mime" to "video/mp4", "name" to "Clip.mp4", "size" to NATIVE_ATTACHMENT_FILE_LIMIT)
         assertTrue(shouldFetchInlineMedia(attachment))
+        assertTrue(shouldFetchInlineMedia(attachment.put("size", 21_000_000L)))
         assertFalse(shouldFetchInlineMedia(attachment.put("listed", true)))
-        assertFalse(shouldFetchInlineMedia(attachment.put("listed", false).put("size", CHATMAIL_FILE_LIMIT + 1)))
+        assertFalse(shouldFetchInlineMedia(attachment.put("listed", false).put("size", NATIVE_ATTACHMENT_FILE_LIMIT + 1)))
         assertFalse(shouldFetchInlineMedia(obj("mime" to "application/pdf", "size" to 400)))
     }
 

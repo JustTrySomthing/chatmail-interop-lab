@@ -24,6 +24,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import java.io.ByteArrayInputStream
+import java.io.FilterInputStream
+import java.io.InputStream
 import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.atomic.AtomicBoolean
@@ -40,8 +42,6 @@ import org.json.JSONObject
 internal val WEBXDC_EVENTS = setOf("WebxdcStatusUpdate", "WebxdcRealtimeData", "WebxdcInstanceDeleted")
 private const val BOOTSTRAP_PATH = "/webxdc_bootstrap324567869.html"
 private const val RTC_CHECK_PATH = "/sandboxed_iframe_rtcpeerconnection_check_5965668501706.html"
-private const val MAX_ENTRY_BYTES = 32 * 1024 * 1024
-private const val MAX_ARCHIVE_BYTES = 128L * 1024 * 1024
 private const val MAX_REALTIME_BYTES = 128 * 1024
 private val sandboxHeaders = mapOf(
     "Content-Security-Policy" to ("default-src 'self'; " +
@@ -72,26 +72,49 @@ internal data class WebxdcInfo(
 internal fun inspectWebxdc(file: File) {
     require(file.length() in 1..NATIVE_ATTACHMENT_FILE_LIMIT) { "This app exceeds the 1 GiB attachment limit." }
     ZipFile(file).use { zip ->
-        require(zip.size() <= 4096 && zip.getEntry("index.html")?.isDirectory == false) { "This Webxdc package is invalid." }
+        require(zip.getEntry("index.html")?.isDirectory == false) { "This Webxdc package is invalid." }
         val names = HashSet<String>()
-        val buffer = ByteArray(16 * 1024)
-        var total = 0L
         for (entry in zip.entries()) {
-            check(names.add(entry.name) && entry.size in 0..MAX_ENTRY_BYTES.toLong()) { "Invalid or oversized app asset." }
-            if (entry.isDirectory) continue
-            zip.getInputStream(entry).use { stream ->
-                var bytes = 0L
-                while (true) {
-                    val count = stream.read(buffer)
-                    if (count < 0) break
-                    bytes += count
-                    total += count
-                    check(bytes <= entry.size && total <= MAX_ARCHIVE_BYTES) { "The unpacked app is too large." }
-                }
-                check(bytes == entry.size) { "The app package is incomplete." }
-            }
+            require(names.add(entry.name)) { "The app contains duplicate assets." }
         }
     }
+}
+
+internal fun openWebxdcAsset(file: File, path: String): InputStream {
+    val archive = ZipFile(file)
+    try {
+        val entry = checkNotNull(archive.getEntry(path.removePrefix("/")))
+        check(!entry.isDirectory)
+        return object : FilterInputStream(archive.getInputStream(entry)) {
+            override fun close() {
+                try { super.close() } finally { archive.close() }
+            }
+        }
+    } catch (failure: Throwable) {
+        archive.close()
+        throw failure
+    }
+}
+
+internal fun openWebxdcExport(encoded: String): InputStream {
+    val ascii = object : InputStream() {
+        private var position = 0
+        override fun read(): Int =
+            if (position < encoded.length) encoded[position++].code else -1
+
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            if (length == 0) return 0
+            if (position == encoded.length) return -1
+            val count = minOf(length, encoded.length - position)
+            repeat(count) { i ->
+                val character = encoded[position++].code
+                require(character <= 127) { "Invalid file data." }
+                buffer[offset + i] = character.toByte()
+            }
+            return count
+        }
+    }
+    return android.util.Base64InputStream(ascii, Base64.DEFAULT)
 }
 
 internal fun webxdcRequestPath(uri: Uri, host: String): String? {
@@ -158,7 +181,7 @@ internal fun WebxdcRunner(
         when {
             loadError != null -> Text(loadError.orEmpty(), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
             current == null || hasGuard == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
-            else -> SandboxedWebxdc(model, thread, id, current, href, visible, hasGuard, close, sendDraft)
+            else -> SandboxedWebxdc(model, thread, id, file, current, href, visible, hasGuard, close, sendDraft)
         }
     }
 }
@@ -166,7 +189,7 @@ internal fun WebxdcRunner(
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun ColumnScope.SandboxedWebxdc(
-    model: P2pModel, thread: String, id: Int, info: WebxdcInfo, href: String,
+    model: P2pModel, thread: String, id: Int, file: File, info: WebxdcInfo, href: String,
     visible: Boolean, hasGuard: Boolean, close: () -> Unit, sendDraft: (String, AttachmentDraft?) -> Unit
 ) {
     val context = LocalContext.current
@@ -331,9 +354,7 @@ private fun ColumnScope.SandboxedWebxdc(
                         }
                         return try {
                             val stream = if (builtIn != null) context.assets.open("webxdc/$builtIn") else {
-                                val encoded = runBlocking { model.webxdcBlob(id, path) }
-                                check(encoded.length <= MAX_ENTRY_BYTES * 4 / 3 + 4)
-                                ByteArrayInputStream(Base64.decode(encoded, Base64.DEFAULT))
+                                openWebxdcAsset(file, path)
                             }
                             val mime = webxdcMime(path)
                             if (path == "/index.html") web.post { ready = true }
@@ -491,7 +512,7 @@ private class WebxdcBridge(
     }
 
     @JavascriptInterface fun sendToChat(json: String): String? {
-        if (!live.get() || draftPrepared || json.length > CHATMAIL_FILE_LIMIT * 2) return "The draft is unavailable or too large."
+        if (!live.get() || draftPrepared) return "The draft is unavailable."
         return try {
             val message = JSONObject(json)
             val text = message.optString("text")
@@ -499,12 +520,14 @@ private class WebxdcBridge(
             val attachment = if (message.has("base64")) {
                 val name = message.optString("name").replace('\\', '/').substringAfterLast('/').trim().take(120)
                 require(name.isNotEmpty() && name !in setOf(".", "..") && name.none { it.isISOControl() })
-                val bytes = Base64.decode(message.getString("base64"), Base64.DEFAULT)
-                require(bytes.size <= CHATMAIL_FILE_LIMIT)
                 val folder = File(cache, "captures").apply { mkdirs() }
                 val file = File.createTempFile("webxdc-draft-", ".tmp", folder)
                 try {
-                    file.writeBytes(bytes)
+                    openWebxdcExport(message.getString("base64")).use { input ->
+                        file.outputStream().buffered().use { output ->
+                            input.copyBoundedTo(output, NATIVE_ATTACHMENT_FILE_LIMIT, "This attachment is too large.")
+                        }
+                    }
                     AttachmentDraft(Uri.fromFile(file), name, webxdcMime(name), asFile = true, temporary = true)
                 } catch (failure: Exception) {
                     file.delete()

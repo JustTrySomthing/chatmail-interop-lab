@@ -670,7 +670,7 @@ class P2pModel internal constructor(application: Application, internal val profi
     }
 
     internal suspend fun chatmailChannelImage(path: String): String = withContext(Dispatchers.IO) {
-        val file = storage.chatmailFile(path)?.takeIf { it.length() in 1..CHATMAIL_FILE_LIMIT }
+        val file = storage.chatmailFile(path)?.takeIf { it.length() in 1..NATIVE_ATTACHMENT_FILE_LIMIT }
         if (file != null) prepareProfilePhoto(context, Uri.fromFile(file)) else ""
     }
 
@@ -888,7 +888,7 @@ class P2pModel internal constructor(application: Application, internal val profi
             } else if (path != data.optString("nativePhotoPath")) {
                 try {
                     val image = storage.chatmailFile(path)
-                    if (image != null && image.length() in 1..CHATMAIL_FILE_LIMIT) {
+                    if (image != null && image.length() in 1..NATIVE_ATTACHMENT_FILE_LIMIT) {
                         data.put("photo", prepareProfilePhoto(context, Uri.fromFile(image)))
                         data.put("nativePhotoPath", path)
                     }
@@ -936,8 +936,15 @@ class P2pModel internal constructor(application: Application, internal val profi
         val missing = if (messageId == null) cached.removedChatmailMessages(thread, page.existingIds) else emptyList()
         if (batch.isEmpty() && page.first == null && before == null && missing.isEmpty()) return emptyList()
         val discardedFiles = mutableListOf<Record>()
-        var newMessage = false
-        var newAttachment = false
+        var newMessage: NativeMessage? = null
+        var replyToSelf: NativeMessage? = null
+        val preferences = records.get("thread-pref:$thread")?.data()
+        val contact = records.get(thread)?.data()
+        val muted = preferences?.optBoolean("muted") == true || contact?.optBoolean("alertMuted") == true
+        val canNotify = preferences?.optBoolean("blocked") != true && contact?.optBoolean("blocked") != true
+        val checkForReplies = chat.group && canNotify && muted && batch.any {
+            it.from != 1 && it.state == 10 && it.quote != null
+        } && core.mentionsNotifyWhenMuted()
         database.withTransaction {
             if (messageId == null && (loaded <= 9 || latest == null)) change(thread) {
                 put("nativeHasOlder", page.hasOlder)
@@ -973,8 +980,13 @@ class P2pModel internal constructor(application: Application, internal val profi
                 }
                 val attachment = message.attachment
                 if (before == null && old == null && message.state == 10) {
-                    newMessage = true
-                    newAttachment = newAttachment || attachment != null
+                    newMessage = message
+                    if (checkForReplies && message.from != 1 && message.quote != null) {
+                        val quoted = records.get(nativeMessageKey(message.quote))?.data()
+                        val fromSelf = quoted?.optString("author")?.let { it == peerKey }
+                            ?: runCatching { core.message(message.quote).optInt("fromId") == 1 }.getOrDefault(false)
+                        if (fromSelf) replyToSelf = message
+                    }
                 }
                 val data = old ?: obj()
                 data.put("nativeMessage", message.id).put("thread", thread).put("author", author)
@@ -1021,7 +1033,7 @@ class P2pModel internal constructor(application: Application, internal val profi
                 }
                 knownReactions[id].orEmpty().filter { it.key !in current }.forEach { records.remove(it.key) }
             }
-            if (newMessage) {
+            if (newMessage != null) {
                 val key = "folder:$thread"
                 val location = records.get(key)?.data()?.optString("name")
                 if (!chat.archived && (location == "Cleared" || location == "Archive" ||
@@ -1035,13 +1047,15 @@ class P2pModel internal constructor(application: Application, internal val profi
             File(directory, file.key).delete()
             alerts.clear(AlertArea.FILES, file.key)
         }
-        val preferences = records.get("thread-pref:$thread")?.data()
-        val contact = records.get(thread)?.data()
-        if (newMessage && !(visible && visibleThread == thread) && preferences?.optBoolean("muted") != true &&
-            preferences?.optBoolean("blocked") != true && contact?.optBoolean("blocked") != true &&
-            contact?.optBoolean("alertMuted") != true) {
+        val alertMessage = if (muted) replyToSelf else newMessage
+        if (alertMessage != null && canNotify) {
             val area = if (chat.group) AlertArea.GROUPS else AlertArea.CHATS
-            alerts.show(area, thread, chat.name, if (newAttachment) "New attachment" else "New message")
+            if (visible && visibleThread == thread) alerts.playInChatSound(area)
+            else {
+                val preview = alertMessage.text.take(240).ifBlank { alertMessage.attachment?.name ?: "New message" }
+                val sender = alertMessage.senderName.takeIf { chat.group && it.isNotBlank() }
+                alerts.show(area, thread, chat.name, if (sender == null) preview else "$sender: $preview")
+            }
         }
         return batch.map(NativeMessage::id)
     }
@@ -1266,7 +1280,7 @@ class P2pModel internal constructor(application: Application, internal val profi
                 val packet = JSONObject(NativeEngine.signWith(account.deviceSecret, body))
                     .put("body", body).put("transfer", transfer).put("to", to).put("grant", account.grant.encoded)
                 val file = if (type == "offer") File(outgoing, payload.getString("id")) else null
-                if (file != null && (!file.isFile || file.length() > CHATMAIL_FILE_LIMIT)) {
+                if (file != null && (!file.isFile || file.length() > NATIVE_ATTACHMENT_FILE_LIMIT)) {
                     handleResult(record.key, "rejected")
                     continue
                 }
@@ -1286,7 +1300,7 @@ class P2pModel internal constructor(application: Application, internal val profi
 
     private fun storeChatmailFile(source: File, id: String, data: JSONObject): Boolean {
         val size = data.optLong("size", -1)
-        if (!source.isFile || size !in 0..CHATMAIL_FILE_LIMIT || source.length() != size) return false
+        if (!source.isFile || size !in 0..NATIVE_ATTACHMENT_FILE_LIMIT || source.length() != size) return false
         val staging = File(partial, "chatmail-" + id)
         try {
             val hash = MessageDigest.getInstance("SHA-256")
@@ -1618,7 +1632,7 @@ class P2pModel internal constructor(application: Application, internal val profi
             else -> return null
         }
         val size = value.optLong("size", -1)
-        if (!isId(id) || size !in 0..CHATMAIL_FILE_LIMIT) return null
+        if (!isId(id) || size !in 0..NATIVE_ATTACHMENT_FILE_LIMIT) return null
         return BackupMedia(id, size, directory)
     }
 
@@ -1737,6 +1751,10 @@ class P2pModel internal constructor(application: Application, internal val profi
             talk.state.value?.takeIf { it.phase == TalkPhase.Incoming }?.let { alerts.clear(AlertArea.TALK, it.id) }
         } else AppAlertMute.deliver(context, talk::ring)
     }
+
+    internal suspend fun alertPreferences() = withChatmail { it.alertPreferences() }
+    internal suspend fun setMentionAlerts(enabled: Boolean) = withChatmail { it.setMentionAlerts(enabled) }
+    internal suspend fun setCallAlerts(enabled: Boolean) = withChatmail { it.setCallAlerts(enabled) }
 
     internal fun setAppNotificationsMuted(muted: Boolean) {
         AppAlertMute.set(context, muted)
@@ -2527,7 +2545,6 @@ class P2pModel internal constructor(application: Application, internal val profi
         WebxdcInfo.from(core.webxdcInfo(id))
     }
 
-    internal suspend fun webxdcBlob(id: Int, path: String): String = withChatmail { it.webxdcBlob(id, path) }
     internal suspend fun webxdcUpdates(id: Int, after: Int): String = withChatmail { it.webxdcUpdates(id, after) }
 
     internal suspend fun webxdcWrite(thread: String, id: Int, write: (Chatmail) -> Unit) = withChatmail { core ->
@@ -2557,7 +2574,7 @@ class P2pModel internal constructor(application: Application, internal val profi
         val staged = mutableListOf<JSONObject>()
         try {
             for (item in attachments.drop(start)) {
-                staged.add(stageFile(item.uri, thread, "", item.asFile, draft = item, native = true))
+                staged.add(stageFile(item.uri, thread, "", item.asFile, draft = item))
             }
             withChatmail { core ->
                 val channel = if (channelPost) requireNotNull(core.channel(chat)) { "Channel unavailable." } else null
@@ -2699,7 +2716,7 @@ class P2pModel internal constructor(application: Application, internal val profi
 
     private suspend fun stageFile(
         uri: Uri, thread: String, group: String, asFile: Boolean, post: String = "",
-        draft: AttachmentDraft? = null, native: Boolean = false
+        draft: AttachmentDraft? = null
     ): JSONObject {
         val id = newId()
         val attachment = draft ?: describeAttachment(context, uri, asFile)
@@ -2710,13 +2727,9 @@ class P2pModel internal constructor(application: Application, internal val profi
             val originalHash = MessageDigest.getInstance("SHA-256")
             context.contentResolver.openInputStream(uri)?.use { input ->
                 source.outputStream().buffered().use { output ->
-                    val hashingInput = java.security.DigestInputStream(input, originalHash)
-                    if (native) {
-                        hashingInput.copyBoundedTo(output, NATIVE_ATTACHMENT_FILE_LIMIT,
-                            "This attachment exceeds the 1 GiB limit.", bufferSize = 128 * 1024)
-                    } else {
-                        hashingInput.copyTo(output, 128 * 1024)
-                    }
+                    java.security.DigestInputStream(input, originalHash).copyBoundedTo(
+                        output, NATIVE_ATTACHMENT_FILE_LIMIT, "This attachment is too large.", bufferSize = 128 * 1024
+                    )
                 }
             } ?: error("Couldn’t open " + name)
             val compressed = AttachmentCompressor(context).compress(source, attachment)
@@ -2742,13 +2755,7 @@ class P2pModel internal constructor(application: Application, internal val profi
                     compressed.file.delete()
                 }
             }
-            if (native) {
-                require(source.length() <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment exceeds the 1 GiB limit." }
-            } else {
-                require(source.length() <= CHATMAIL_FILE_LIMIT) {
-                    "$name is over the 20 MB file limit. Choose a smaller file or trim the video."
-                }
-            }
+            require(source.length() <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment is too large." }
             return obj("type" to "offer", "id" to id, "name" to name, "mime" to mime,
                 "size" to source.length(), "digest" to hash, "thread" to thread,
                 "group" to group, "post" to post, "author" to peer.value, "listed" to asFile, "state" to "Offer queued")

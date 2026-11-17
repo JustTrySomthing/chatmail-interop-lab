@@ -1087,14 +1087,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             P2pTextButton(onClick = { attempt++ }) { Text("Retry") }
                         }
                     }
-                    FullPageRoute.Notifications -> {
-                        Text(when {
-                            appMuted -> "All app alerts are muted"
-                            notificationsEnabled -> "Notifications are enabled"
-                            else -> "Notifications are disabled"
-                        })
-                        PageActionButton("Notification settings", { configureNotifications() }, Modifier.fillMaxWidth())
-                    }
+                    FullPageRoute.Notifications -> NotificationSettingsContent(model, appMuted, notificationsEnabled,
+                        model::setAppNotificationsMuted, ::configureNotifications) { modal = "quiet-hours" }
+                    FullPageRoute.Compression -> CompressionSettingsContent()
+                    FullPageRoute.Help -> HelpSettingsContent()
                     FullPageRoute.Address -> {
                         androidx.compose.foundation.text.selection.SelectionContainer { Text(peer) }
                         Button(shape = P2pButtonShape, onClick = {
@@ -2359,9 +2355,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 }, close = { modal = null })
             }
             "attach" -> Sheet("Add attachment", { modal = null }) {
-                val native = records.firstOrNull { it.key == thread }?.data()?.optInt("nativeChat")?.let { it > 9 } == true
-                val sizeNote = if (native) "File size depends on the recipient’s mail relay." else "20 MB maximum file size"
-                Text(sizeNote, style = MaterialTheme.typography.bodySmall)
                 P2pRow("Other File Type", "", Icons.Outlined.AttachFile) { chooseAttachment(true, "*/*") }
                 P2pRow("Take photo", "", Icons.Outlined.PhotoCamera) { capture("photo") }
                 P2pRow("Record video", "", Icons.Outlined.Videocam) { capture("video") }
@@ -2692,7 +2685,8 @@ private fun SettingsGrid(query: String, open: (String) -> Unit) {
     val settings = listOf("Profile" to "profile", "Profiles" to "profiles", "Setup" to "setup", "Appearance" to "appearance",
         "Read aloud" to "text-to-speech", "Privacy" to "privacy", "Notifications" to "notifications", "Quiet Hours" to "quiet-hours",
         "P2P address" to "p2p-address", "Backup" to "backup", "Block list" to "block-list",
-        "Connections" to "connection-details", "Updates" to "updates", "App log" to "app-log")
+        "Connections" to "connection-details", "Updates" to "updates", "App log" to "app-log",
+        "Compression" to "compression", "Help" to "help")
     val matches = settings.filter { (label, _) -> threadSearchMatches(query, label, emptyList()) }
     if (matches.isEmpty()) {
         EmptyTabMessage("No matching settings")
@@ -2878,6 +2872,8 @@ private enum class FullPageRoute(val route: String, val title: String) {
     Settings("settings", "Settings"),
     Updates("updates", "P2P updates"),
     Notifications("notifications", "Notifications"),
+    Compression("compression", "Compression"),
+    Help("help", "Help"),
     Privacy("privacy", "Privacy"),
     Address("p2p-address", "P2P address"),
     Backup("backup", "Backup"),

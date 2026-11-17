@@ -344,10 +344,10 @@ class ChatmailTest {
 
     @Test
     fun chatmailChecksBothAdvertisedAndActualAttachmentSizes() {
-        val offer = obj("size" to CHATMAIL_FILE_LIMIT)
-        val metadata = obj("fileBytes" to CHATMAIL_FILE_LIMIT)
+        val offer = obj("size" to NATIVE_ATTACHMENT_FILE_LIMIT)
+        val metadata = obj("fileBytes" to NATIVE_ATTACHMENT_FILE_LIMIT)
         assertTrue(chatmailDownloadAllowed(offer, metadata))
-        assertFalse(chatmailDownloadAllowed(offer, metadata.put("fileBytes", CHATMAIL_FILE_LIMIT + 1)))
+        assertFalse(chatmailDownloadAllowed(offer, metadata.put("fileBytes", NATIVE_ATTACHMENT_FILE_LIMIT + 1)))
         assertFalse(chatmailDownloadAllowed(offer.put("size", -1), metadata.put("fileBytes", 0)))
     }
 }

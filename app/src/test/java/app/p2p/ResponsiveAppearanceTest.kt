@@ -161,7 +161,7 @@ class ResponsiveAppearanceTest {
                 assertFalse(label, text.hasVisualOverflow)
             }
             compose.onNodeWithContentDescription("Settings").performClick()
-            for (label in listOf("Notifications", "P2P address", "Connections")) {
+            for (label in listOf("Notifications", "P2P address", "Connections", "Compression", "Help")) {
                 compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
                 val text = layout(label)
                 assertEquals(label, 1, text.lineCount)
@@ -169,7 +169,8 @@ class ResponsiveAppearanceTest {
                 assertFalse(label, text.hasVisualOverflow)
             }
             compose.onNodeWithText("Notifications").performScrollTo().performClick()
-            compose.onNodeWithText("Notification settings").assertIsDisplayed()
+            compose.onNodeWithText("Show in notifications").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Android notification settings").performScrollTo().assertIsDisplayed()
         }
     }
 
