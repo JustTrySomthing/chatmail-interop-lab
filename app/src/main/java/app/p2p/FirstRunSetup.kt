@@ -31,8 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.Job
 
-internal fun setupPreferences(context: Context) =
-    context.getSharedPreferences("first-run-setup", Context.MODE_PRIVATE)
+internal fun setupPreferences(context: Context, profileId: String = PRIMARY_PROFILE) =
+    ProfileStorage(context, profileId).preferences("first-run-setup")
 
 private data class PermissionStep(val permission: String, val title: String, val detail: String, val action: String)
 
@@ -45,6 +45,7 @@ internal fun FirstRunSetup(
     restoreBackup: (() -> Unit)? = null,
     restoringBackup: Boolean = false,
     receiveProfile: (() -> Unit)? = null,
+    switchProfile: (() -> Unit)? = null,
     finish: () -> Unit
 ) {
     val context = LocalContext.current
@@ -123,7 +124,9 @@ internal fun FirstRunSetup(
     val completed = (if (name.isNotBlank()) 1 else 0) + permissions.size - pending.size + (if (liveDelivery) 1 else 0)
     if (back != null) BackHandler(onBack = back)
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Setup") }, navigationIcon = {
+        TopAppBar(title = { Text("Setup") }, actions = {
+            if (switchProfile != null) P2pTextButton(onClick = switchProfile) { Text("Switch profile") }
+        }, navigationIcon = {
             if (back != null) IconButton(onClick = back) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
             }

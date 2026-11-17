@@ -38,7 +38,8 @@ class P2pApplication : Application() {
         AppLog.collectPreviousCrashes(this)
         AppLog.record(this, "App started")
     }
-    val model by lazy { P2pModel(this) }
+    internal val profiles by lazy { RelayProfiles(this) }
+    val model get() = profiles.model.value
 }
 
 class TransferJob : JobService() {
@@ -49,18 +50,20 @@ class TransferJob : JobService() {
         if (Build.VERSION.SDK_INT < 34) return false
         val fileId = parameters.extras.getString(FILE_ID) ?: return false
         if (!isId(fileId)) return false
+        val model = (application as P2pApplication).model
+        val profile = parameters.extras.getString(EXTRA_PROFILE) ?: PRIMARY_PROFILE
+        if (profile != model.profileId || model.retiring) return false
         val notificationId = parameters.jobId
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "File transfers", NotificationManager.IMPORTANCE_LOW))
-        setNotification(parameters, notificationId, notification(fileId, notificationId, 0L, 0L), JOB_END_NOTIFICATION_POLICY_REMOVE)
+        setNotification(parameters, notificationId, notification(profile, fileId, notificationId, 0L, 0L), JOB_END_NOTIFICATION_POLICY_REMOVE)
         active[notificationId]?.cancel()
         active[notificationId] = scope.launch {
             try {
-                val model = (application as P2pApplication).model
                 model.withActiveSync {
                     var lastOffset = -1L
                     var progressAt = SystemClock.elapsedRealtime()
-                    while (SystemClock.elapsedRealtime() - progressAt < IDLE_TIMEOUT) {
+                    while (!model.retiring && SystemClock.elapsedRealtime() - progressAt < IDLE_TIMEOUT) {
                         val items = model.items.value
                         if (items != null) {
                             val file = items.firstOrNull { it.key == fileId && it.kind == "file-received" }?.data() ?: break
@@ -70,7 +73,7 @@ class TransferJob : JobService() {
                                 lastOffset = offset
                                 progressAt = SystemClock.elapsedRealtime()
                                 setNotification(parameters, notificationId,
-                                    notification(fileId, notificationId, offset, file.optLong("size")), JOB_END_NOTIFICATION_POLICY_REMOVE)
+                                    notification(profile, fileId, notificationId, offset, file.optLong("size")), JOB_END_NOTIFICATION_POLICY_REMOVE)
                             }
                         }
                         delay(1_000)
@@ -101,10 +104,11 @@ class TransferJob : JobService() {
         super.onDestroy()
     }
 
-    private fun notification(fileId: String, notificationId: Int, offset: Long, size: Long): Notification {
+    private fun notification(profile: String, fileId: String, notificationId: Int, offset: Long, size: Long): Notification {
         val destination = Intent(this, MainActivity::class.java)
             .setAction(LocalAlerts.ACTION_OPEN)
             .setData(Uri.parse("p2p-transfer:$fileId"))
+            .putExtra(EXTRA_PROFILE, profile)
             .putExtra(LocalAlerts.EXTRA_AREA, AlertArea.FILES.name)
             .putExtra(LocalAlerts.EXTRA_TARGET, fileId)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -129,29 +133,36 @@ class TransferJob : JobService() {
         private val activeStates = setOf("Waiting to connect", "Downloading")
 
         @Synchronized
-        fun cancelLegacyConstraint(context: Context, file: String) {
+        fun cancelLegacyConstraint(context: Context, file: String, profileId: String) {
             if (Build.VERSION.SDK_INT < 34) return
             val scheduler = context.getSystemService(JobScheduler::class.java)
             val service = ComponentName(context, TransferJob::class.java)
             scheduler.allPendingJobs.filter {
                 it.service == service && it.extras.getString(FILE_ID) == file &&
+                    (it.extras.getString(EXTRA_PROFILE) ?: PRIMARY_PROFILE) == profileId &&
                     it.requiredNetwork?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) == true
             }.forEach { scheduler.cancel(it.id) }
         }
 
         @Synchronized
-        fun schedule(context: Context, file: String, bytes: Long) {
+        fun schedule(context: Context, file: String, bytes: Long, profileId: String) {
             if (Build.VERSION.SDK_INT < 34 || !isId(file)) return
             val scheduler = context.getSystemService(JobScheduler::class.java)
             val component = ComponentName(context, TransferJob::class.java)
             val pending = scheduler.allPendingJobs
-            val previous = pending.firstOrNull { it.service == component && it.extras.getString(FILE_ID) == file }
+            val previous = pending.firstOrNull {
+                it.service == component && it.extras.getString(FILE_ID) == file &&
+                    (it.extras.getString(EXTRA_PROFILE) ?: PRIMARY_PROFILE) == profileId
+            }
             val taken = pending.mapTo(mutableSetOf(), JobInfo::getId)
             var id = previous?.id ?: (0x40000000 or (file.hashCode() and 0x3fffffff))
             if (previous == null) {
                 while (id in taken) id = if (id == Int.MAX_VALUE) 0x40000000 else id + 1
             }
-            val extras = PersistableBundle().apply { putString(FILE_ID, file) }
+            val extras = PersistableBundle().apply {
+                putString(FILE_ID, file)
+                putString(EXTRA_PROFILE, profileId)
+            }
             val job = JobInfo.Builder(id, component)
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                 .setEstimatedNetworkBytes(bytes.coerceAtLeast(0), JobInfo.NETWORK_BYTES_UNKNOWN.toLong())

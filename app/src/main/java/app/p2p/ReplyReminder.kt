@@ -38,10 +38,12 @@ class ReplyReminderJob : JobService() {
 
     override fun onStartJob(params: JobParameters): Boolean {
         val reminder = ReplyReminder.read(params.extras) ?: return false
+        val profile = params.extras.getString(EXTRA_PROFILE) ?: PRIMARY_PROFILE
+        if (profile !in ProfileSelection(applicationContext).ids()) return false
         active.remove(params.jobId)?.cancel()
         active[params.jobId] = scope.launch {
             try {
-                val store = LocalStore.open(applicationContext)
+                val store = LocalStore.open(applicationContext, profile)
                 try {
                     val records = store.records()
                     val target = records.get(reminder.target)
@@ -51,7 +53,7 @@ class ReplyReminderJob : JobService() {
                     if (target.data().optBoolean("blocked") ||
                         records.get(author)?.data()?.optBoolean("blocked") == true ||
                         records.get("thread-pref:${target.key}")?.data()?.optBoolean("blocked") == true) return@launch
-                    LocalAlerts(applicationContext).show(reminder.area, reminder.target, "Reminder to reply",
+                    LocalAlerts(applicationContext, profile).show(reminder.area, reminder.target, "Reminder to reply",
                         target.data().optString("name").ifBlank { "Open P2P to reply" }, replyTo = reminder.item)
                 } finally {
                     store.close()
@@ -83,16 +85,20 @@ class ReplyReminderJob : JobService() {
 
     companion object {
         @Synchronized
-        internal fun schedule(context: Context, reminder: ReplyReminder, delayMs: Long): Boolean {
+        internal fun schedule(context: Context, reminder: ReplyReminder, delayMs: Long, profile: String): Boolean {
             if (!reminder.valid() || delayMs <= 0) return false
             val service = ComponentName(context, ReplyReminderJob::class.java)
             val scheduler = context.getSystemService(JobScheduler::class.java)
             return runCatching {
                 val pending = scheduler.allPendingJobs
                 val used = pending.mapTo(mutableSetOf(), JobInfo::getId)
-                val existing = pending.firstOrNull { it.service == service && ReplyReminder.read(it.extras) == reminder }
+                val existing = pending.firstOrNull {
+                    it.service == service && ReplyReminder.read(it.extras) == reminder &&
+                        (it.extras.getString(EXTRA_PROFILE) ?: PRIMARY_PROFILE) == profile
+                }
                 val id = existing?.id ?: (60_000..60_999).firstOrNull { it !in used } ?: return false
                 val extras = PersistableBundle().apply {
+                    putString(EXTRA_PROFILE, profile)
                     putString("area", reminder.area.name)
                     putString("target", reminder.target)
                     putString("item", reminder.item)

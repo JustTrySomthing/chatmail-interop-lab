@@ -3,6 +3,8 @@ package app.p2p
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 internal const val CHATMAIL_FILE_LIMIT = 20_000_000L
 internal const val CHATMAIL_SUBMITTED = "Sent via Chatmail"
@@ -31,6 +33,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
         throw error
     }
     private val eventLock = Any()
+    private val eventReaderExited = CountDownLatch(1)
     private var readingEvents = false
     private var closing = false
     private var closeReady = false
@@ -84,6 +87,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
                     readingEvents = false
                     if (closeReady) ChatmailNative.close(handle)
                 }
+                eventReaderExited.countDown()
             }
         }, "Chatmail events").apply { isDaemon = true }.start()
     }
@@ -439,9 +443,23 @@ internal class Chatmail(directory: File) : AutoCloseable {
         try {
             disconnect()
         } finally {
+            val waiting = synchronized(eventLock) { readingEvents }
+            if (waiting) runCatching {
+                // A stopped or offline Core can still be waiting in get_next_event_batch.
+                // Setting the same local-only tag emits AccountsItemChanged without changing the profile.
+                val tag = call("get_config", "private_tag").takeUnless { it == JSONObject.NULL }
+                call("set_config", "private_tag", tag)
+            }
             synchronized(eventLock) {
                 closeReady = true
                 if (!readingEvents) ChatmailNative.close(handle)
+            }
+            if (waiting) {
+                try {
+                    eventReaderExited.await(1, TimeUnit.SECONDS)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
             }
         }
     }

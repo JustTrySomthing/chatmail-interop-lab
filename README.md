@@ -67,7 +67,13 @@ Long-press a message for editing, deletion for everyone, shared pinning, and sav
 
 In Group info, choose or remove a group photo. On a channel post, use the emoji button to send or remove your reaction. The Chatmail contact list shows the day a contact was last seen when Core reports it.
 
-In **Settings → Backup**, export a standard Chatmail archive that includes the profile and its history. It contains private keys and messages, so keep it in private storage. Choose **Restore Chatmail backup** during setup on a fresh install to import an archive. Existing installations retain their profile and use the existing P2P backup controls for earlier P2P data. For a QR transfer, open **Settings → Backup → Add second device** on the original device. On a fresh Relay Lab install, choose **Add as second device** during setup and scan the code on the same network. Standard Chatmail Core QR transfers still need a cross-client device test. Profile switching is pending.
+In **Settings → Backup**, export a standard Chatmail archive that includes the profile and its history. It contains private keys and messages, so keep it in private storage. Choose **Restore Chatmail backup** during setup on a fresh install to import an archive. Existing installations retain their profile and use the existing P2P backup controls for earlier P2P data. For a QR transfer, open **Settings → Backup → Add second device** on the original device. On a fresh Relay Lab install, choose **Add as second device** during setup and scan the code on the same network. Standard Chatmail Core QR transfers still need a cross-client device test.
+
+### Multiple profiles
+
+In this development branch, open **Settings → Profiles** to switch profiles or add a profile. A new profile opens Setup, where you can create a Chatmail identity, restore a standard backup, or scan an Add Second Device QR code. Setup's **Switch profile** button lets you return to your original profile even before finishing setup. The original profile keeps its existing conversations, identity, and files. Other profiles have their own Chatmail database, local history, attachments, and Webxdc storage.
+
+The active profile receives background message and call checks. Other profiles catch up when selected. Finish a call, a backup or device transfer, or a message that's currently sending before switching. Android permissions and the app's updater apply to the whole installation. Creating, switching, and restoring profiles on Android still need device testing.
 
 ## Device test status
 

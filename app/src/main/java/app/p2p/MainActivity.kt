@@ -104,9 +104,11 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
     private val updates: P2pUpdateModel by viewModels()
     private val readAloud by lazy { ReadAloud(applicationContext, lifecycleScope) }
-    private val model: P2pModel get() = (application as P2pApplication).model
+    private val profiles get() = (application as P2pApplication).profiles
+    private val model: P2pModel get() = profiles.model.value
     private val shared = MutableStateFlow<List<Uri>>(emptyList())
     private val alert = MutableStateFlow<AlertRoute?>(null)
+    private val otherProfileAlert = MutableStateFlow<Pair<String, AlertRoute>?>(null)
     private val openUpdates = MutableStateFlow(false)
     private val incomingSecureJoin = MutableStateFlow<String?>(null)
 
@@ -118,23 +120,81 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun acceptAlert(intent: Intent?) {
+        val route = LocalAlerts.read(intent)
+        val owner = intent?.getStringExtra(EXTRA_PROFILE) ?: PRIMARY_PROFILE
+        alert.value = route?.takeIf { owner == model.profileId && !model.retiring }
+        otherProfileAlert.value = route?.takeIf { owner != model.profileId && it.area != AlertArea.TALK }
+            ?.let { owner to it }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         acceptShare(intent)
         acceptSecureJoinLink(intent)
-        alert.value = LocalAlerts.read(intent)
+        acceptAlert(intent)
         openUpdates.value = intent.action == UpdateChecks.OPEN
         setContent {
+            val current by profiles.model.collectAsState()
+            val switching by profiles.switching.collectAsState()
             val incoming by shared.collectAsState()
             val route by alert.collectAsState()
+            val pendingAlert by otherProfileAlert.collectAsState()
             val updateRequested by openUpdates.collectAsState()
             val secureJoinLink by incomingSecureJoin.collectAsState()
-            val inlineAudio = remember { mutableStateOf<String?>(null) }
-            CompositionLocalProvider(LocalReadAloud provides readAloud, LocalInlineAudio provides inlineAudio) {
-                P2pApp(model, updates, incoming, route, { alert.value = null }, ::clearShare,
-                    updateRequested, { openUpdates.value = false },
-                    secureJoinLink, { incomingSecureJoin.value = null })
+            var profilesOpen by rememberSaveable { mutableStateOf(false) }
+            var profileError by remember { mutableStateOf<String?>(null) }
+            val profileScope = rememberCoroutineScope()
+            LaunchedEffect(pendingAlert) { if (pendingAlert != null) profilesOpen = true }
+            if (switching) {
+                P2pTheme(Appearance.read(null)) {
+                    Box(Modifier.fillMaxSize().background(Base), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+            } else {
+                key(current.profileId) {
+                    val inlineAudio = remember { mutableStateOf<String?>(null) }
+                    CompositionLocalProvider(LocalReadAloud provides readAloud, LocalInlineAudio provides inlineAudio) {
+                        P2pApp(current, updates, incoming, route, { alert.value = null }, ::clearShare,
+                            updateRequested, { openUpdates.value = false },
+                            secureJoinLink, { incomingSecureJoin.value = null },
+                            hasOtherProfiles = profiles.hasOtherProfiles(),
+                            openProfiles = { profilesOpen = true })
+                    }
+                }
+                if (profilesOpen) {
+                    val currentRecords by current.items.collectAsState()
+                    val appearance = Appearance.read(currentRecords?.firstOrNull { it.kind == "appearance" }?.data())
+                    P2pTheme(appearance) {
+                        ProfileChooser(profiles, current.profileId, pendingAlert?.first, profileError, select = { target ->
+                            profileScope.launch {
+                                profileError = null
+                                try {
+                                    readAloud.stop()
+                                    profiles.switchTo(target)
+                                    shared.value = emptyList()
+                                    incomingSecureJoin.value = null
+                                    openUpdates.value = false
+                                    alert.value = pendingAlert?.takeIf { it.first == target }?.second
+                                    otherProfileAlert.value = null
+                                    setIntent(Intent(Intent.ACTION_MAIN).setClass(this@MainActivity, MainActivity::class.java))
+                                    profilesOpen = false
+                                    BackgroundMessages.start(this@MainActivity, catchUp = true)
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (error: Exception) {
+                                    profileError = error.message ?: "Couldn’t switch profiles."
+                                }
+                            }
+                        }, close = {
+                            profilesOpen = false
+                            profileError = null
+                            otherProfileAlert.value = null
+                        })
+                    }
+                }
             }
         }
     }
@@ -144,7 +204,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         acceptShare(intent)
         acceptSecureJoinLink(intent)
-        alert.value = LocalAlerts.read(intent)
+        acceptAlert(intent)
         openUpdates.value = intent.action == UpdateChecks.OPEN
     }
 
@@ -161,7 +221,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStart() {
-        model.setForeground(true)
+        profiles.setForeground(true)
         super.onStart()
         BackgroundMessages.start(this)
     }
@@ -169,7 +229,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         readAloud.stop()
         // Android restarts the activity on rotation while the call stays in the foreground.
-        if (!isChangingConfigurations) model.setForeground(false)
+        if (!isChangingConfigurations) profiles.setForeground(false)
         super.onStop()
     }
 
@@ -211,7 +271,8 @@ private enum class Area(val label: String, val icon: ImageVector) {
 @Composable
 private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, alert: AlertRoute?, clearAlert: () -> Unit,
                    clearShared: () -> Unit, updateRequested: Boolean, clearUpdateRequest: () -> Unit,
-                   secureJoinLink: String?, clearSecureJoinLink: () -> Unit) {
+                   secureJoinLink: String?, clearSecureJoinLink: () -> Unit,
+                   hasOtherProfiles: Boolean, openProfiles: () -> Unit) {
     val loadedRecords by model.items.collectAsState()
     val records = loadedRecords.orEmpty()
     val appearance = Appearance.read(records.firstOrNull { it.kind == "appearance" }?.data())
@@ -230,7 +291,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         val snack = remember { SnackbarHostState() }
         val profileData = records.firstOrNull { it.kind == "profile" }?.data()
         val profile = profileData?.optString("name").orEmpty()
-        val setup = remember(context) { setupPreferences(context) }
+        val setup = remember(model, context) { setupPreferences(context, model.profileId) }
         var setupComplete by remember { mutableStateOf(setup.getBoolean("complete", false)) }
         if (loadedRecords == null) {
             Box(Modifier.fillMaxSize().background(Base), contentAlignment = Alignment.Center) {
@@ -246,7 +307,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             }
             Box(Modifier.fillMaxSize()) {
                 FirstRunSetup(profile, model::setName, restoreBackup = { restore.launch(arrayOf("*/*")) },
-                    restoringBackup = restoring, receiveProfile = { receivingProfile = true }) {
+                    restoringBackup = restoring, receiveProfile = { receivingProfile = true },
+                    switchProfile = openProfiles.takeIf { hasOtherProfiles }) {
                     setup.edit().putBoolean("complete", true).apply()
                     setupComplete = true
                 }
@@ -931,8 +993,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
 
                     FullPageRoute.Settings -> {
                         SettingsGrid(settingsQuery) { destination ->
-                            modal = destination
-                            if (destination == "updates") updates.checkNow()
+                            if (destination == "profiles") openProfiles()
+                            else {
+                                modal = destination
+                                if (destination == "updates") updates.checkNow()
+                            }
                         }
                     }
                     FullPageRoute.Updates -> {
@@ -1676,7 +1741,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 if (reminder != null) ItemActionsDialog("Remind me to reply",
                     listOf("In 1 hour" to 3_600_000L, "In 1 day" to 86_400_000L, "In 1 week" to 604_800_000L).map { (label, delay) ->
                         ItemAction(label, Icons.Outlined.Schedule) {
-                            val scheduled = ReplyReminderJob.schedule(context, reminder, delay)
+                            val scheduled = ReplyReminderJob.schedule(context, reminder, delay, model.profileId)
                             android.widget.Toast.makeText(context,
                                 if (scheduled) "Reply reminder scheduled" else "Couldn’t schedule the reminder",
                                 android.widget.Toast.LENGTH_SHORT).show()
@@ -2466,7 +2531,7 @@ internal fun PageActionButton(
 
 @Composable
 private fun SettingsGrid(query: String, open: (String) -> Unit) {
-    val settings = listOf("Profile" to "profile", "Setup" to "setup", "Appearance" to "appearance",
+    val settings = listOf("Profile" to "profile", "Profiles" to "profiles", "Setup" to "setup", "Appearance" to "appearance",
         "Read aloud" to "text-to-speech", "Notifications" to "notifications", "Quiet Hours" to "quiet-hours",
         "P2P address" to "p2p-address", "Backup" to "backup", "Block list" to "block-list",
         "Connections" to "connection-details", "Updates" to "updates", "App log" to "app-log")

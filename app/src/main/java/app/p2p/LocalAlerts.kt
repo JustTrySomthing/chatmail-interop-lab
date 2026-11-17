@@ -50,7 +50,8 @@ internal object AppAlertMute {
 
 internal data class AlertRoute(val area: AlertArea, val target: String, val answer: Boolean = false, val replyTo: String? = null)
 
-internal class LocalAlerts(private val context: Context) {
+internal class LocalAlerts(private val context: Context, private val profileId: String = PRIMARY_PROFILE) {
+    private val tag = profileId.takeUnless { it == PRIMARY_PROFILE }
     private val manager get() = context.getSystemService(NotificationManager::class.java)
 
     fun enabled() = manager.areNotificationsEnabled() && permitted()
@@ -77,6 +78,7 @@ internal class LocalAlerts(private val context: Context) {
         val id = id(area, if (replyTo != null) "reply:$replyTo" else target)
         val intent = Intent(context, MainActivity::class.java)
             .setAction(ACTION_OPEN)
+            .putExtra(EXTRA_PROFILE, profileId)
             .putExtra(EXTRA_AREA, area.name)
             .putExtra(EXTRA_TARGET, target)
             .putExtra(EXTRA_REPLY_TO, replyTo)
@@ -103,7 +105,8 @@ internal class LocalAlerts(private val context: Context) {
                         PendingIntent.FLAG_IMMUTABLE)
                     val decline = PendingIntent.getBroadcast(context, id,
                         Intent(context, TalkDeclineReceiver::class.java).setAction(ACTION_DECLINE)
-                            .setData(Uri.fromParts("p2p-talk", target, null)).putExtra(EXTRA_TARGET, target),
+                            .setData(Uri.fromParts("p2p-talk", target, null)).putExtra(EXTRA_TARGET, target)
+                            .putExtra(EXTRA_PROFILE, profileId),
                         PendingIntent.FLAG_IMMUTABLE)
                     setStyle(NotificationCompat.CallStyle.forIncomingCall(
                         Person.Builder().setName(title).setImportant(true).build(), decline, answer))
@@ -117,16 +120,22 @@ internal class LocalAlerts(private val context: Context) {
         if (area == AlertArea.TALK && !quiet) notification.flags = notification.flags or Notification.FLAG_INSISTENT
         if (Build.VERSION.SDK_INT < 33 ||
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
-            AppAlertMute.deliver(context) { manager.notify(id, notification) }
+            AppAlertMute.deliver(context) { manager.notify(tag, id, notification) }
         }
     }
 
-    fun clear(area: AlertArea, target: String) = manager.cancel(id(area, target))
+    fun clear(area: AlertArea, target: String) = manager.cancel(tag, id(area, target))
+
+    fun clearProfileAlerts() {
+        manager.activeNotifications.filter { notification ->
+            notification.tag == tag && AlertArea.entries.any { it.channel == notification.notification.channelId }
+        }.forEach { manager.cancel(it.tag, it.id) }
+    }
 
     private fun permitted() = Build.VERSION.SDK_INT < 33 ||
         context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    private fun id(area: AlertArea, target: String) = (area.channel + ":" + target).hashCode()
+    private fun id(area: AlertArea, target: String) = (area.channel + ":" + target + (tag?.let { ":$it" } ?: "")).hashCode()
 
     companion object {
         const val ACTION_OPEN = "app.p2p.OPEN_ALERT"
@@ -154,8 +163,11 @@ class TalkDeclineReceiver : android.content.BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in setOf(LocalAlerts.ACTION_DECLINE, TalkCallService.ACTION_END)) return
         val call = intent.getStringExtra(LocalAlerts.EXTRA_TARGET)?.takeIf(::isId) ?: return
-        LocalAlerts(context).clear(AlertArea.TALK, call)
-        (context.applicationContext as P2pApplication).model.talk.let { talk ->
+        val model = (context.applicationContext as P2pApplication).model
+        val owner = intent.getStringExtra(EXTRA_PROFILE) ?: PRIMARY_PROFILE
+        if (owner != model.profileId || model.retiring) return
+        LocalAlerts(context, owner).clear(AlertArea.TALK, call)
+        model.talk.let { talk ->
             if (intent.action == TalkCallService.ACTION_END && talk.state.value?.id == call) talk.end() else talk.decline(call)
         }
     }

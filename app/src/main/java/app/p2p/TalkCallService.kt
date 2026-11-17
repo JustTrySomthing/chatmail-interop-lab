@@ -16,15 +16,18 @@ class TalkCallService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val id = intent?.getStringExtra(LocalAlerts.EXTRA_TARGET)
         if (id == null || pending?.first != id) { stopSelf(startId); return START_NOT_STICKY }
+        val model = (application as P2pApplication).model
         try {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CHANNEL, "Ongoing Talk calls", NotificationManager.IMPORTANCE_LOW))
             val open = Intent(this, MainActivity::class.java).setAction(LocalAlerts.ACTION_OPEN)
                 .setData(Uri.fromParts("p2p-talk-ongoing", id, null))
+                .putExtra(EXTRA_PROFILE, model.profileId)
                 .putExtra(LocalAlerts.EXTRA_AREA, AlertArea.TALK.name).putExtra(LocalAlerts.EXTRA_TARGET, id)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             val end = Intent(this, TalkDeclineReceiver::class.java).setAction(ACTION_END)
                 .setData(Uri.fromParts("p2p-talk-ongoing", id, null)).putExtra(LocalAlerts.EXTRA_TARGET, id)
+                .putExtra(EXTRA_PROFILE, model.profileId)
             val notification = Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle("Relay Lab call").setContentText("Tap to return to the call")
                 .setContentIntent(PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE))
@@ -35,7 +38,7 @@ class TalkCallService : Service() {
             startForeground(4201, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
             callId = id
             pending?.second?.complete(Unit)
-            scope.launch { (application as P2pApplication).model.withActiveSync { awaitCancellation() } }
+            scope.launch { model.withActiveSync { awaitCancellation() } }
         } catch (error: Exception) {
             pending?.second?.completeExceptionally(error)
             AppLog.record(this, "Talk: audio service failed", error)

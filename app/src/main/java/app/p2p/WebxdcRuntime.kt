@@ -180,7 +180,8 @@ private fun ColumnScope.SandboxedWebxdc(
     val live = remember(id) { AtomicBoolean(true) }
     val joined = remember(id) { AtomicBoolean(false) }
     val host = remember(id, info.selfAddr) {
-        val profile = java.security.MessageDigest.getInstance("SHA-256").digest(info.selfAddr.toByteArray())
+        val address = if (model.profileId == PRIMARY_PROFILE) info.selfAddr else "${model.profileId}:${info.selfAddr}"
+        val profile = java.security.MessageDigest.getInstance("SHA-256").digest(address.toByteArray())
             .take(8).joinToString("") { "%02x".format(it.toInt() and 255) }
         "rl-$profile-msg$id.localhost"
     }

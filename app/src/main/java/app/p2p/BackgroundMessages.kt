@@ -22,6 +22,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -101,11 +103,14 @@ class ChatmailConnectionService : Service() {
         }
         if (connection?.isActive != true) {
             connection = scope.launch {
-                val model = (application as P2pApplication).model
-                model.withActiveSync {
-                    while (BackgroundMessages.keepConnection(this@ChatmailConnectionService)) delay(15_000L)
-                }
-                stopSelf()
+                val profiles = (application as P2pApplication).profiles
+                profiles.model.takeWhile { BackgroundMessages.keepConnection(this@ChatmailConnectionService) }
+                    .collectLatest { model ->
+                        model.withActiveSync {
+                            while (BackgroundMessages.keepConnection(this@ChatmailConnectionService)) delay(15_000L)
+                        }
+                        stopSelf()
+                    }
             }
         }
         return START_STICKY
@@ -128,7 +133,10 @@ class BackgroundMessageJob : JobService() {
             var retry = false
             try {
                 val model = (application as P2pApplication).model
-                model.withActiveSync { delay(SYNC_WINDOW) }
+                model.withActiveSync {
+                    val deadline = android.os.SystemClock.elapsedRealtime() + SYNC_WINDOW
+                    while (!model.retiring && android.os.SystemClock.elapsedRealtime() < deadline) delay(1_000L)
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {

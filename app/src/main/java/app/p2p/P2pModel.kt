@@ -106,9 +106,12 @@ private val notificationTypes = setOf("message", "messageReaction", "offer", "fr
 internal data class SheetSubmission(val sheet: String, val recipient: String? = null, val finished: Boolean = false,
     val error: String? = null)
 
-class P2pModel(application: Application) : AndroidViewModel(application) {
+class P2pModel(application: Application, internal val profileId: String = PRIMARY_PROFILE) : AndroidViewModel(application) {
     private val context = application
-    private val database = LocalStore.open(application)
+    internal val storage = ProfileStorage(application, profileId)
+    @Volatile internal var retiring = false
+        private set
+    private val database = LocalStore.open(application, profileId)
     private val records = database.records()
     private val devices = DeviceDirectory(records)
     @Volatile private var credentials: DeviceAccount? = null
@@ -126,7 +129,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private var pendingBackupPassword: CharArray? = null
     private val backupWorking = MutableStateFlow(false)
     internal val backupBusy = backupWorking.asStateFlow()
-    private val backupStaging get() = File(context.noBackupFilesDir, "restore-attachments")
+    private val backupStaging get() = storage.noBackup("restore-attachments")
     private val rendezvousLookups = mutableMapOf<String, Pair<String, String>>()
     private val observedRoutes = linkedMapOf<String, Long>()
     private val punches = linkedMapOf<String, Punch>()
@@ -141,7 +144,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private val pending = mutableMapOf<String, Attempt>()
     private val downloadLock = Mutex()
     private val outboxLock = Mutex()
-    private val alerts = LocalAlerts(application)
+    private val alerts = LocalAlerts(application, profileId)
     private val notificationsMuted = MutableStateFlow(AppAlertMute.isMuted(context))
     internal val appNotificationsMuted = notificationsMuted.asStateFlow()
     internal val talk = TalkCalls(application, viewModelScope, ::resolveTalkContact, ::talkIce,
@@ -178,7 +181,12 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     internal val webxdcEvents = webxdcEventFlow.asSharedFlow()
 
-    private fun openChatmail(directory: File): Chatmail = Chatmail(directory).also { core ->
+    private fun openChatmail(directory: File): Chatmail {
+        directory.parentFile?.mkdirs()
+        return Chatmail(directory).also(::listenForChatmailEvents)
+    }
+
+    private fun listenForChatmailEvents(core: Chatmail) {
         core.listenForEvents(onMessagesChanged = { changed ->
             nativeChangedMessages.addAll(changed)
             nextNativeSync = 0L
@@ -188,7 +196,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 val accepted = withContext(Dispatchers.IO) {
                     chatmailLock.withLock {
-                        if (chatmail !== core) return@withLock false to null
+                        if (retiring || chatmail !== core) return@withLock false to null
                         val caller = if (event.kind == "IncomingCall" && !isBlockedChatmailContact(event.chatId)) {
                             try {
                                 core.callContact(event.chatId)?.takeIf { core.isRingingCall(event.id) }
@@ -201,7 +209,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                         true to caller
                     }
                 }
-                if (accepted.first) talk.event(event, accepted.second)
+                if (accepted.first && !retiring) talk.event(event, accepted.second)
             }
         }
     }
@@ -240,9 +248,9 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private val visible: Boolean get() = syncDemand.value.foreground
     @Volatile private var visibleThread: String? = null
     private val retryAfter = mutableMapOf<String, Long>()
-    private val outgoing = File(context.filesDir, "sent").apply { mkdirs() }
-    private val incoming = File(context.filesDir, "received").apply { mkdirs() }
-    private val partial = File(context.filesDir, "partial").apply { mkdirs() }
+    private val outgoing = storage.files("sent").apply { mkdirs() }
+    private val incoming = storage.files("received").apply { mkdirs() }
+    private val partial = storage.files("partial").apply { mkdirs() }
 
     private val chatmailLock = Mutex()
     private var chatmail: Chatmail? = null
@@ -363,7 +371,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun initializeAccount(): Boolean = recoveryLock.withLock {
         try {
-            val vault = IdentityVault(context)
+            val vault = IdentityVault(context, profileId)
             val pending = vault.pendingRecovery()
             if (pending != null) {
                 credentials = null
@@ -426,7 +434,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private suspend fun connectedChatmail(name: String, setupQr: String? = null): Chatmail {
         val current = selectedNetwork?.network
             ?: error("Connect to the internet to set up Chatmail.")
-        val service = chatmail ?: openChatmail(File(context.noBackupFilesDir, "chatmail")).also { chatmail = it }
+        val service = chatmail ?: openChatmail(storage.noBackup("chatmail")).also { chatmail = it }
         if (chatmailNetwork != current) service.disconnect()
         val profile = records.get("profile")?.data()
         if (profile != null && service.profileNeedsSync(profile.optLong("revision"))) {
@@ -456,12 +464,14 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private suspend fun <T> withChatmail(
         requireNetwork: Boolean = false, setupQr: String? = null, action: suspend (Chatmail) -> T
     ): T = withContext(Dispatchers.IO) {
+        check(!retiring) { "Relay Lab is switching profiles." }
         awaitInviteAccount()
         if (requireNetwork) awaitInviteNetwork()
         val name = requireChatmailName()
         chatmailLock.withLock {
+            check(!retiring) { "Relay Lab is switching profiles." }
             check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
-            val directory = File(context.noBackupFilesDir, "chatmail")
+            val directory = storage.noBackup("chatmail")
             val service = if (selectedNetwork != null || requireNetwork) connectedChatmail(name, setupQr)
             else chatmail ?: directory.takeIf(File::isDirectory)?.let { openChatmail(it).also { opened -> chatmail = opened } }
             check(service != null && service.isConfigured()) { "Connect to the internet to set up Chatmail." }
@@ -578,15 +588,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private fun channelAttachment(core: Chatmail, id: Int): ChannelPost =
         channelPostMedia(requireNotNull(core.channelPost(id)) { "This post is unavailable." })
 
-    private fun availableChatmailFile(attachment: ChatmailAttachment): File? {
-        val path = attachment.path ?: return null
-        return runCatching {
-            val parent = File(context.noBackupFilesDir, "chatmail").canonicalFile.toPath()
-            File(path).canonicalFile.takeIf { file ->
-                file.toPath().startsWith(parent) && file.isFile && file.length() in 0..CHATMAIL_FILE_LIMIT
-            }
-        }.getOrNull()
-    }
+    private fun availableChatmailFile(attachment: ChatmailAttachment): File? =
+        attachment.path?.let(storage::chatmailFile)?.takeIf { it.length() in 0..CHATMAIL_FILE_LIMIT }
 
     internal suspend fun createChatmailChannel(name: String) =
         withChatmail { it.createChannel(checkedChannelName(name)) }
@@ -811,9 +814,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 data.remove("photo")
             } else if (path != data.optString("nativePhotoPath")) {
                 try {
-                    val root = File(context.noBackupFilesDir, "chatmail").canonicalFile.toPath()
-                    val image = File(path).canonicalFile
-                    if (image.toPath().startsWith(root) && image.isFile && image.length() in 1..CHATMAIL_FILE_LIMIT) {
+                    val image = storage.chatmailFile(path)
+                    if (image != null && image.length() in 1..CHATMAIL_FILE_LIMIT) {
                         data.put("photo", prepareProfilePhoto(context, Uri.fromFile(image)))
                         data.put("nativePhotoPath", path)
                     }
@@ -1342,11 +1344,11 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 recoveryLock.withLock {
                     chatmailLock.withLock {
                         check(records.get("profile")?.data()?.optString("name").isNullOrBlank()) {
-                            "Restore a Chatmail profile before creating one on this install."
+                            "Restore a Chatmail profile before setting up this profile."
                         }
-                        val root = File(context.noBackupFilesDir, "chatmail")
+                        val root = storage.noBackup("chatmail")
                         val core = chatmail ?: openChatmail(root).also { chatmail = it }
-                        check(!core.isConfigured()) { "A Chatmail profile is already set up on this install." }
+                        check(!core.isConfigured()) { "This Chatmail profile is already set up." }
                         restore(core)
                         val name = core.profileName().trim().take(60).ifBlank { "Chatmail profile" }
                         save("profile", "profile", obj("name" to name))
@@ -1453,7 +1455,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 plain.fill(0)
             }
             val protected = account.protectRoot(root, password)
-            IdentityVault(context).save(protected.encode())
+            IdentityVault(context, profileId).save(protected.encode())
             credentials = protected
             notice.value = "Encrypted backup saved"
         } finally {
@@ -1485,7 +1487,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                     bundle.remove("secret")
                     bundle.remove("mediaKey")
                     bundle.put("credentials", replacement.encode())
-                    IdentityVault(context).stageRecovery(bundle.toString())
+                    IdentityVault(context, profileId).stageRecovery(bundle.toString())
                     staged = true
                     recoveryQueued.set(true)
                     notice.value = "Restoring backup…"
@@ -1619,6 +1621,28 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         database.withTransaction {
             val existing = Appearance.read(records.get("appearance")?.data())
             save("appearance", "appearance", update(existing).json())
+        }
+    }
+
+    internal fun checkCanSwitchProfiles() {
+        check(talk.state.value?.phase.let { it == null || it == TalkPhase.Finished }) {
+            "End the call before switching profiles."
+        }
+        check(!backupWorking.value && !recoveryQueued.get() && pendingBackupPassword == null) {
+            "Finish the backup or transfer before switching profiles."
+        }
+        check(!draftSendState.value) { "Wait for the message to finish sending before switching profiles." }
+    }
+
+    internal suspend fun retireForProfileSwitch() {
+        retiring = true
+        setForeground(false)
+        val scopeJob = checkNotNull(viewModelScope.coroutineContext[Job])
+        scopeJob.cancel()
+        scopeJob.join()
+        withContext(Dispatchers.IO) {
+            closeChatmail()
+            database.close()
         }
     }
 
@@ -2736,7 +2760,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 record.key
             }
         }
-        migrated.forEach { TransferJob.cancelLegacyConstraint(context, it) }
+        migrated.forEach { TransferJob.cancelLegacyConstraint(context, it, profileId) }
     }
 
     fun requestDownload(id: String) = work { startDownload(id) }
@@ -2755,7 +2779,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
         val chatmailMessage = snapshot.optInt("chatmailAttachment")
         val retainedFile = if (chatmailMessage > 9) chatmailLock.withLock {
-            val service = chatmail ?: openChatmail(File(context.noBackupFilesDir, "chatmail")).also { chatmail = it }
+            val service = chatmail ?: openChatmail(storage.noBackup("chatmail")).also { chatmail = it }
             val cachedPath = service.message(chatmailMessage).optString("file")
             if (cachedPath.isBlank() || cachedPath == "null") null else File(cachedPath).takeIf(File::isFile)
         } else null
@@ -2781,7 +2805,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 queueDownload(id, data, offset)
                 save(id, record.kind, data, record.created)
             }
-            if (android.os.Build.VERSION.SDK_INT >= 34) TransferJob.schedule(context, id, remaining)
+            if (android.os.Build.VERSION.SDK_INT >= 34) TransferJob.schedule(context, id, remaining, profileId)
         }
     }
 

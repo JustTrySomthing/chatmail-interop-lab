@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.platform.LocalContext
 import android.net.Uri
-import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.material3.MaterialTheme
@@ -68,7 +67,7 @@ internal fun NativeContactRows(model: P2pModel, query: String, showEmpty: Boolea
             }
         }, enabled = !opening, shape = MaterialTheme.shapes.medium,
             color = MaterialTheme.colorScheme.surfaceVariant) {
-            NativeContactHeader(contact.name, contact.bio, contact.photoPath,
+            NativeContactHeader(model.storage, contact.name, contact.bio, contact.photoPath,
                 Modifier.fillMaxWidth().padding(12.dp), contact.lastSeen)
         }
     }
@@ -76,18 +75,12 @@ internal fun NativeContactRows(model: P2pModel, query: String, showEmpty: Boolea
 }
 
 @Composable
-private fun NativeContactHeader(name: String, bio: String, path: String?, modifier: Modifier, lastSeen: Long) {
+private fun NativeContactHeader(storage: ProfileStorage, name: String, bio: String, path: String?, modifier: Modifier, lastSeen: Long) {
     val context = LocalContext.current
-    val photo by produceState("", path) {
+    val photo by produceState("", storage, path) {
         value = withContext(Dispatchers.IO) {
-            if (path == null) return@withContext ""
-            runCatching {
-                val root = File(context.noBackupFilesDir, "chatmail").canonicalFile
-                val file = File(path).canonicalFile
-                if (file.isFile && file.path.startsWith(root.path + File.separator)) {
-                    prepareProfilePhoto(context, Uri.fromFile(file))
-                } else ""
-            }.getOrDefault("")
+            val photoFile = path?.let(storage::chatmailFile) ?: return@withContext ""
+            runCatching { prepareProfilePhoto(context, Uri.fromFile(photoFile)) }.getOrDefault("")
         }
     }
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
