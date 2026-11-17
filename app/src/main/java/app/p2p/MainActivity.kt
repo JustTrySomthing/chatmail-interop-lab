@@ -763,28 +763,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                 threadPreferences[id]?.optBoolean("blocked") == true
         val inlineAudio = LocalInlineAudio.current
         val appsInChat = remember(records, thread) { records.webxdcMessages(thread) }
-        fun launchWebxdc(record: Record, local: File, href: String = "") {
-            val data = record.data()
-            val target = data.optString("thread")
-            val appId = record.webxdcMessageId(target) ?: return
-            if (blocked(target) || model.galleryFile(record) != local) return
-            val index = webxdcSessions.indexOfFirst { it.id == appId }
-            if (index >= 0) {
-                if (href.isNotEmpty()) webxdcSessions[index] = webxdcSessions[index].copy(href = href)
-            } else {
-                if (webxdcSessions.size >= MAX_OPEN_WEBXDC_APPS) {
-                    modal = "webxdc-sessions"
-                    android.widget.Toast.makeText(context, "Close an open app before opening another.",
-                        android.widget.Toast.LENGTH_SHORT).show()
-                    return
-                }
-                val title = data.optString("name").substringBeforeLast('.').ifBlank { "App" }
-                webxdcSessions.add(WebxdcSession(target, appId, local, href, title))
-            }
-            inlineAudio?.value = null
-            activeWebxdc = appId
-            modal = null
-        }
         LaunchedEffect(records, threadPreferences, hasWebxdcSessions) {
             if (!hasWebxdcSessions) return@LaunchedEffect
             webxdcSessions.removeAll { session ->
@@ -856,14 +834,39 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
             goArea(Area.Chats)
             goThread(id)
         }
+        fun launchWebxdc(record: Record, local: File, href: String = "") {
+            val data = record.data()
+            val target = data.optString("thread")
+            val appId = record.webxdcMessageId(target) ?: return
+            if (blocked(target) || model.galleryFile(record) != local) return
+            val conversation = records.firstOrNull { it.key == target && it.kind in setOf("contact", "group") } ?: return
+            val index = webxdcSessions.indexOfFirst { it.id == appId }
+            if (index >= 0) {
+                if (href.isNotEmpty()) webxdcSessions[index] = webxdcSessions[index].copy(href = href)
+            } else {
+                if (webxdcSessions.size >= MAX_OPEN_WEBXDC_APPS) {
+                    modal = "webxdc-sessions"
+                    android.widget.Toast.makeText(context, "Close an open app before opening another.",
+                        android.widget.Toast.LENGTH_SHORT).show()
+                    return
+                }
+                val title = data.optString("name").substringBeforeLast('.').ifBlank { "App" }
+                webxdcSessions.add(WebxdcSession(target, appId, local, href, title))
+            }
+            if (thread != target) {
+                goArea(if (conversation.kind == "group") Area.Groups else Area.Chats)
+                goThread(target)
+            }
+            inlineAudio?.value = null
+            activeWebxdc = appId
+            modal = null
+        }
         LaunchedEffect(webxdcShortcut) {
             val target = webxdcShortcut ?: return@LaunchedEffect
             val error = chatAction {
                 val conversation = records.firstOrNull { it.key == target.thread && it.kind in setOf("contact", "group") }
                 check(conversation != null && !blocked(target.thread)) { "This app’s conversation is unavailable." }
                 val (record, local) = model.prepareWebxdcShortcut(target)
-                goArea(if (conversation.kind == "group") Area.Groups else Area.Chats)
-                goThread(target.thread)
                 launchWebxdc(record, local)
             }
             if (error != null) android.widget.Toast.makeText(context, error, android.widget.Toast.LENGTH_LONG).show()
@@ -2266,9 +2269,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             if (activeWebxdc == session.id) activeWebxdc = null
                         }) { Icon(Icons.Outlined.Close, "Close ${session.title}") }
                     }) {
-                        activeWebxdc = session.id
-                        inlineAudio?.value = null
-                        modal = null
+                        val app = records.firstOrNull { it.key == nativeMessageKey(session.id) }
+                        val local = app?.let(model::galleryFile)
+                        if (app != null && local != null && session.matches(app, local)) {
+                            launchWebxdc(app, local)
+                        }
                     }
                 }
                 if (closedApps.isNotEmpty()) {

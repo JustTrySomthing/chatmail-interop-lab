@@ -1,6 +1,9 @@
 package app.p2p
 
 import android.Manifest
+import android.app.Activity
+import android.content.ClipData
+import android.content.Intent
 import android.net.Uri
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
@@ -19,6 +22,26 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class WebxdcTest {
+    @Test fun webxdcFilePickerReturnsTheSelectedContentUris() {
+        val first = Uri.parse("content://documents/first")
+        val second = Uri.parse("content://documents/second")
+        val untrusted = Uri.parse("file:///storage/emulated/0/unselected")
+        val single = Intent().setData(first)
+        assertArrayEquals(arrayOf(first), webxdcPickedFiles(Activity.RESULT_OK, single))
+
+        val multiple = Intent().apply {
+            clipData = ClipData.newRawUri("Files", first).apply {
+                addItem(ClipData.Item(untrusted))
+                addItem(ClipData.Item(second))
+                addItem(ClipData.Item(first))
+                addItem(ClipData.Item("Text"))
+            }
+        }
+        assertArrayEquals(arrayOf(first, second), webxdcPickedFiles(Activity.RESULT_OK, multiple))
+        assertNull(webxdcPickedFiles(Activity.RESULT_CANCELED, multiple))
+        assertNull(webxdcPickedFiles(Activity.RESULT_OK, Intent().setData(untrusted)))
+    }
+
     @Test fun chatAppListKeepsSeparateSharedInstancesAndExcludesDeletedMessages() {
         val thread = nativeThreadKey(12)
         fun app(id: Int, owner: String = thread, deleted: Boolean = false) =

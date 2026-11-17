@@ -1,6 +1,7 @@
 package app.p2p
 
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -128,6 +129,14 @@ internal fun webxdcRequestPath(uri: Uri, host: String): String? {
     val path = uri.path?.takeIf { it.startsWith("/") && it.length <= 1024 } ?: return null
     if (path.any { it == '\\' || it.isISOControl() } || path.split('/').any { it == "." || it == ".." }) return null
     return path
+}
+
+internal fun webxdcPickedFiles(resultCode: Int, data: Intent?): Array<Uri>? {
+    if (resultCode != Activity.RESULT_OK || data == null) return null
+    val files = data.clipData?.let { clip ->
+        (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri }
+    }.orEmpty().ifEmpty { listOfNotNull(data.data) }
+    return files.filter { it.scheme == "content" }.distinct().takeIf { it.isNotEmpty() }?.toTypedArray()
 }
 
 @Composable
@@ -279,6 +288,7 @@ private fun ColumnScope.SandboxedWebxdc(
     val entryServed = remember(id) { AtomicBoolean(false) }
     var startError by remember(id) { mutableStateOf(false) }
     var fileCallback by remember(id) { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    var filePickerPending by remember(id) { mutableStateOf(false) }
     val permissions = remember(id, host) { WebxdcPermissions(context, host) }
     val destroyed = remember(id) { AtomicBoolean(false) }
     fun permissionsInForeground(): Boolean = live.get() && !rendererFailed && isVisible &&
@@ -305,10 +315,13 @@ private fun ColumnScope.SandboxedWebxdc(
         closeAction()
     }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val uris = WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
-            ?.filter { it.scheme == "content" }?.toTypedArray()
-        fileCallback?.onReceiveValue(uris)
+        filePickerPending = false
+        val callback = fileCallback
         fileCallback = null
+        val selected = if (live.get() && isVisible && !rendererFailed) {
+            webxdcPickedFiles(result.resultCode, result.data)
+        } else null
+        callback?.onReceiveValue(selected)
     }
     LaunchedEffect(href, ready, view) {
         if (ready && href.startsWith('#') && href.length <= 1_024) {
@@ -460,15 +473,16 @@ private fun ColumnScope.SandboxedWebxdc(
 
                     override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>,
                                                    params: FileChooserParams): Boolean {
-                        if (!isVisible) {
+                        if (!permissionsInForeground() || filePickerPending) {
                             callback.onReceiveValue(null)
                             return true
                         }
-                        fileCallback?.onReceiveValue(null)
+                        filePickerPending = true
                         fileCallback = callback
                         if (runCatching { picker.launch(params.createIntent()) }.isFailure) {
-                            callback.onReceiveValue(null)
+                            filePickerPending = false
                             fileCallback = null
+                            callback.onReceiveValue(null)
                         }
                         return true
                     }
