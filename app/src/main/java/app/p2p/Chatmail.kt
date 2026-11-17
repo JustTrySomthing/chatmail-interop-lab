@@ -114,12 +114,14 @@ internal class Chatmail(directory: File) : AutoCloseable {
     fun connect(name: String, setupQr: String? = null) {
         if (displayName != name) {
             // Earlier signed P2P messages need their complete text for verification.
-            call("batch_set_config", obj("displayname" to name, "download_limit" to "0", "bot" to "1",
-                "mdns_enabled" to "0"))
+            call("batch_set_config", obj("displayname" to name, "download_limit" to "0", "bot" to "1"))
             displayName = name
         }
         if (!running) {
-            if (call("is_configured") != true) call("init_transports", setupQr)
+            if (!isConfigured()) {
+                call("set_config", "mdns_enabled", "0")
+                call("init_transports", setupQr)
+            }
             call("start_io")
             running = true
         }
@@ -184,6 +186,18 @@ internal class Chatmail(directory: File) : AutoCloseable {
         updateChatDescription(id, description)
     }
 
+    fun setChannelImage(id: Int, file: File?) {
+        requireOwnedChannel(id)
+        setChatImage(id, file)
+    }
+
+    fun channelViewCount(message: Int): Int {
+        val row = message(message)
+        val channel = requireOwnedChannel(row.optInt("chatId"))
+        require(isEncryptedChatmailMessage(row, channel.id)) { "This post is unavailable." }
+        return (call("get_message_read_receipt_count", message) as Number).toInt()
+    }
+
     fun pinChannel(id: Int, pinned: Boolean) {
         requireOwnedChannel(id)
         call("set_chat_visibility", id, if (pinned) "Pinned" else "Normal")
@@ -218,6 +232,25 @@ internal class Chatmail(directory: File) : AutoCloseable {
     fun addRelay(code: String) {
         require(inviteKind(code) in setOf("account", "login")) { "Use a Chatmail relay or login QR code." }
         call("add_transport_from_qr", code)
+    }
+
+    fun relayAddresses(): List<String> {
+        val rows = call("list_transports") as JSONArray
+        return (0 until rows.length()).mapNotNull { index ->
+            rows.optJSONObject(index)?.optString("addr")?.takeIf(String::isNotBlank)
+        }.distinct()
+    }
+
+    fun removeRelay(address: String) {
+        val addresses = relayAddresses()
+        require(address in addresses) { "This relay is unavailable." }
+        check(addresses.size > 1) { "Add another relay before removing this one." }
+        call("delete_transport", address)
+    }
+
+    fun contactEncryptionInfo(chat: Int): String {
+        val contactId = requireNotNull(nativeThread(chat)?.contactId) { "This encrypted contact is unavailable." }
+        return call("get_contact_encryption_info", contactId) as String
     }
 
     fun contacts(): List<ChatmailContact> {
@@ -278,6 +311,34 @@ internal class Chatmail(directory: File) : AutoCloseable {
         call("send_reaction", id, JSONArray(if (emoji.isEmpty()) emptyList() else listOf(emoji)))
     }
 
+    fun readReceiptsEnabled(): Boolean = call("get_config", "mdns_enabled") == "1"
+    fun setReadReceipts(enabled: Boolean) { call("set_config", "mdns_enabled", if (enabled) "1" else "0") }
+
+    fun forwardMessage(id: Int, target: Int) { call("forward_messages", JSONArray(listOf(id)), target) }
+
+    fun makeContactCard(id: Int): String {
+        require(contact(id) != null) { "This Chatmail contact is unavailable." }
+        return call("make_vcard", JSONArray(listOf(id))) as String
+    }
+
+    fun importContactCard(file: File): List<Int> =
+        (call("import_vcard", file.absolutePath) as JSONArray).intValues()
+
+    fun messageDetails(message: NativeMessage): NativeMessageDetails {
+        val receipts = if (message.from == 1) (call("get_message_read_receipts", message.id) as JSONArray)
+        else JSONArray()
+        val readers = (0 until receipts.length()).mapNotNull { index ->
+            val row = receipts.optJSONObject(index) ?: return@mapNotNull null
+            val timestamp = row.optLong("timestamp")
+            if (timestamp <= 0) return@mapNotNull null
+            val name = contact(row.optInt("contactId"))?.name ?: "Contact"
+            name to timestamp * 1_000
+        }
+        val info = call("get_message_info_object", message.id) as JSONObject
+        return NativeMessageDetails(message.time, message.from == 1, message.state, readers,
+            info.optLong("ephemeralTimestamp").takeIf { it > 0 }?.times(1_000))
+    }
+
     fun editMessage(id: Int, text: String) { call("send_edit_request", id, text) }
     fun deleteMessageForEveryone(id: Int) { call("delete_messages_for_all", JSONArray(listOf(id))) }
     fun setMessagePinned(id: Int, pinned: Boolean) { call("set_pinned_message_state", id, pinned) }
@@ -289,7 +350,7 @@ internal class Chatmail(directory: File) : AutoCloseable {
     fun savedMessagesChat(): Int = (call("create_chat_by_contact_id", 1) as Number).toInt()
     fun disappearingTimer(chat: Int): Int = (call("get_chat_ephemeral_timer", chat) as Number).toInt()
     fun setDisappearingTimer(chat: Int, seconds: Int) { call("set_chat_ephemeral_timer", chat, seconds) }
-    fun setGroupImage(chat: Int, file: File?) { call("set_chat_profile_image", chat, file?.absolutePath) }
+    fun setChatImage(chat: Int, file: File?) { call("set_chat_profile_image", chat, file?.absolutePath) }
 
     fun nativeGroupInvite(chat: Int): String {
         check(nativeThread(chat)?.let { it.group && it.canSend && !it.request } == true) {
@@ -313,11 +374,12 @@ internal class Chatmail(directory: File) : AutoCloseable {
         call("accept_chat", id)
     }
 
-    fun nativeCreateGroup(name: String, description: String, members: Set<Int>): Int {
+    fun nativeCreateGroup(name: String, description: String, members: Set<Int>, photo: File? = null): Int {
         val id = (call("create_group_chat", name, false) as Number).toInt()
         try {
             members.forEach { call("add_contact_to_chat", id, it) }
             if (description.isNotEmpty()) updateChatDescription(id, description)
+            if (photo != null) setChatImage(id, photo)
         } catch (failure: Exception) {
             runCatching { call("delete_chat", id) }
             throw failure
@@ -484,7 +546,7 @@ internal const val INTEROP_TEXT_LIMIT = 12_000
 
 internal data class ChatmailChannel(
     val id: Int, val name: String, val owned: Boolean, val canPost: Boolean, val unread: Int,
-    val pinned: Boolean = false
+    val pinned: Boolean = false, val imagePath: String? = null
 )
 internal data class ChannelPost(
     val id: Int, val channelId: Int, val channelName: String, val text: String,
@@ -500,7 +562,8 @@ internal fun parseChatmailChannel(chat: JSONObject): ChatmailChannel? {
         (type != "InBroadcast" && type != "OutBroadcast")) return null
     val owned = type == "OutBroadcast"
     return ChatmailChannel(id, chat.optString("name").ifBlank { "Channel" }, owned,
-        owned && chat.optBoolean("canSend"), chat.optInt("freshMessageCounter"), chat.optBoolean("pinned"))
+        owned && chat.optBoolean("canSend"), chat.optInt("freshMessageCounter"), chat.optBoolean("pinned"),
+        chat.optString("profileImage").takeUnless { chat.isNull("profileImage") || it.isBlank() })
 }
 
 internal fun parseChannelPost(message: JSONObject, channel: ChatmailChannel): ChannelPost? {

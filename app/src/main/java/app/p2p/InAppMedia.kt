@@ -284,6 +284,7 @@ private fun AudioControls(player: Player, inlineLabel: String?, options: (() -> 
     var duration by remember(player) { mutableLongStateOf(0L) }
     var playing by remember(player) { mutableStateOf(false) }
     var requested by remember(player) { mutableStateOf<Float?>(null) }
+    var speed by remember(player) { mutableFloatStateOf(1f) }
     LaunchedEffect(player) {
         while (true) {
             position = player.currentPosition
@@ -307,8 +308,17 @@ private fun AudioControls(player: Player, inlineLabel: String?, options: (() -> 
                 requested?.let { position = (duration * it.toDouble()).toLong(); player.seekTo(position) }
                 requested = null
             })
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
             Text(playbackTime((duration * fraction.toDouble()).toLong()), style = MaterialTheme.typography.labelMedium)
+            P2pTextButton(onClick = {
+                speed = when (speed) {
+                    1f -> 1.5f
+                    1.5f -> 2f
+                    else -> 1f
+                }
+                player.setPlaybackSpeed(speed)
+            }) { Text(if (speed == 1.5f) "1.5×" else "${speed.toInt()}×") }
             Text(playbackTime(duration), style = MaterialTheme.typography.labelMedium)
         }
     }

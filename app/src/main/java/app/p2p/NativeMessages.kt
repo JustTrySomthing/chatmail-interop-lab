@@ -37,7 +37,8 @@ internal data class NativeMessage(
     val attachment: ChatmailAttachment?,
     val reactions: Map<Int, List<String>>,
     val webxdcParent: Int? = null, val webxdcHref: String? = null,
-    val edited: Boolean = false, val pinned: Boolean = false, val hasLocation: Boolean = false
+    val edited: Boolean = false, val pinned: Boolean = false, val hasLocation: Boolean = false,
+    val forwarded: Boolean = false
 )
 
 internal data class ChatmailAttachment(
@@ -46,7 +47,7 @@ internal data class ChatmailAttachment(
 ) {
     fun displayData(local: File?) = obj(
         "name" to name, "mime" to mime, "size" to size, "listed" to (viewType == "File"),
-        "webxdc" to (viewType == "Webxdc"),
+        "webxdc" to (viewType == "Webxdc"), "nativeVcard" to (viewType == "Vcard"),
         "state" to when {
             local != null || downloadState == "Done" -> "Complete"
             downloadState == "InProgress" -> "Downloading"
@@ -61,10 +62,10 @@ internal fun readChatmailAttachment(row: JSONObject): ChatmailAttachment? {
     val path = row.optString("file").takeUnless { it.isBlank() || row.isNull("file") }
     val name = row.optString("fileName").takeUnless { row.isNull("fileName") }.orEmpty()
     val viewType = row.optString("viewType")
-    if (path == null && name.isBlank() && viewType !in setOf("Image", "Gif", "Sticker", "Audio", "Voice", "Video", "File", "Webxdc")) {
+    if (path == null && name.isBlank() && viewType !in setOf("Image", "Gif", "Sticker", "Audio", "Voice", "Video", "File", "Webxdc", "Vcard")) {
         return null
     }
-    val mime = row.optString("fileMime").takeUnless { row.isNull("fileMime") }.orEmpty().ifBlank {
+    val mime = if (viewType == "Vcard") "text/x-vcard" else row.optString("fileMime").takeUnless { row.isNull("fileMime") }.orEmpty().ifBlank {
         when (viewType) {
             "Webxdc" -> WEBXDC_MIME
             "Gif" -> "image/gif"
@@ -74,7 +75,7 @@ internal fun readChatmailAttachment(row: JSONObject): ChatmailAttachment? {
             else -> ""
         }
     }
-    return ChatmailAttachment(path, name.ifBlank { path?.substringAfterLast('/') ?: "Attachment" },
+    return ChatmailAttachment(path, name.ifBlank { path?.substringAfterLast('/') ?: if (viewType == "Vcard") "Contact card.vcf" else "Attachment" },
         mime, row.optLong("fileBytes"), viewType, row.optString("downloadState"))
 }
 
@@ -131,13 +132,14 @@ internal fun readNativeMessage(row: JSONObject, chat: Int, webxdcParent: Int? = 
         quote?.optString("text").orEmpty(), quote?.optString("authorDisplayName").orEmpty(),
         row.optJSONObject("sender")?.optString("displayName").orEmpty(), attachment, readNativeReactions(row),
         webxdcParent, row.optString("webxdcHref").takeIf { webxdcParent != null && !row.isNull("webxdcHref") },
-        row.optBoolean("isEdited"), row.optBoolean("isPinned"), row.optBoolean("hasLocation"))
+        row.optBoolean("isEdited"), row.optBoolean("isPinned"), row.optBoolean("hasLocation"), row.optBoolean("isForwarded"))
 }
 
 internal fun chatmailAttachmentViewType(
     mime: String, asFile: Boolean, voicemail: Boolean = false, name: String = ""
 ): String = when {
     mime == WEBXDC_MIME || name.endsWith(".xdc", ignoreCase = true) -> "Webxdc"
+    mime in setOf("text/x-vcard", "text/vcard", "application/vcard") -> "Vcard"
     asFile -> "File"
     isTgsSticker(mime, name) -> "Sticker"
     voicemail && mime.startsWith("audio/") -> "Voice"

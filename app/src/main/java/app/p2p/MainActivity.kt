@@ -834,7 +834,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 postDraft = ""
                 postMedia = arrayListOf()
                 if (modal == "post") modal = null
-            } else if (result.sheet == "group-new" || result.sheet == "group-edit") {
+            } else if (result.sheet in setOf("group-new", "group-edit", "group-clone")) {
                 if (modal == result.sheet) result.recipient?.let(::goThread)
             } else {
                 chosen = arrayListOf()
@@ -1003,6 +1003,36 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     FullPageRoute.Updates -> {
                         UpdateSettingsContent(updates)
                     }
+                    FullPageRoute.Privacy -> {
+                        var attempt by remember { mutableIntStateOf(0) }
+                        val receipts by produceState<Result<Boolean>?>(null, model, attempt) {
+                            value = null
+                            value = try {
+                                Result.success(model.chatmailReadReceipts())
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                Result.failure(error)
+                            }
+                        }
+                        val enabled = receipts?.getOrNull()
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Read receipts")
+                                Text("Share when you read Chatmail messages. Applies to this profile.", color = Quiet)
+                            }
+                            Switch(checked = enabled == true, enabled = enabled != null && !nativeActionBusy,
+                                onCheckedChange = { checked ->
+                                    runNativeAction(done = { attempt++ }) { model.setChatmailReadReceipts(checked) }
+                                })
+                        }
+                        if (receipts == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        if (receipts?.isFailure == true) {
+                            Text("Connect this profile to load its privacy settings.", color = Quiet)
+                            P2pTextButton(onClick = { attempt++ }) { Text("Retry") }
+                        }
+                    }
                     FullPageRoute.Notifications -> {
                         Text(when {
                             appMuted -> "All app alerts are muted"
@@ -1088,6 +1118,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         }
                         P2pRow("Display name", profile, Icons.Outlined.Badge) { modal = "display-name" }
                         P2pRow("Bio", profileData?.optString("bio").orEmpty(), Icons.Outlined.Edit) { modal = "profile-bio" }
+                        P2pRow("Manage Chatmail relays", "", Icons.Outlined.SettingsEthernet) { modal = "chatmail-relays" }
                         P2pRow("Add Chatmail relay", "Use a relay or login QR link", Icons.Outlined.Link) { modal = "chatmail-relay" }
                     }
                 }
@@ -1639,6 +1670,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             }
                         }
                         if (activeThread && data.optInt("nativeMessage") > 9 && data.optInt("webxdcParent") <= 9) {
+                            add(ItemAction("Forward", Icons.AutoMirrored.Outlined.Reply) { modal = "forward-message" })
+                            add(ItemAction("Message info", Icons.Outlined.Info) { modal = "message-info" })
                             add(ItemAction("Save to Saved Messages", Icons.Outlined.BookmarkBorder) {
                                 model.saveNativeMessage(item.key)
                                 modal = null
@@ -1761,12 +1794,17 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 val canChange = chat?.optBoolean("nativeCanSend") == true && !chat.optBoolean("contactRequest") &&
                     !chat.optBoolean("nativeSelfTalk") && !blocked(target)
                 ItemActionsDialog("Chat options", buildList {
+                    if (chat != null && !chat.optBoolean("nativeSelfTalk") &&
+                        records.firstOrNull { it.key == target }?.kind == "contact") {
+                        add(ItemAction("Encryption info", Icons.Outlined.Lock) { modal = "encryption-info" })
+                    }
                     add(ItemAction("Pinned messages", Icons.Outlined.PushPin) { modal = "native-pinned-messages" })
                     if (canChange) add(ItemAction("Disappearing messages", Icons.Outlined.Timer) {
                         modal = "native-disappearing-messages"
                     })
                 }) { modal = null }
             }
+            "encryption-info" -> selected?.let { EncryptionInfoSheet(model, it) { modal = "native-conversation-options" } }
             "native-pinned-messages" -> selected?.let { target ->
                 Sheet("Pinned messages", { modal = null }) {
                     val result by produceState<Result<List<NativeMessage>>?>(null, target) {
@@ -1811,6 +1849,21 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         result != null -> Text(result?.exceptionOrNull()?.message ?: "Couldn’t load the timer.")
                         else -> LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
+                }
+            }
+            "message-info" -> selected?.let { MessageInfoSheet(model, it) { modal = null } }
+            "forward-message" -> selected?.let { key ->
+                val trashed = records.filter { it.kind == "folder" && it.data().optString("name") == "Trash" }
+                    .map { it.key.removePrefix("folder:") }.toSet()
+                val targets = records.filter {
+                    (it.kind == "contact" || it.kind == "group") && it.data().let { data ->
+                        data.optInt("nativeChat") > 9 && data.optBoolean("nativeCanSend") &&
+                            !data.optBoolean("contactRequest")
+                    } && !blocked(it.key) && it.key !in trashed
+                }.distinctBy { it.data().optInt("nativeChat") }.sortedBy { it.data().optString("name").lowercase() }
+                ForwardMessageSheet(targets, nativeActionBusy, nativeActionError,
+                    close = { if (!nativeActionBusy) modal = null }) { target ->
+                    runNativeAction { model.forwardNativeMessage(key, target) }
                 }
             }
             "native-edit-message" -> records.firstOrNull { it.key == selected }?.let { message ->
@@ -2044,6 +2097,12 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 { modal = "profile" }, contentInput = true) { bio ->
                 model.setBio(bio) { modal = "profile" }
             }
+            "chatmail-relays" -> {
+                var revision by remember { mutableIntStateOf(0) }
+                ChatmailRelaysSheet(model, revision, nativeActionBusy, close = { if (!nativeActionBusy) modal = "profile" }) { address ->
+                    runNativeAction(done = { revision++ }) { model.removeChatmailRelay(address) }
+                }
+            }
             "chatmail-relay" -> InputDialog("Add Chatmail relay", "Relay or login link", "Add relay", "",
                 { modal = "profile" }, password = true) { qr ->
                 if (qr.isNotBlank()) model.addChatmailRelay(qr) { modal = "profile" }
@@ -2114,6 +2173,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         selected = group.key
                         modal = "native-conversation-options"
                     }) { Text("Chat options") }
+                    if (!group.data().optBoolean("contactRequest") && !blocked(group.key)) {
+                        P2pTextButton(onClick = { selected = group.key; modal = "group-clone" }) { Text("Clone group") }
+                    }
                     if (peer.isNotBlank() && group.data().optString("owner") == peer) {
                         P2pTextButton(onClick = { selected = group.key; modal = "group-edit" }) { Text("Edit group") }
                         P2pTextButton(enabled = !nativeActionBusy, onClick = {
@@ -2128,9 +2190,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     }
                 }
             }
-            "group-new", "group-edit" -> {
+            "group-new", "group-edit", "group-clone" -> {
                 val editing = modal == "group-edit"
-                val group = groups.firstOrNull { editing && it.key == selected }
+                val cloning = modal == "group-clone"
+                val group = groups.firstOrNull { (editing || cloning) && it.key == selected }
                 val chat = group?.data()?.optInt("nativeChat")?.takeIf { it > 9 }
                 val useChatmail = !editing || chat != null
                 val nativeMembers by produceState(emptyList<Record>(), useChatmail, chat) {
@@ -2148,7 +2211,12 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 val groupSubmission = submission?.takeIf { it.sheet == modal }
                 val busy = groupSubmission?.finished == false
                 val description = if (chat == null) GroupDescriptionState("") else rememberGroupDescription(model, chat)
-                GroupSheet(if (editing) "Edit group" else "New group", choices, group,
+                val title = when {
+                    cloning -> "Clone group"
+                    editing -> "Edit group"
+                    else -> "New group"
+                }
+                GroupSheet(title, choices, group, creating = !editing,
                     description = description.takeIf { useChatmail }, busy = busy,
                     error = groupSubmission?.error, dismiss = {
                         if (!busy) {
@@ -2156,7 +2224,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             modal = null
                         }
                     }) { title, details, members ->
-                    if (useChatmail) model.saveNativeGroup(chat, title, details, members)
+                    if (useChatmail) model.saveNativeGroup(chat.takeIf { !cloning }, title, details,
+                        if (cloning) members.intersect(choices.map(Record::key).toSet()) else members,
+                        cloneFrom = chat.takeIf { cloning })
                     else if (group != null) { model.updateGroup(group.key, title, members); modal = null }
                 }
             }
@@ -2260,7 +2330,29 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 P2pRow("Choose a .vcf file", "", Icons.Outlined.ContactPage) {
                     chooseAttachment(false, "text/x-vcard", "text/vcard", "application/vcard", "application/octet-stream")
                 }
-                contacts.filter { !it.data().optBoolean("blocked") }.forEach { contact ->
+                val destination = thread
+                if (destination != null && records.any {
+                        it.key == destination && it.data().optInt("nativeChat") > 9
+                    }) {
+                    val available by produceState<Result<List<ChatmailContact>>?>(null, model, destination) {
+                        value = try {
+                            Result.success(model.chatmailCardContacts())
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (error: Exception) {
+                            Result.failure(error)
+                        }
+                    }
+                    if (available == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    else if (available?.isFailure == true) Text("Couldn’t load Chatmail contacts.", color = Quiet)
+                    else if (available?.getOrNull().isNullOrEmpty()) Text("No Chatmail contacts to share yet.", color = Quiet)
+                    available?.getOrNull().orEmpty().forEach { contact ->
+                        P2pRow(contact.name, "Share Chatmail contact card", Icons.Outlined.PersonOutline,
+                            enabled = !nativeActionBusy) {
+                            runNativeAction { addDraft(destination, listOf(model.chatmailContactCard(contact.id))) }
+                        }
+                    }
+                } else contacts.filter { !it.data().optBoolean("blocked") }.forEach { contact ->
                     P2pRow(name(contact.key), "Share P2P contact card", Icons.Outlined.PersonOutline) {
                         val id = thread
                         if (id != null) {
@@ -2367,6 +2459,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                             model.galleryFile(file)?.let { VCardPreview(it) }
                         }
                         val local = model.galleryFile(file)
+                        if (local != null && data.optBoolean("nativeVcard") && file.kind == "file-received") {
+                            P2pOutlinedButton(enabled = !nativeActionBusy, onClick = {
+                                runNativeAction(done = {}) { model.importChatmailCard(file.key) }
+                            }) { Text("Add to Chatmail contacts") }
+                        }
                         val kind = mediaKind(data.optString("mime"), data.optString("name"))
                         if (local != null && kind != null) Button(onClick = { modal = "media" }) {
                             Text(if (kind in setOf(MediaKind.Audio, MediaKind.Video)) "Play" else "View")
@@ -2532,7 +2629,7 @@ internal fun PageActionButton(
 @Composable
 private fun SettingsGrid(query: String, open: (String) -> Unit) {
     val settings = listOf("Profile" to "profile", "Profiles" to "profiles", "Setup" to "setup", "Appearance" to "appearance",
-        "Read aloud" to "text-to-speech", "Notifications" to "notifications", "Quiet Hours" to "quiet-hours",
+        "Read aloud" to "text-to-speech", "Privacy" to "privacy", "Notifications" to "notifications", "Quiet Hours" to "quiet-hours",
         "P2P address" to "p2p-address", "Backup" to "backup", "Block list" to "block-list",
         "Connections" to "connection-details", "Updates" to "updates", "App log" to "app-log")
     val matches = settings.filter { (label, _) -> threadSearchMatches(query, label, emptyList()) }
@@ -2720,6 +2817,7 @@ private enum class FullPageRoute(val route: String, val title: String) {
     Settings("settings", "Settings"),
     Updates("updates", "P2P updates"),
     Notifications("notifications", "Notifications"),
+    Privacy("privacy", "Privacy"),
     Address("p2p-address", "P2P address"),
     Backup("backup", "Backup"),
     AppLog("app-log", "App log"),
@@ -3013,7 +3111,7 @@ private fun GroupDescriptionFeedback(description: GroupDescriptionState) {
 
 @Composable
 private fun GroupSheet(
-    title: String, contacts: List<Record>, group: Record?,
+    title: String, contacts: List<Record>, group: Record?, creating: Boolean,
     description: GroupDescriptionState?, busy: Boolean, error: String?, dismiss: () -> Unit,
     save: (String, String?, Set<String>) -> Unit
 ) {
@@ -3050,8 +3148,8 @@ private fun GroupSheet(
             save(name, editedDescription, members.toSet())
         }, shape = P2pButtonShape,
             enabled = !busy && name.isNotBlank() && (description == null || description.value != null) &&
-                (group != null || contacts.any { it.key in members })) {
-            Text(if (group == null) "Create group" else "Save changes")
+                (!creating || contacts.any { it.key in members })) {
+            Text(if (creating) "Create group" else "Save changes")
         }
     }
 }
@@ -3256,6 +3354,7 @@ internal fun ColumnScope.ThreadView(
                                         P2pTextButton(onClick = { openWebxdc(message) }) { Text("Open app") }
                                     }
                                     val details = listOfNotNull(
+                                        "Forwarded".takeIf { data.optBoolean("nativeForwarded") },
                                         "Edited".takeIf { data.optBoolean("nativeEdited") },
                                         "Pinned".takeIf { data.optBoolean("nativePinned") }
                                     )

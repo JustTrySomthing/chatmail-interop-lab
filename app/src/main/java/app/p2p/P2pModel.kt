@@ -516,8 +516,13 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
 
     internal suspend fun chatmailDescription(id: Int) = withChatmail { it.chatDescription(id) }
 
-    internal fun saveNativeGroup(chat: Int?, name: String, description: String?, members: Set<String>) =
-        submitSheet(SheetSubmission(if (chat == null) "group-new" else "group-edit")) {
+    internal fun saveNativeGroup(
+        chat: Int?, name: String, description: String?, members: Set<String>, cloneFrom: Int? = null
+    ) = submitSheet(SheetSubmission(when {
+        cloneFrom != null -> "group-clone"
+        chat != null -> "group-edit"
+        else -> "group-new"
+    })) {
             val title = name.trim()
             require(title.isNotBlank() && title.length <= 80) { "Enter a group name of up to 80 characters." }
             val details = description?.let(::checkedChatDescription)
@@ -525,8 +530,19 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
                 .mapNotNull { it.substringAfter(':').toIntOrNull()?.takeIf { id -> id > 9 } }.toSet()
             require(chat != null || ids.isNotEmpty()) { "Choose at least one contact." }
             withChatmail { core ->
-                val id = if (chat == null) core.nativeCreateGroup(title, details.orEmpty(), ids)
-                    else chat.also { core.nativeUpdateGroup(it, title, details, ids) }
+                val id = when {
+                    cloneFrom != null -> {
+                        val original = requireNotNull(core.nativeThread(cloneFrom)?.takeIf { it.group && !it.request }) {
+                            "This group is unavailable."
+                        }
+                        val allowed = core.contacts().mapTo(mutableSetOf(), ChatmailContact::id)
+                        require(ids.all { it in allowed }) { "Choose contacts available on this profile." }
+                        val photo = original.imagePath?.let(storage::chatmailFile)
+                        core.nativeCreateGroup(title, details ?: core.chatDescription(original.id), ids, photo)
+                    }
+                    chat == null -> core.nativeCreateGroup(title, details.orEmpty(), ids)
+                    else -> chat.also { core.nativeUpdateGroup(it, title, details, ids) }
+                }
                 core.nativeThread(id)?.let { cacheNativeThread(it) }
                 nextNativeSync = 0L
                 nativeThreadKey(id)
@@ -536,17 +552,21 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
     internal suspend fun updateNativeGroupImage(thread: String, uri: Uri?) = withChatmail { core ->
         val chat = writableNativeChat(core, thread)
         check(chat.group) { "This conversation is not a group." }
+        withPreparedChatImage(uri) { file -> core.setChatImage(chat.id, file) }
+        core.nativeThread(chat.id)?.let { cacheNativeThread(it, thread) }
+        nextNativeSync = 0L
+    }
+
+    private fun withPreparedChatImage(uri: Uri?, update: (File?) -> Unit) {
         val file = uri?.let {
             val photo = requireNotNull(checkedPhoto(prepareProfilePhoto(context, it)))
-            File.createTempFile("group-photo-", ".jpg", context.cacheDir).also { file ->
+            File.createTempFile("chat-photo-", ".jpg", context.cacheDir).also { file ->
                 try { file.writeBytes(photo) }
                 catch (failure: Exception) { file.delete(); throw failure }
             }
         }
         try {
-            core.setGroupImage(chat.id, file)
-            core.nativeThread(chat.id)?.let { cacheNativeThread(it, thread) }
-            nextNativeSync = 0L
+            update(file)
         } finally {
             file?.delete()
         }
@@ -602,6 +622,17 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
     private fun checkedChatDescription(description: String): String = description.trim().also {
         require(it.length <= INTEROP_TEXT_LIMIT) { "The description is too long." }
     }
+
+    internal suspend fun setChatmailChannelImage(id: Int, uri: Uri?) = withChatmail { core ->
+        withPreparedChatImage(uri) { file -> core.setChannelImage(id, file) }
+    }
+
+    internal suspend fun chatmailChannelImage(path: String): String = withContext(Dispatchers.IO) {
+        val file = storage.chatmailFile(path)?.takeIf { it.length() in 1..CHATMAIL_FILE_LIMIT }
+        if (file != null) prepareProfilePhoto(context, Uri.fromFile(file)) else ""
+    }
+
+    internal suspend fun chatmailChannelViewCount(post: Int): Int = withChatmail { it.channelViewCount(post) }
 
     internal suspend fun pinChatmailChannel(id: Int, pinned: Boolean) =
         withChatmail { it.pinChannel(id, pinned) }
@@ -907,7 +938,7 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
                 data.put("nativeMessage", message.id).put("thread", thread).put("author", author)
                     .put("text", message.text).put("caption", message.text)
                     .put("nativeEdited", message.edited).put("nativePinned", message.pinned)
-                    .put("nativeLocation", message.hasLocation)
+                    .put("nativeLocation", message.hasLocation).put("nativeForwarded", message.forwarded)
                     .put("group", if (chat.group) thread else "")
                     .put("unread", !data.optBoolean("locallyDeleted") &&
                         (message.state == 10 || data.optBoolean("locallyUnread")))
@@ -2238,6 +2269,67 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
             it.data().optString("thread") == thread
         })
         nextNativeSync = 0L
+    }
+
+    internal suspend fun chatmailRelays() = withChatmail { it.relayAddresses() }
+
+    internal suspend fun removeChatmailRelay(address: String) = withChatmail { it.removeRelay(address) }
+
+    internal suspend fun nativeEncryptionInfo(thread: String): String = withChatmail { core ->
+        val chat = records.get(thread)?.data()?.optInt("nativeChat")?.takeIf { it > 9 }
+        core.contactEncryptionInfo(requireNotNull(chat) { "This encrypted contact is unavailable." })
+    }
+
+    internal suspend fun chatmailReadReceipts(): Boolean = withChatmail { it.readReceiptsEnabled() }
+
+    internal suspend fun setChatmailReadReceipts(enabled: Boolean) = withChatmail { it.setReadReceipts(enabled) }
+
+    private suspend fun existingNativeMessage(core: Chatmail, key: String): NativeMessage {
+        val row = requireNotNull(records.get(key)?.data()?.takeUnless { it.optBoolean("locallyDeleted") }) {
+            "This message is unavailable."
+        }
+        val chat = records.get(row.optString("thread"))?.data()?.optInt("nativeChat") ?: 0
+        return requireNotNull(chat.takeIf { it > 9 }?.let { core.nativeMessage(it, row.optInt("nativeMessage")) }
+            ?.takeIf { it.webxdcParent == null }) { "This message is unavailable." }
+    }
+
+    internal suspend fun nativeMessageDetails(key: String): NativeMessageDetails = withChatmail { core ->
+        core.messageDetails(existingNativeMessage(core, key))
+    }
+
+    internal suspend fun forwardNativeMessage(key: String, target: String) = withChatmail { core ->
+        val destination = writableNativeChat(core, target)
+        val message = existingNativeMessage(core, key)
+        core.forwardMessage(message.id, destination.id)
+        refreshAfterNativeSend(core, destination.id, target)
+        notice.value = "Message forwarded."
+    }
+
+    internal suspend fun chatmailCardContacts(): List<ChatmailContact> = withChatmail { core ->
+        core.contacts().sortedBy { it.name.lowercase() }
+    }
+
+    internal suspend fun chatmailContactCard(id: Int): AttachmentDraft = withChatmail { core ->
+        val card = core.makeContactCard(id)
+        val directory = File(context.cacheDir, "captures").apply { mkdirs() }
+        val file = File.createTempFile("chatmail-contact-", ".vcf", directory)
+        try {
+            file.writeText(card)
+            AttachmentDraft(Uri.fromFile(file), "Contact card.vcf", "text/x-vcard", false, temporary = true)
+        } catch (error: Exception) {
+            file.delete()
+            throw error
+        }
+    }
+
+    internal suspend fun importChatmailCard(key: String) = withChatmail { core ->
+        val message = existingNativeMessage(core, key)
+        val attachment = requireNotNull(message.attachment?.takeIf { it.viewType == "Vcard" }) {
+            "This message does not have a Chatmail contact card."
+        }
+        val file = requireNotNull(availableChatmailFile(attachment)) { "Download the contact card first." }
+        check(core.importContactCard(file).any { it > 9 }) { "The card does not contain a Chatmail contact." }
+        notice.value = "Contact added to Chatmail."
     }
 
     internal suspend fun editNativeMessage(key: String, draft: String) {

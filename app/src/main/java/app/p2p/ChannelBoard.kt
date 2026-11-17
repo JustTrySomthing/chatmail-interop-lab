@@ -121,6 +121,10 @@ internal fun ChannelBoard(
         value = ""
         if (active != null) chatAction { value = model.chatmailDescription(active) }
     }
+    val channelPhoto by produceState("", current?.imagePath) {
+        value = ""
+        current?.imagePath?.let { path -> chatAction { value = model.chatmailChannelImage(path) } }
+    }
     val viewingFeed = page == "Feed" && selected == null
     LaunchedEffect(model, lifecycle, page, selected, active, limit, revision) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -179,14 +183,27 @@ internal fun ChannelBoard(
         }
     }
 
+    var photoTarget by rememberSaveable { mutableStateOf<Int?>(null) }
+    val choosePhoto = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val target = photoTarget
+        photoTarget = null
+        if (uri != null && target != null) submit { model.setChatmailChannelImage(target, uri) }
+    }
+
     if (creating || editing != null) {
-        ChannelEditor(editing, model, busy, actionError, dismiss = {
-            if (!busy) {
-                creating = false
-                editingId = null
-                actionError = null
+        ChannelEditor(editing, model, busy, actionError,
+            choosePhoto = editing?.let { channel -> { photoTarget = channel.id; choosePhoto.launch("image/*") } },
+            removePhoto = editing?.takeIf { it.imagePath != null }?.let { channel ->
+                { submit { model.setChatmailChannelImage(channel.id, null) } }
+            },
+            dismiss = {
+                if (!busy) {
+                    creating = false
+                    editingId = null
+                    actionError = null
+                }
             }
-        }) { name, details ->
+        ) { name, details ->
             submit {
                 if (editing == null) {
                     val id = model.createChatmailChannel(name)
@@ -304,7 +321,7 @@ internal fun ChannelBoard(
             active != null -> {
                 if (current != null) {
                     item {
-                        ChannelProfileCard(current, description, profilePhoto.takeIf { current.owned }.orEmpty(),
+                        ChannelProfileCard(current, description, channelPhoto.ifEmpty { profilePhoto.takeIf { current.owned }.orEmpty() },
                             share, edit = { editChannel(current) })
                     }
                     if (current.owned) item {
@@ -326,8 +343,20 @@ internal fun ChannelBoard(
                     EmptyTabMessage(if (search.isBlank()) "No posts yet" else "No matching posts")
                 }
                 items(matches, key = { it.id }) { post ->
-                    ChannelPostCard(post, current?.owned == true, profilePhoto.takeIf { current?.owned == true }.orEmpty(),
-                        null, preview, openLink, { openAttachment(post) }, { if (!busy) reactingTo = post })
+                    val ownedPost = current?.owned == true
+                    val views by produceState<Int?>(null, post.id, ownedPost, post.state) {
+                        value = null
+                        if (ownedPost && post.state >= 26) {
+                            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                                while (true) {
+                                    chatAction { value = model.chatmailChannelViewCount(post.id) }
+                                    delay(30_000)
+                                }
+                            }
+                        }
+                    }
+                    ChannelPostCard(post, ownedPost, channelPhoto.ifEmpty { profilePhoto.takeIf { ownedPost }.orEmpty() },
+                        null, preview, openLink, { openAttachment(post) }, { if (!busy) reactingTo = post }, views)
                 }
                 if (hasOlder) item { P2pTextButton(onClick = { limit += 50 }) { Text("Load older posts") } }
             }
@@ -383,7 +412,7 @@ internal fun ChannelBoard(
 @Composable
 private fun ChannelEditor(
     channel: ChatmailChannel?, model: P2pModel, busy: Boolean, error: String?,
-    dismiss: () -> Unit, save: (String, String) -> Unit
+    choosePhoto: (() -> Unit)?, removePhoto: (() -> Unit)?, dismiss: () -> Unit, save: (String, String) -> Unit
 ) {
     var name by rememberSaveable(channel?.id) { mutableStateOf(channel?.name.orEmpty()) }
     var description by rememberSaveable(channel?.id) { mutableStateOf<String?>(null) }
@@ -402,6 +431,12 @@ private fun ChannelEditor(
             OutlinedTextField(description.orEmpty(), { if (it.length <= INTEROP_TEXT_LIMIT) description = it },
                 modifier = Modifier.fillMaxWidth(), label = { Text("Description") }, shape = RoundedFieldShape,
                 minLines = 2, maxLines = 5, enabled = !busy && description != null)
+            choosePhoto?.let { action ->
+                P2pTextButton(enabled = !busy, onClick = action) { Text("Choose channel photo") }
+            }
+            removePhoto?.let { action ->
+                P2pTextButton(enabled = !busy, onClick = action) { Text("Remove channel photo") }
+            }
             loadError?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)
                 P2pTextButton(onClick = { attempt++ }) { Text("Retry") }
@@ -488,7 +523,7 @@ internal fun SocialPostCard(
 @Composable
 private fun ChannelPostCard(
     post: ChannelPost, owned: Boolean, photo: String, open: (() -> Unit)?, preview: (PreviewLink) -> Unit,
-    openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit, react: () -> Unit
+    openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit, react: () -> Unit, views: Int? = null
 ) {
     val save = LocalMediaDownload.current
     val colors = MaterialTheme.colorScheme
@@ -511,6 +546,7 @@ private fun ChannelPostCard(
                 if (count == 1) emoji else "$emoji $count"
             }, style = MaterialTheme.typography.labelLarge)
         }
+        if (views != null) Text(if (views == 1) "1 view" else "$views views", style = MaterialTheme.typography.labelMedium)
         if (owned && post.state == 20) Text("Queued", style = MaterialTheme.typography.labelMedium)
         if (owned && post.state == 24) Text("Send failed", color = colors.error, style = MaterialTheme.typography.labelMedium)
     }

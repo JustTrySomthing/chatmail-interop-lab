@@ -16,6 +16,25 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ChatmailTest {
     @Test
+    fun nativeContactCardsKeepTheirChatmailAttachmentType() {
+        assertEquals("Vcard", chatmailAttachmentViewType("text/x-vcard", asFile = true))
+        val card = requireNotNull(readChatmailAttachment(obj("viewType" to "Vcard",
+            "downloadState" to "Available")))
+        assertEquals("Contact card.vcf", card.name)
+        assertEquals("text/x-vcard", card.mime)
+        assertTrue(card.displayData(null).optBoolean("nativeVcard"))
+    }
+
+    @Test
+    fun forwardedStatusSurvivesNativeParsing() {
+        val row = obj("id" to 13, "chatId" to 12, "kind" to "message", "fromId" to 1,
+            "showPadlock" to true, "text" to "Forwarded text", "isForwarded" to true)
+        val message = requireNotNull(readNativeMessage(row, 12))
+        assertTrue(message.forwarded)
+        assertEquals("Sent to relay", NativeMessageDetails(1, true, 26, emptyList(), null).status)
+    }
+
+    @Test
     fun compactChatmailInviteSurvivesPastingAndMakesAQr() {
         val signed = obj("payload" to """{"name":"Alyssa ☀","chatmail":"https://i.delta.chat/#sample"}""",
             "signature" to "sample", "public" to "sample").toString()
