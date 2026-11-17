@@ -2592,21 +2592,25 @@ class P2pModel internal constructor(application: Application, internal val profi
             val pending = attachments.drop(start)
             val policy = mediaPolicy(pending)
             for (item in pending) staged.add(stageFile(item, thread, "", policy = policy))
+            val ready = staged.map { offer ->
+                val file = File(outgoing, offer.getString("id"))
+                val name = offer.getString("name")
+                val viewType = chatmailAttachmentViewType(offer.getString("mime"), offer.optBoolean("listed"), voicemail, name)
+                if (viewType == "Webxdc") {
+                    require(!channelPost) { "Share apps in a chat or group." }
+                    inspectWebxdc(file)
+                }
+                Triple(file, name, viewType)
+            }
             withChatmail { core ->
                 val channel = if (channelPost) requireNotNull(core.channel(chat)) { "Channel unavailable." } else null
                 if (attachments.isEmpty()) {
                     if (channel != null) core.postToChannel(channel, text) else core.nativeSend(chat, text, quote)
                 }
-                for ((offset, offer) in staged.withIndex()) {
+                for ((offset, attachment) in ready.withIndex()) {
                     val index = start + offset
                     val caption = text.takeIf { index == 0 }.orEmpty()
-                    val file = File(outgoing, offer.getString("id"))
-                    val name = offer.getString("name")
-                    val viewType = chatmailAttachmentViewType(offer.getString("mime"), offer.optBoolean("listed"), voicemail, name)
-                    if (viewType == "Webxdc") {
-                        require(channel == null) { "Share apps in a chat or group." }
-                        inspectWebxdc(file)
-                    }
+                    val (file, name, viewType) = attachment
                     if (channel != null) core.postToChannel(channel, caption, file, name, viewType)
                     else core.nativeSend(chat, caption, quote.takeIf { index == 0 }, file, name, viewType)
                     save(checkpoint, "native-draft", obj("next" to index + 1))
@@ -2781,9 +2785,9 @@ class P2pModel internal constructor(application: Application, internal val profi
         }
     }
 
-    internal fun sendFiles(thread: String, uris: List<Uri>) = submitSheet(SheetSubmission("send", thread)) {
-        require(uris.isNotEmpty()) { "Choose a file to share." }
-        commitDraft(thread, "", null, uris.distinct().map { describeAttachment(context, it, asFile = false) })
+    internal fun sendFiles(thread: String, uris: List<Uri>, text: String = "") = submitSheet(SheetSubmission("send", thread)) {
+        require(uris.isNotEmpty() || text.isNotBlank()) { "Choose something to share." }
+        commitDraft(thread, text, null, uris.distinct().map { describeAttachment(context, it, asFile = false) })
         thread
     }
 

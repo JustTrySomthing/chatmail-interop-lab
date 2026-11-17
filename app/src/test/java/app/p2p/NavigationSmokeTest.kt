@@ -1,5 +1,9 @@
 package app.p2p
 
+import android.content.ClipData
+import android.content.Intent
+import android.net.Uri
+
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.isDisplayed
@@ -34,6 +38,27 @@ class NavigationSmokeTest {
         override fun before() = seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
     }
     @get:Rule(order = 1) val compose = createAndroidComposeRule<MainActivity>()
+
+    @Test
+    fun readsTextAndCaptionsFromAndroidShareIntents() {
+        val own = "app.p2p.interop.files"
+        val url = "https://example.org/article"
+        val link = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
+        org.junit.Assert.assertEquals(IncomingShare(emptyList(), url), readIncomingShare(link, own))
+
+        val video = Uri.parse("content://example.provider/video")
+        val caption = Intent(Intent.ACTION_SEND_MULTIPLE).setType("video/*")
+            .putExtra(Intent.EXTRA_TEXT, "Two clips from today")
+            .apply {
+                clipData = ClipData.newRawUri("video", video).apply {
+                    addItem(ClipData.Item(Uri.parse("content://$own/private")))
+                    addItem(ClipData.Item(Uri.parse("file:///private.mp4")))
+                    addItem(ClipData.Item(video))
+                }
+            }
+        org.junit.Assert.assertEquals(IncomingShare(listOf(video), "Two clips from today"),
+            readIncomingShare(caption, own))
+    }
 
     @Test
     fun settingsAndContactsShareTheSameToolbarWhileSwitching() {

@@ -124,7 +124,7 @@ class MainActivity : ComponentActivity() {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         pictureInPicture.value = isInPictureInPictureMode
     }
-    private val shared = MutableStateFlow<List<Uri>>(emptyList())
+    private val shared = MutableStateFlow<IncomingShare?>(null)
     private val alert = MutableStateFlow<AlertRoute?>(null)
     private val otherProfileAlert = MutableStateFlow<Pair<String, AlertRoute>?>(null)
     private val incomingProfileCall = MutableStateFlow<Pair<String, AlertRoute>?>(null)
@@ -243,7 +243,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun resetProfileNavigation() {
-        shared.value = emptyList()
+        shared.value = null
         incomingSecureJoin.value = null
         openUpdates.value = false
         otherProfileAlert.value = null
@@ -285,20 +285,38 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun clearShare() {
-        shared.value = emptyList()
+        shared.value = null
         if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
-            setIntent(Intent(intent).setAction(Intent.ACTION_MAIN).apply { removeExtra(Intent.EXTRA_STREAM) })
+            setIntent(Intent(intent).setAction(Intent.ACTION_MAIN).apply {
+                removeExtra(Intent.EXTRA_STREAM)
+                removeExtra(Intent.EXTRA_TEXT)
+                clipData = null
+            })
         }
     }
-
-    private fun shareable(uri: Uri) = uri.scheme == "content" && uri.authority != "$packageName.files"
 
     private fun acceptShare(intent: Intent?) {
-        when (intent?.action) {
-            Intent.ACTION_SEND -> shared.value = listOfNotNull(IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)).filter(::shareable)
-            Intent.ACTION_SEND_MULTIPLE -> shared.value = IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty().filter(::shareable)
-        }
+        readIncomingShare(intent, "$packageName.files")?.let { shared.value = it }
     }
+}
+
+internal data class IncomingShare(val files: List<Uri>, val text: String)
+
+internal fun readIncomingShare(intent: Intent?, ownAuthority: String): IncomingShare? {
+    val action = intent?.action
+    if (intent == null || action !in setOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) return null
+    fun Uri.isShareable() = scheme == "content" && authority != ownAuthority
+    val streams = when (action) {
+        Intent.ACTION_SEND_MULTIPLE -> IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java).orEmpty()
+        else -> listOfNotNull(IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java))
+    }
+    val files = streams.filter { it.isShareable() }.ifEmpty {
+        intent.clipData?.let { clip ->
+            (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri?.takeIf { uri -> uri.isShareable() } }
+        }.orEmpty()
+    }.distinct()
+    val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()
+    return IncomingShare(files, text).takeIf { files.isNotEmpty() || text.isNotBlank() }
 }
 
 private val Base: Color @Composable get() = MaterialTheme.colorScheme.background
@@ -320,7 +338,7 @@ private enum class Area(val label: String, val icon: ImageVector) {
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, alert: AlertRoute?, clearAlert: () -> Unit,
+private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingShare?, alert: AlertRoute?, clearAlert: () -> Unit,
                    clearShared: () -> Unit, updateRequested: Boolean, clearUpdateRequest: () -> Unit,
                    secureJoinLink: String?, clearSecureJoinLink: () -> Unit,
                    hasOtherProfiles: Boolean, inPip: Boolean, minimizeVideo: (() -> Unit)?, openProfiles: () -> Unit) {
@@ -473,6 +491,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         var linkUrl by rememberSaveable { mutableStateOf<String?>(null) }
         val mediaDrafts = model.attachmentDrafts
         var chosen by rememberSaveable { mutableStateOf(arrayListOf<Uri>()) }
+        var chosenText by rememberSaveable { mutableStateOf("") }
         var postMedia by rememberSaveable { mutableStateOf(arrayListOf<Uri>()) }
         var postDraft by rememberSaveable { mutableStateOf("") }
         val postPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { result ->
@@ -892,6 +911,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 if (modal == result.sheet) result.recipient?.let(::goThread)
             } else {
                 chosen = arrayListOf()
+                chosenText = ""
                 if (modal == "send" && result.recipient != null) {
                     goArea(if (groups.any { it.key == result.recipient }) Area.Groups else Area.Chats)
                     goThread(result.recipient)
@@ -901,9 +921,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         }
         LaunchedEffect(shared, submission) {
             val pendingShare = submission?.takeIf { it.sheet == "send" }
-            if (shared.isNotEmpty() && (pendingShare == null || pendingShare.error != null)) {
+            if (shared != null && (pendingShare == null || pendingShare.error != null)) {
                 pendingShare?.let(model::clearSubmission)
-                chosen = ArrayList(shared)
+                chosen = ArrayList(shared.files)
+                chosenText = shared.text
                 goArea(Area.Chats)
                 modal = "send"
                 clearShared()
@@ -2447,15 +2468,20 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     }
                 }
             }
-            "send" -> Sheet("Send files", { if (!submitting) modal = null }) {
-                Text(chosen.size.toString() + if (chosen.size == 1) " file selected" else " files selected", color = Quiet)
+            "send" -> Sheet("Share to chat", { if (!submitting) modal = null }) {
+                if (chosen.isNotEmpty()) {
+                    Text(chosen.size.toString() + if (chosen.size == 1) " file selected" else " files selected", color = Quiet)
+                }
+                if (chosenText.isNotBlank()) Text(chosenText, maxLines = 4, overflow = TextOverflow.Ellipsis)
                 submission?.takeIf { it.sheet == "send" }?.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 if (submitting) LinearProgressIndicator(Modifier.fillMaxWidth())
                 val recipients = contacts.filterNot { it.data().optBoolean("blocked") } + groups
                 if (recipients.isEmpty()) Button(onClick = { modal = "contacts" }) { Text("Add a contact") }
                 recipients.forEach { person ->
                     P2pRow(name(person.key), if (person.kind == "group") "Group" else "Contact",
-                        enabled = !submitting && chosen.isNotEmpty()) { model.sendFiles(person.key, chosen) }
+                        enabled = !submitting && (chosen.isNotEmpty() || chosenText.isNotBlank())) {
+                        model.sendFiles(person.key, chosen, chosenText)
+                    }
                 }
             }
             "media" -> {

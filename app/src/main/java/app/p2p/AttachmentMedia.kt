@@ -6,6 +6,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
 import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -49,18 +50,36 @@ internal fun describeAttachment(context: Context, uri: Uri, asFile: Boolean, lab
         context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { if (it.moveToFirst()) it.getString(0) else null }
     }.getOrNull() ?: uri.lastPathSegment ?: "Attachment"
-    val inferred = when (name.substringAfterLast('.', "").lowercase()) {
-        "vcf" -> "text/x-vcard"
-        "gif" -> "image/gif"
-        "webp" -> "image/webp"
+    val providerType = mime ?: runCatching { context.contentResolver.getType(uri) }.getOrNull()
+    return AttachmentDraft(uri, attachmentLabel(name), attachmentMime(name, providerType), asFile)
+}
+
+internal fun attachmentLabel(name: String): String {
+    val extension = name.substringAfterLast('.', "").takeIf { it.length in 1..16 } ?: return name.take(180)
+    return name.substringBeforeLast('.').take(179 - extension.length) + "." + extension
+}
+
+internal fun attachmentMime(name: String, reportedType: String?): String {
+    val extension = name.substringAfterLast('.', "").lowercase()
+    val type = reportedType?.substringBefore(';')?.trim()?.lowercase()
+    val inferred = when (extension) {
+        "vcf" -> return "text/x-vcard"
+        "gif" -> return "image/gif"
+        "webp" -> return "image/webp"
+        "xdc" -> return WEBXDC_MIME
         "m4a" -> "audio/mp4"
         "mp4" -> "video/mp4"
+        "mov" -> "video/quicktime"
+        "mkv" -> "video/x-matroska"
+        "webm" -> "video/webm"
+        "png" -> "image/png"
         "jpg", "jpeg" -> "image/jpeg"
-        else -> null
+        else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
     }
-    val type = mime ?: if (inferred in setOf("text/x-vcard", "image/gif", "image/webp")) inferred else
-        context.contentResolver.getType(uri)?.takeUnless { it == "application/octet-stream" } ?: inferred
-    return AttachmentDraft(uri, name.take(180), type ?: "application/octet-stream", asFile)
+    val generic = type.isNullOrBlank() || type.endsWith("/*") ||
+        type in setOf("application/octet-stream", "binary/octet-stream", "application/mp4", "application/x-matroska")
+    return if (generic) inferred ?: type.orEmpty().takeUnless { it.isEmpty() || it.endsWith("/*") }
+        ?: "application/octet-stream" else checkNotNull(type)
 }
 
 internal enum class OutgoingMediaQuality(val coreValue: String, val voiceBitrate: Int) {

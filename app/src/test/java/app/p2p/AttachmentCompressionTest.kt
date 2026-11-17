@@ -25,6 +25,18 @@ internal fun exampleAnimatedWebP(): ByteArray = Base64.getDecoder().decode(
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AttachmentCompressionTest {
     @Test
+    fun recognizesSharedVideosWithGenericMimeTypesAndPreservesExtensions() {
+        assertEquals("video/quicktime", attachmentMime("clip.MOV", "application/octet-stream"))
+        assertEquals("video/webm", attachmentMime("clip.webm", "video/*"))
+        assertEquals("audio/webm", attachmentMime("recording.webm", "AUDIO/WEBM; codecs=opus"))
+        assertEquals(WEBXDC_MIME, attachmentMime("miniapp.xdc", "application/zip"))
+        val longName = attachmentLabel("a".repeat(190) + ".webm")
+        assertEquals(180, longName.length)
+        assertTrue(longName.endsWith(".webm"))
+        assertTrue(needsMediaPreparation(AttachmentDraft(Uri.EMPTY, longName, attachmentMime(longName, null), false)))
+    }
+
+    @Test
     fun keepsLargeAnimatedWebPBytesAndRoutesThemToAnimationPlayback() = runBlocking {
         val context = RuntimeEnvironment.getApplication()
         val original = File.createTempFile("p2p-test-animation", ".webp", context.cacheDir)

@@ -72,9 +72,11 @@ class DeliveryRegressionTest {
         }
         assertEquals(0, File(app.filesDir, "sent").listFiles().orEmpty().size)
 
-        checkNotNull(model.sendFiles(contact, listOf(valid, valid))).join()
+        checkNotNull(model.sendFiles(contact, listOf(valid, valid), "Shared caption")).join()
         assertEquals(SheetSubmission("send", contact, finished = true), model.sheetSubmission.value)
-        withTestRecords(app) { records -> assertEquals(1, records.all("file-sent").size) }
+        withTestRecords(app) { records ->
+            assertEquals("Shared caption", records.all("file-sent").single().data().optString("caption"))
+        }
     }
 
     @Test
