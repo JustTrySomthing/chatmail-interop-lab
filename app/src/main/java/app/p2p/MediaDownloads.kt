@@ -5,6 +5,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import kotlinx.coroutines.currentCoroutineContext
@@ -80,20 +81,23 @@ internal data class MediaDownload(
 internal val LocalMediaDownload = staticCompositionLocalOf<((MediaDownload) -> Unit)?> { null }
 
 internal suspend fun writeMediaDownload(
-    resolver: ContentResolver, request: MediaDownload, destination: Uri?, input: InputStream
+    resolver: ContentResolver, request: MediaDownload, newDocument: Uri?, openSource: suspend () -> InputStream
 ) {
     val operation = currentCoroutineContext()
-    operation.ensureActive()
-    val target = destination ?: checkNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-        ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, request.filename)
-            put(MediaStore.Downloads.MIME_TYPE, request.contentType)
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/")
-            put(MediaStore.Downloads.IS_PENDING, 1)
-        })) { "Couldn’t create a file in Downloads." }
+    var target = newDocument
     try {
-        checkNotNull(resolver.openOutputStream(target, "wt")) { "Couldn’t open the save location." }
-            .use { output ->
+        operation.ensureActive()
+        openSource().use { input ->
+            operation.ensureActive()
+            val uri = newDocument ?: checkNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, request.filename)
+                    put(MediaStore.Downloads.MIME_TYPE, request.contentType)
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/")
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                })) { "Couldn’t create a file in Downloads." }
+            target = uri
+            checkNotNull(resolver.openOutputStream(uri, "wt")) { "Couldn’t open the save location." }.use { output ->
                 val buffer = ByteArray(128 * 1024)
                 while (true) {
                     operation.ensureActive()
@@ -103,13 +107,20 @@ internal suspend fun writeMediaDownload(
                     output.write(buffer, 0, count)
                 }
             }
+        }
         operation.ensureActive()
-        if (destination == null) {
-            check(resolver.update(target, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+        if (newDocument == null) {
+            check(resolver.update(checkNotNull(target), ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
                 null, null) == 1) { "Couldn’t finish saving to Downloads." }
         }
     } catch (failure: Exception) {
-        if (destination == null) runCatching { resolver.delete(target, null, null) }
+        target?.let { uri ->
+            runCatching {
+                if (newDocument == null) resolver.delete(uri, null, null)
+                // ACTION_CREATE_DOCUMENT returns a new file, so a failed save can discard it.
+                else DocumentsContract.deleteDocument(resolver, uri)
+            }
+        }
         throw failure
     }
 }

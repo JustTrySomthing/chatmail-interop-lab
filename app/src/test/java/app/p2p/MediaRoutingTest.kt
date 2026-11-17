@@ -1,10 +1,22 @@
 package app.p2p
 
+import android.content.ContentProvider
+import android.content.ContentValues
+import android.content.pm.ProviderInfo
+import android.net.Uri
+import android.os.Bundle
+import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract
+import java.io.IOException
+import java.io.InputStream
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowContentResolver
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -67,17 +79,78 @@ class MediaRoutingTest {
     }
 
     @Test
-    fun writesOriginalMediaBytesToTheChosenLocation() = kotlinx.coroutines.runBlocking {
-        val context = org.robolectric.RuntimeEnvironment.getApplication()
+    fun writesOriginalMediaBytesToTheChosenLocation() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
         val destination = java.io.File.createTempFile("p2p-media", ".mp4", context.cacheDir)
         try {
             destination.writeBytes(ByteArray(64))
             val original = byteArrayOf(1, 2, 3, 4, 5)
             writeMediaDownload(context.contentResolver, MediaDownload("Clip.mp4", "video/mp4"),
-                android.net.Uri.fromFile(destination), original.inputStream())
+                Uri.fromFile(destination)) { original.inputStream() }
             assertArrayEquals(original, destination.readBytes())
         } finally {
             destination.delete()
+        }
+    }
+
+    @Test
+    fun failedSaveDiscardsTheNewDocumentEvenWhenTheSourceCannotBeOpened() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val authority = "app.p2p.test.media-documents"
+        val uri = DocumentsContract.buildDocumentUri(authority, "new-video")
+        val file = java.io.File.createTempFile("relay-export", ".mp4", context.cacheDir)
+        val provider = object : ContentProvider() {
+            override fun onCreate() = true
+            override fun query(uri: Uri, projection: Array<out String>?, selection: String?,
+                selectionArgs: Array<out String>?, sortOrder: String?) = error("Unexpected query")
+            override fun getType(uri: Uri) = "video/mp4"
+            override fun insert(uri: Uri, values: ContentValues?) = error("Unexpected insert")
+            override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = error("Unexpected delete")
+            override fun update(uri: Uri, values: ContentValues?, selection: String?,
+                selectionArgs: Array<out String>?) = error("Unexpected update")
+            override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor =
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_TRUNCATE)
+
+            override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+                check(method == "android:deleteDocument")
+                check(extras?.getParcelable("uri", Uri::class.java) == uri)
+                check(file.delete())
+                return Bundle()
+            }
+        }
+        provider.attachInfo(context, ProviderInfo().apply {
+            this.authority = authority
+            exported = true
+        })
+        ShadowContentResolver.registerProviderInternal(authority, provider)
+        try {
+            val request = MediaDownload("Clip.mp4", "video/mp4")
+            val openFailure = IOException("Source lost before opening")
+            val failedOpen = runCatching {
+                writeMediaDownload(context.contentResolver, request, uri) { throw openFailure }
+            }
+            assertSame(openFailure, failedOpen.exceptionOrNull())
+            assertFalse(file.exists())
+
+            assertTrue(file.createNewFile())
+            val readFailure = IOException("Source lost mid-copy")
+            val source = object : InputStream() {
+                private var readOnce = false
+                override fun read() = error("Expected buffered read")
+                override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                    if (readOnce) throw readFailure
+                    readOnce = true
+                    buffer[offset] = 42
+                    return 1
+                }
+            }
+            val failedCopy = runCatching {
+                writeMediaDownload(context.contentResolver, request, uri) { source }
+            }
+            assertSame(readFailure, failedCopy.exceptionOrNull())
+            assertFalse(file.exists())
+        } finally {
+            file.delete()
         }
     }
 

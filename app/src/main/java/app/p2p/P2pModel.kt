@@ -2816,21 +2816,22 @@ class P2pModel internal constructor(application: Application, internal val profi
         request.attachment?.let { withContext(Dispatchers.IO) { downloadForExport(it) } }
     }
 
-    internal suspend fun saveMedia(request: MediaDownload, destination: Uri?) = withContext(Dispatchers.IO) {
-        val input = when {
-            request.attachment != null -> downloadForExport(request.attachment).inputStream()
-            request.channelMessage != null -> withChatmail { core ->
-                requireNotNull(channelAttachment(core, request.channelMessage).localFile) {
-                    "This attachment is unavailable. Download it from the channel first."
+    internal suspend fun saveMedia(request: MediaDownload, newDocument: Uri?) = withContext(Dispatchers.IO) {
+        writeMediaDownload(context.contentResolver, request, newDocument) {
+            when {
+                request.attachment != null -> downloadForExport(request.attachment).inputStream()
+                request.channelMessage != null -> withChatmail { core ->
+                    requireNotNull(channelAttachment(core, request.channelMessage).localFile) {
+                        "This attachment is unavailable. Download it from the channel first."
+                    }.inputStream()
+                }
+                request.profilePhoto != null -> checkNotNull(checkedPhoto(request.profilePhoto)) {
+                    "This profile photo is no longer available."
                 }.inputStream()
+                request.thumbnail != null -> fetchYoutubeThumbnail(request.thumbnail).inputStream()
+                else -> error("This file is no longer available.")
             }
-            request.profilePhoto != null -> checkNotNull(checkedPhoto(request.profilePhoto)) {
-                "This profile photo is no longer available."
-            }.inputStream()
-            request.thumbnail != null -> fetchYoutubeThumbnail(request.thumbnail).inputStream()
-            else -> error("This file is no longer available.")
         }
-        input.use { writeMediaDownload(context.contentResolver, request, destination, it) }
     }
 
     private suspend fun downloadForExport(id: String): File {
