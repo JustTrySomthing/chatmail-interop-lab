@@ -1,6 +1,8 @@
 package app.p2p
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.util.Base64
 import android.view.View
@@ -14,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Dashboard
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +26,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import java.io.ByteArrayInputStream
 import java.io.FilterInputStream
 import java.io.InputStream
@@ -135,8 +141,10 @@ internal fun WebxdcPage(title: String, close: () -> Unit, content: @Composable C
 @Composable
 private fun WebxdcFrame(
     title: String, modifier: Modifier, back: () -> Unit, close: (() -> Unit)? = null,
-    switchApps: (() -> Unit)? = null, visible: Boolean = true, content: @Composable ColumnScope.() -> Unit
+    switchApps: (() -> Unit)? = null, visible: Boolean = true, pin: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
     Surface(modifier, color = colors.background, contentColor = colors.onBackground) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
@@ -148,6 +156,15 @@ private fun WebxdcFrame(
                 },
                 actions = {
                     if (switchApps != null) IconButton(onClick = switchApps) { Icon(Icons.Outlined.Dashboard, "Open apps") }
+                    if (pin != null) Box {
+                        IconButton(onClick = { menuOpen = true }) { Icon(Icons.Outlined.MoreVert, "App options") }
+                        DropdownMenu(menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(text = { Text("Add to home screen") }, onClick = {
+                                menuOpen = false
+                                pin()
+                            })
+                        }
+                    }
                     if (close != null) IconButton(onClick = close) { Icon(Icons.Outlined.Close, "Close $title") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.surface)
@@ -160,6 +177,39 @@ private fun WebxdcFrame(
 internal data class WebxdcSession(val thread: String, val id: Int, val file: File, val href: String, val title: String)
 internal const val MAX_OPEN_WEBXDC_APPS = 3
 
+internal fun List<Record>.webxdcMessages(thread: String?): List<Record> =
+    if (thread == null) emptyList() else filter { record ->
+        val data = record.data()
+        data.optString("thread") == thread && data.optInt("nativeMessage") > 9 &&
+            data.optBoolean("webxdc") && !data.optBoolean("locallyDeleted")
+    }
+
+internal data class WebxdcShortcut(val profile: String, val thread: String, val id: Int) {
+    fun intent(context: Context) = Intent(ACTION).setClass(context, MainActivity::class.java)
+        .putExtra(EXTRA_PROFILE, profile).putExtra("thread", thread).putExtra("message", id)
+
+    fun pin(context: Context, title: String): Boolean {
+        val shortcut = ShortcutInfoCompat.Builder(context, "webxdc-$profile-$id")
+            .setShortLabel(title.ifBlank { "Chat app" }.take(40))
+            .setIcon(IconCompat.createWithResource(context, R.drawable.ic_p2p))
+            .setIntent(intent(context))
+            .build()
+        return runCatching { ShortcutManagerCompat.requestPinShortcut(context, shortcut, null) }.getOrDefault(false)
+    }
+
+    companion object {
+        private const val ACTION = "app.p2p.OPEN_WEBXDC"
+
+        fun read(intent: Intent?): WebxdcShortcut? {
+            if (intent?.action != ACTION) return null
+            val profile = intent.getStringExtra(EXTRA_PROFILE)?.takeIf { it == PRIMARY_PROFILE || isId(it) } ?: return null
+            val thread = intent.getStringExtra("thread")?.takeIf { isId(it) || isPeer(it) } ?: return null
+            val id = intent.getIntExtra("message", 0).takeIf { it > 9 } ?: return null
+            return WebxdcShortcut(profile, thread, id)
+        }
+    }
+}
+
 @Composable
 internal fun WebxdcRunner(
     model: P2pModel, session: WebxdcSession, visible: Boolean, hasGuard: Boolean?, minimize: () -> Unit,
@@ -167,6 +217,7 @@ internal fun WebxdcRunner(
 ) {
     val (thread, id, file, href, title) = session
     BackHandler(enabled = visible, onBack = minimize)
+    val context = LocalContext.current
     var info by remember(id) { mutableStateOf<WebxdcInfo?>(null) }
     var loadError by remember(id) { mutableStateOf<String?>(null) }
     LaunchedEffect(id, file) {
@@ -176,7 +227,14 @@ internal fun WebxdcRunner(
         }
     }
     val bounds = if (visible) Modifier.fillMaxSize() else Modifier.size(0.dp).clearAndSetSemantics {}
-    WebxdcFrame(info?.name ?: title, bounds, minimize, close, switchApps, visible) {
+    val pin = info?.let { app ->
+        {
+            if (!WebxdcShortcut(model.profileId, thread, id).pin(context, app.name)) {
+                android.widget.Toast.makeText(context, "This launcher couldn’t add the shortcut.", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    WebxdcFrame(info?.name ?: title, bounds, minimize, close, switchApps, visible, pin) {
         val current = info
         when {
             loadError != null -> Text(loadError.orEmpty(), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
@@ -211,6 +269,7 @@ private fun ColumnScope.SandboxedWebxdc(
     var view by remember(id) { mutableStateOf<WebView?>(null) }
     var rendererFailed by remember(id) { mutableStateOf(false) }
     var ready by remember(id) { mutableStateOf(false) }
+    val entryServed = remember(id) { AtomicBoolean(false) }
     var startError by remember(id) { mutableStateOf(false) }
     var fileCallback by remember(id) { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
     val permissions = remember(id, host) { WebxdcPermissions(context, host) }
@@ -315,9 +374,11 @@ private fun ColumnScope.SandboxedWebxdc(
         onDispose { lifecycle.removeObserver(observer) }
     }
     if (rendererFailed || startError) {
-        Text("The app couldn’t start in the isolated WebView. Close it and try again.",
+        Text("The app couldn’t start in the isolated WebView.",
             Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
-    } else AndroidView(
+    } else {
+        if (!ready && visible) LinearProgressIndicator(Modifier.fillMaxWidth())
+        AndroidView(
         modifier = Modifier.fillMaxWidth().weight(1f),
         factory = { owner ->
             WebView(owner).also { web ->
@@ -357,7 +418,7 @@ private fun ColumnScope.SandboxedWebxdc(
                                 openWebxdcAsset(file, path)
                             }
                             val mime = webxdcMime(path)
-                            if (path == "/index.html") web.post { ready = true }
+                            if (path == "/index.html") entryServed.set(true)
                             WebResourceResponse(mime, if (mime.startsWith("text/")) "UTF-8" else null,
                                 200, "OK", if (permissions.motionAllowed) webxdcMotionHeaders else webxdcHeaders, stream)
                         } catch (_: Exception) { blocked() }
@@ -366,6 +427,12 @@ private fun ColumnScope.SandboxedWebxdc(
                     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                         rendererFailed = true
                         return true
+                    }
+
+                    override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                        if (!ready && (request.isForMainFrame || webxdcRequestPath(request.url, host) == "/index.html")) {
+                            startError = true
+                        }
                     }
                 }
                 web.webChromeClient = object : WebChromeClient() {
@@ -406,7 +473,14 @@ private fun ColumnScope.SandboxedWebxdc(
                     }
                 }
                 web.addJavascriptInterface(WebxdcBridge(model, thread, id, info, context.cacheDir,
-                    live, joined, dispatch, speak = { text ->
+                    live, joined, dispatch, startup = { ok ->
+                        web.post {
+                            if (live.get() && !ready) {
+                                ready = ok && entryServed.get()
+                                startError = !ready
+                            }
+                        }
+                    }, speak = { text ->
                         web.post {
                             if (live.get() && isVisible) speech?.toggle(speechPrefix + speechCount.incrementAndGet(), text)
                         }
@@ -432,14 +506,15 @@ private fun ColumnScope.SandboxedWebxdc(
                 val destination = href.takeIf { it.startsWith('#') && it.length <= 1_024 }.orEmpty()
                 val entry = URLEncoder.encode("https://$host/index.html$destination", Charsets.UTF_8.name())
                 val guard = if (hasGuard) 1 else 0
-                web.loadUrl("https://$host$BOOTSTRAP_PATH?i=0&h=$guard&href=$entry")
+                web.loadUrl("https://$host$BOOTSTRAP_PATH?h=$guard&href=$entry")
             }
         },
         update = { web ->
             if (!destroyed.get()) web.visibility = if (visible) View.VISIBLE else View.INVISIBLE
         },
         onRelease = ::releaseBrowser
-    )
+        )
+    }
     if (visible && !rendererFailed) permissions.promptCapabilities?.let { capabilities ->
         WebxdcPermissionPrompt(info.name, capabilities,
             approve = { permissions.approve(permissionsInForeground()) { permissionsLauncher.launch(it) } },
@@ -455,6 +530,7 @@ private fun ColumnScope.SandboxedWebxdc(
 }
 
 private fun webxdcMime(path: String): String = when (val ext = path.substringAfterLast('.', "").lowercase()) {
+    "html", "htm" -> "text/html"
     "js", "mjs" -> "text/javascript"
     "wasm" -> "application/wasm"
     "svg" -> "image/svg+xml"
@@ -468,6 +544,7 @@ private class WebxdcBridge(
     private val model: P2pModel, private val thread: String, private val id: Int, private val info: WebxdcInfo,
     private val cache: File, private val live: AtomicBoolean, private val joined: AtomicBoolean,
     private val draft: (String, AttachmentDraft?) -> Unit,
+    private val startup: (Boolean) -> Unit,
     private val speak: (String) -> Unit,
     private val sensorPermissionState: () -> String,
     private val requestSensors: () -> Unit
@@ -480,6 +557,7 @@ private class WebxdcBridge(
     @JavascriptInterface fun isBroadcast() = info.broadcast
     @JavascriptInterface fun sendUpdateInterval() = info.interval
     @JavascriptInterface fun sendUpdateMaxSize() = info.maxSize
+    @JavascriptInterface fun startupFinished(ok: Boolean) = startup(ok)
     @JavascriptInterface fun getSensorPermissionState() = sensorPermissionState()
     @JavascriptInterface fun requestSensorPermission() {
         if (live.get()) requestSensors()

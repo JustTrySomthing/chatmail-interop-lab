@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script>
-window.addEventListener("message", e => {
+window.addEventListener("message", event => {
   // Currently this never happens because we don't load other scripts that could `postMessage`
   // until all checks have passed, but let's play it safe.
   if (

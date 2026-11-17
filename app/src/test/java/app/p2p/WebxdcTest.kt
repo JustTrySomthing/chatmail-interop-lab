@@ -19,6 +19,25 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class WebxdcTest {
+    @Test fun chatAppListKeepsSeparateSharedInstancesAndExcludesDeletedMessages() {
+        val thread = nativeThreadKey(12)
+        fun app(id: Int, owner: String = thread, deleted: Boolean = false) =
+            Record(nativeMessageKey(id), "file-sent",
+                obj("thread" to owner, "nativeMessage" to id, "webxdc" to true,
+                    "name" to "Checklist.xdc", "locallyDeleted" to deleted).toString())
+        assertEquals(listOf(nativeMessageKey(20), nativeMessageKey(21)),
+            listOf(app(20), app(21), app(22, deleted = true), app(23, nativeThreadKey(13)))
+                .webxdcMessages(thread).map(Record::key))
+    }
+
+    @Test fun aHomeShortcutCarriesTheExactProfileChatAndInstance() {
+        val shortcut = WebxdcShortcut(newId(), nativeThreadKey(12), 24)
+        val launch = shortcut.intent(RuntimeEnvironment.getApplication())
+        assertEquals(shortcut, WebxdcShortcut.read(launch))
+        assertEquals(MainActivity::class.java.name, launch.component?.className)
+        assertNull(WebxdcShortcut.read(launch.putExtra("message", 1)))
+    }
+
     @Test fun acceptsOnlyCatalogAssetsAndKeepsGamesAndTools() {
         val rows = """[
           {"app_id":"calculator","name":"Calculator","category":"tool","cache_relname":"calc.xdc","size":500},
