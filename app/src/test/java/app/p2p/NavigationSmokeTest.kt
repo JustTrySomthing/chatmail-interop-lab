@@ -223,6 +223,7 @@ class NavigationSmokeTest {
     fun theSameNotificationBellWorksAcrossPages() {
         val mute = compose.onNodeWithContentDescription("Mute all notifications")
         val unmute = compose.onNodeWithContentDescription("Unmute all notifications")
+        compose.waitUntil(5_000) { mute.isDisplayed() }
         mute.assertIsOff().performClick()
         for (area in listOf("Talk", "Groups", "Channels", "Chats")) {
             compose.onAllNodesWithText(area)[0].performClick()
