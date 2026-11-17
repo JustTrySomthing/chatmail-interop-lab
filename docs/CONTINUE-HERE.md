@@ -55,3 +55,8 @@ User reports RC59 blank screens in Calendar, Calculator, Checklist and other app
 RC60 restores same-origin worker loading (the earlier explicit worker-src blob: incorrectly excluded bundled scripts), explicitly resumes visible WebViews in AndroidView.update even without an Activity transition, and adds an eight-second coroutine timeout around status-read suspension. This timeout can cancel lock/suspension waits but cannot forcibly interrupt a blocking native call. Existing empty-update fallback remains unchanged. Resource diagnostics distinguish favicon/mime type; console categories distinguish CSP from JavaScript errors. Copy diagnostics now adds inner-document visibility, API presence, frame dimensions, script count, and native attachment state, without app text or calendar data.
 
 These are compatibility/stall corrections and diagnostic improvements, not a phone-verified explanation or fix for every reported black screen. Keep this limitation explicit.
+
+
+## RC61 zero-height frame fix
+
+RC60 phone diagnostics established frameHeight=0 despite initialized API, complete visible body, successful status reads and attached 1080x1886 native WebView. RC61 sets native MATCH_PARENT parameters and replaces the wrapper's 100vh container with a fixed inset viewport container. This is a targeted layout correction; verify positive frame height and usable Calendar, Calculator and Checklist on the phone. Existing RC58 signing key retained.

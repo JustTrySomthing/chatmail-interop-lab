@@ -420,6 +420,11 @@ private fun ColumnScope.SandboxedWebxdc(
         modifier = Modifier.fillMaxWidth().weight(1f),
         factory = { owner ->
             WebView(owner).also { web ->
+                // WebView uses LayoutParams to select viewport sizing semantics even
+                // when Compose gives it exact measured bounds. WRAP_CONTENT makes
+                // viewport-relative CSS collapse to zero in the embedded app frame.
+                web.layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 view = web
                 web.post { note("WebView ${WebView.getCurrentWebViewPackage()?.versionName ?: "unknown"}; guard=$hasGuard") }
                 web.settings.apply {
