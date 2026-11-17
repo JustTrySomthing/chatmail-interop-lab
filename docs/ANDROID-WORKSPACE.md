@@ -15,4 +15,4 @@ On a fresh machine, set JAVA_HOME to JDK 17 or 21 and ANDROID_HOME to an SDK wit
 
 ## Runtime testing is separate
 
-This host is x86_64, has no /dev/kvm, no installed Android emulator, and no attached phone. The distributed app packages ARM64 native libraries. ADB availability and Robolectric tests do not establish real Android WebView rendering. The shared-app black-screen report remains unresolved; see RC58-WEBXDC-BLACK-SCREEN.md. Do not label it fixed without a demonstrated correction and runtime verification.
+This host is x86_64, has no /dev/kvm and no attached phone. Android Emulator 37.2.13 and an API 35 Google APIs image are now installed, but the software-mode boot did not complete within the bounded test attempt. See [EMULATOR-TEST-STATUS.md](EMULATOR-TEST-STATUS.md) for evidence and reproduction scripts. The distributed app packages ARM64 native libraries. ADB availability and Robolectric tests do not establish real Android WebView rendering. The shared-app black-screen report remains unresolved; see RC58-WEBXDC-BLACK-SCREEN.md. Do not label it fixed without a demonstrated correction and runtime verification.
