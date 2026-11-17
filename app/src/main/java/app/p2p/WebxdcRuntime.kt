@@ -46,6 +46,10 @@ import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal fun webxdcErrorCategory(message: String): String =
+    listOf("SyntaxError", "ReferenceError", "TypeError", "RangeError", "SecurityError", "EvalError", "URIError")
+        .firstOrNull { message.contains(it) } ?: "JavaScript error"
+
 internal val WEBXDC_EVENTS = setOf("WebxdcStatusUpdate", "WebxdcRealtimeData", "WebxdcInstanceDeleted")
 private const val BOOTSTRAP_PATH = "/webxdc_bootstrap324567869.html"
 private const val RTC_CHECK_PATH = "/sandboxed_iframe_rtcpeerconnection_check_5965668501706.html"
@@ -282,6 +286,13 @@ private fun ColumnScope.SandboxedWebxdc(
         "rl-$profile-msg$id.localhost"
     }
     var view by remember(id) { mutableStateOf<WebView?>(null) }
+    val diagnostics = remember(id) { mutableStateListOf<String>() }
+    fun note(code: String) {
+        if (diagnostics.size < 20 && code !in diagnostics) {
+            diagnostics.add(code)
+            AppLog.record(context, "Webxdc: $code")
+        }
+    }
     var rendererFailed by remember(id) { mutableStateOf(false) }
     var ready by remember(id) { mutableStateOf(false) }
     var startupAttempt by remember(id) { mutableIntStateOf(0) }
@@ -333,7 +344,10 @@ private fun ColumnScope.SandboxedWebxdc(
     }
     LaunchedEffect(id, startupAttempt) {
         delay(35_000)
-        if (!ready) startError = true
+        if (!ready) {
+            note("Startup timeout; entry served=${entryServed.get()}")
+            startError = true
+        }
     }
     LaunchedEffect(id) {
         model.webxdcEvents.collect { event ->
@@ -394,7 +408,7 @@ private fun ColumnScope.SandboxedWebxdc(
         onDispose { lifecycle.removeObserver(observer) }
     }
     if (rendererFailed || startError) {
-        Text("The app couldn’t start in the isolated WebView.",
+        Text("The app couldn’t start. Copy app diagnostics below, then close and reopen it.",
             Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
     } else {
         if (!ready && visible) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -403,6 +417,7 @@ private fun ColumnScope.SandboxedWebxdc(
         factory = { owner ->
             WebView(owner).also { web ->
                 view = web
+                web.post { note("WebView ${WebView.getCurrentWebViewPackage()?.versionName ?: "unknown"}; guard=$hasGuard") }
                 web.settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
@@ -438,24 +453,44 @@ private fun ColumnScope.SandboxedWebxdc(
                                 openWebxdcAsset(file, path)
                             }
                             val mime = webxdcMime(path)
-                            if (path == "/index.html") entryServed.set(true)
+                            if (path == "/index.html") {
+                                entryServed.set(true)
+                                web.post { note("App entry served") }
+                            }
+                            if (path == "/webxdc.js") web.post { note("Webxdc API served") }
                             WebResourceResponse(mime, if (mime.startsWith("text/")) "UTF-8" else null,
                                 200, "OK", if (permissions.motionAllowed) webxdcMotionHeaders else webxdcHeaders, stream)
-                        } catch (_: Exception) { blocked() }
+                        } catch (_: Exception) {
+                            val kind = if (path == "/index.html") "entry" else "asset"
+                            web.post { note("Missing or unreadable app $kind") }
+                            blocked()
+                        }
                     }
 
                     override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                        note("Renderer stopped; crashed=${detail.didCrash()}")
                         rendererFailed = true
                         return true
                     }
 
+                    override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+                        note("HTTP ${response.statusCode}; main=${request.isForMainFrame}")
+                    }
+
                     override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                        note("WebView load error ${error.errorCode}; main=${request.isForMainFrame}")
                         if (!ready && (request.isForMainFrame || webxdcRequestPath(request.url, host) == "/index.html")) {
                             startError = true
                         }
                     }
                 }
                 web.webChromeClient = object : WebChromeClient() {
+                    override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                        if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
+                            note("${webxdcErrorCategory(message.message())}; line ${message.lineNumber()}")
+                        }
+                        return true
+                    }
                     override fun onPermissionRequest(request: PermissionRequest) {
                         permissions.receiveCapture(request, permissionsInForeground())
                     }
@@ -497,6 +532,7 @@ private fun ColumnScope.SandboxedWebxdc(
                     live, joined, dispatch, startup = { ok ->
                         web.post {
                             if (live.get() && !ready) {
+                                note("Frame load callback=$ok; entry served=${entryServed.get()}")
                                 ready = ok && entryServed.get()
                                 startError = !ready
                             }
@@ -538,6 +574,21 @@ private fun ColumnScope.SandboxedWebxdc(
         },
         onRelease = ::releaseBrowser
         )
+    }
+    if (visible) {
+        TextButton(onClick = {
+            val browser = view
+            val summary = buildString {
+                appendLine("Relay Lab ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                appendLine("Android ${android.os.Build.VERSION.SDK_INT}; Webxdc diagnostics")
+                appendLine("Frame loaded=$ready; startup error=$startError; renderer failed=$rendererFailed")
+                appendLine("View size=${browser?.width ?: 0}x${browser?.height ?: 0}; visible=${browser?.visibility}")
+                diagnostics.forEach { appendLine(it) }
+            }
+            context.getSystemService(android.content.ClipboardManager::class.java)
+                .setPrimaryClip(android.content.ClipData.newPlainText("App diagnostics", summary))
+            android.widget.Toast.makeText(context, "App diagnostics copied", android.widget.Toast.LENGTH_SHORT).show()
+        }) { Text("Copy app diagnostics") }
     }
     if (visible && !rendererFailed) permissions.promptCapabilities?.let { capabilities ->
         WebxdcPermissionPrompt(info.name, capabilities,

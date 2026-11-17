@@ -22,6 +22,12 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class WebxdcTest {
+    @Test fun appDiagnosticsKeepErrorTypeWithoutMessageOrUrl() {
+        assertEquals("TypeError", webxdcErrorCategory("Uncaught TypeError: secret payload at https://private.example/"))
+        assertEquals("JavaScript error", webxdcErrorCategory("message containing private chat contents"))
+        assertEquals("SyntaxError", webxdcErrorCategory("Uncaught SyntaxError: unexpected token"))
+    }
+
     @Test fun webxdcFilePickerReturnsTheSelectedContentUris() {
         val first = Uri.parse("content://documents/first")
         val second = Uri.parse("content://documents/second")

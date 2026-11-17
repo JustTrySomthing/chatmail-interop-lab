@@ -8,10 +8,12 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc58**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc58/P2P-0.7.23-rc58-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc59**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc59/P2P-0.7.23-rc59-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC58 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC59 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+
+RC59 adds **Copy app diagnostics** to shared apps for the unresolved black-screen report. Open an affected app, wait about one minute, tap that button and include the copied text in the bug report. RC59 updates RC58 in place using the same signing key. This is a diagnostic build, not a verified black-screen fix.
 
 ### Update from the app
 
@@ -39,7 +41,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 
 
 For a non-debuggable development APK, run `./gradlew :app:assemblePreview`. The output is `app/build/outputs/apk/preview/app-preview.apk`. This variant uses the dedicated Relay Lab signing configuration. Set both signing environment variables using the restored backup described in RECOVERY.md. Do not distribute a debug-signed replacement.
 
-The downloadable APK's source is at the [RC58 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc58). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and automatic update checks off by default.
+The downloadable APK's source is at the [RC59 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc59). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and automatic update checks off by default.
 
 ### Release publishing
 

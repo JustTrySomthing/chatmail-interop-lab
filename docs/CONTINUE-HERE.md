@@ -40,3 +40,9 @@ User authorized a new persistent key after RC56 key recovery failed. RC58 cannot
 ## RC58 build verification, November 17, 2026
 
 171 tests passed with zero failures/errors/skips. Debug and preview assembly and preview vital lint passed. Final APK package app.p2p.interop, version code 94, version 0.7.23-rc58. WebRTC packaging and signature guard passed. The distribution APK was signed using the independently restored saved key. SHA-256: d749d308c25277dfdf2b3974d0e6ff5375545b6c36f73a4b4f56efbe7f076ab2.
+
+## RC59 phone diagnostic build
+
+RC59 (95) retains the established RC58 signing identity. Shared apps now have a Copy app diagnostics button. It reports WebView version, guard status, entry/API serving, frame-load result, renderer/load errors and measured view bounds. JavaScript console errors are reduced to allowlisted error categories and line numbers; raw messages, source URLs, chat data and account addresses are not copied. Events are bounded to 20 unique entries per session and also recorded in the local AppLog.
+
+Ask for the copied diagnostics after opening an affected app and waiting about one minute, plus the tested app name. The black-screen root cause is not confirmed and this release must not be described as a verified fix. Emulator installation succeeded but its software-mode boot did not finish; see EMULATOR-TEST-STATUS.md.
