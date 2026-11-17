@@ -2349,6 +2349,21 @@ class P2pModel internal constructor(application: Application, internal val profi
         core.contactEncryptionInfo(requireNotNull(chat) { "This encrypted contact is unavailable." })
     }
 
+    internal suspend fun outgoingMediaQuality() = withChatmail { it.outgoingMediaQuality() }
+
+    internal suspend fun setOutgoingMediaQuality(quality: OutgoingMediaQuality) =
+        withChatmail { it.setOutgoingMediaQuality(quality) }
+
+    private suspend fun mediaPolicy(attachments: List<AttachmentDraft>, legacy: Boolean = false): OutgoingMediaPolicy {
+        if (attachments.none { it.mime.startsWith("video/") && needsMediaPreparation(it) }) return OutgoingMediaPolicy()
+        return try {
+            withChatmail { it.outgoingMediaPolicy() }
+        } catch (failure: IllegalStateException) {
+            if (!legacy || failure is CancellationException) throw failure
+            OutgoingMediaPolicy()
+        }
+    }
+
     internal suspend fun chatmailReadReceipts(): Boolean = withChatmail { it.readReceiptsEnabled() }
 
     internal suspend fun setChatmailReadReceipts(enabled: Boolean) = withChatmail { it.setReadReceipts(enabled) }
@@ -2515,7 +2530,8 @@ class P2pModel internal constructor(application: Application, internal val profi
         val group = if (record?.kind == "group") thread else ""
         val staged = mutableListOf<JSONObject>()
         try {
-            for (item in attachments) staged.add(stageFile(item.uri, thread, group, item.asFile, draft = item))
+            val policy = mediaPolicy(attachments, legacy = true)
+            for (item in attachments) staged.add(stageFile(item, thread, group, policy = policy))
             database.withTransaction {
                 val targets = recipients(thread)
                 require(targets.isNotEmpty()) { "There is no active recipient" }
@@ -2573,9 +2589,9 @@ class P2pModel internal constructor(application: Application, internal val profi
         val start = if (attachments.isEmpty()) 0 else records.get(checkpoint)?.data()?.optInt("next") ?: 0
         val staged = mutableListOf<JSONObject>()
         try {
-            for (item in attachments.drop(start)) {
-                staged.add(stageFile(item.uri, thread, "", item.asFile, draft = item))
-            }
+            val pending = attachments.drop(start)
+            val policy = mediaPolicy(pending)
+            for (item in pending) staged.add(stageFile(item, thread, "", policy = policy))
             withChatmail { core ->
                 val channel = if (channelPost) requireNotNull(core.channel(chat)) { "Channel unavailable." } else null
                 if (attachments.isEmpty()) {
@@ -2655,7 +2671,9 @@ class P2pModel internal constructor(application: Application, internal val profi
         val id = newId()
         val attachments = mutableListOf<JSONObject>()
         try {
-            for (uri in media.distinct()) attachments.add(stageFile(uri, "", "", false, id))
+            val drafts = media.distinct().map { describeAttachment(context, it, false) }
+            val policy = mediaPolicy(drafts, legacy = true)
+            for (draft in drafts) attachments.add(stageFile(draft, "", "", id, policy))
             val data = obj("type" to "post", "id" to id, "text" to value.take(12_000),
                 "author" to peer.value, "at" to System.currentTimeMillis(), "media" to attachments.size)
             database.withTransaction {
@@ -2715,24 +2733,22 @@ class P2pModel internal constructor(application: Application, internal val profi
     }
 
     private suspend fun stageFile(
-        uri: Uri, thread: String, group: String, asFile: Boolean, post: String = "",
-        draft: AttachmentDraft? = null
+        attachment: AttachmentDraft, thread: String, group: String, post: String = "", policy: OutgoingMediaPolicy
     ): JSONObject {
         val id = newId()
-        val attachment = draft ?: describeAttachment(context, uri, asFile)
         var name = attachment.label
         var mime = attachment.mime
         val source = File(outgoing, id)
         try {
             val originalHash = MessageDigest.getInstance("SHA-256")
-            context.contentResolver.openInputStream(uri)?.use { input ->
+            context.contentResolver.openInputStream(attachment.uri)?.use { input ->
                 source.outputStream().buffered().use { output ->
                     java.security.DigestInputStream(input, originalHash).copyBoundedTo(
                         output, NATIVE_ATTACHMENT_FILE_LIMIT, "This attachment is too large.", bufferSize = 128 * 1024
                     )
                 }
             } ?: error("Couldn’t open " + name)
-            val compressed = AttachmentCompressor(context).compress(source, attachment)
+            val compressed = AttachmentCompressor(context).compress(source, attachment, policy)
             val hash = if (compressed == null) {
                 if (attachment.range != null) error("Couldn’t prepare the selected trim. Your draft is still available.")
                 originalHash.digest().hex()
@@ -2758,7 +2774,7 @@ class P2pModel internal constructor(application: Application, internal val profi
             require(source.length() <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment is too large." }
             return obj("type" to "offer", "id" to id, "name" to name, "mime" to mime,
                 "size" to source.length(), "digest" to hash, "thread" to thread,
-                "group" to group, "post" to post, "author" to peer.value, "listed" to asFile, "state" to "Offer queued")
+                "group" to group, "post" to post, "author" to peer.value, "listed" to attachment.asFile, "state" to "Offer queued")
         } catch (error: Throwable) {
             source.delete()
             throw error
@@ -2767,7 +2783,7 @@ class P2pModel internal constructor(application: Application, internal val profi
 
     internal fun sendFiles(thread: String, uris: List<Uri>) = submitSheet(SheetSubmission("send", thread)) {
         require(uris.isNotEmpty()) { "Choose a file to share." }
-        commitDraft(thread, "", null, uris.distinct().map { describeAttachment(context, it, true) })
+        commitDraft(thread, "", null, uris.distinct().map { describeAttachment(context, it, asFile = false) })
         thread
     }
 

@@ -345,6 +345,19 @@ internal class Chatmail(directory: File) : AutoCloseable {
         call("set_config", "who_can_call_me", if (enabled) "1" else "2")
     }
 
+    fun outgoingMediaQuality() = OutgoingMediaQuality.fromCore(call("get_config", "media_quality"))
+
+    fun setOutgoingMediaQuality(quality: OutgoingMediaQuality) {
+        call("set_config", "media_quality", quality.coreValue)
+    }
+
+    fun outgoingMediaPolicy(): OutgoingMediaPolicy {
+        val quality = outgoingMediaQuality()
+        val recommended = runCatching { call("get_config", "sys.msgsize_max_recommended").toString().toLong() }
+            .getOrNull()?.takeIf { it in 1..NATIVE_ATTACHMENT_FILE_LIMIT }
+        return if (recommended == null) OutgoingMediaPolicy(quality) else OutgoingMediaPolicy(quality, recommended)
+    }
+
     fun readReceiptsEnabled(): Boolean = call("get_config", "mdns_enabled") == "1"
     fun setReadReceipts(enabled: Boolean) { call("set_config", "mdns_enabled", if (enabled) "1" else "0") }
 

@@ -27,8 +27,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun AudioCapturePanel(limitSeconds: Int? = null, recorded: (File) -> Unit) {
+internal fun AudioCapturePanel(model: P2pModel, limitSeconds: Int? = null, recorded: (File) -> Unit) {
     val context = LocalContext.current
+    val quality by produceState<OutgoingMediaQuality?>(null, model) {
+        value = runCatching { model.outgoingMediaQuality() }.getOrDefault(OutgoingMediaQuality.Balanced)
+    }
     var current by remember { mutableStateOf<Pair<MediaRecorder, File>?>(null) }
     var started by remember { mutableLongStateOf(0L) }
     var elapsed by remember { mutableLongStateOf(0L) }
@@ -68,7 +71,7 @@ internal fun AudioCapturePanel(limitSeconds: Int? = null, recorded: (File) -> Un
     } else {
         Text(if (limitSeconds == null) "Record an audio attachment for your draft."
             else "Record up to one minute.")
-        Button(onClick = {
+        Button(enabled = quality != null, onClick = {
             val directory = File(context.cacheDir, "captures").apply { mkdirs() }
             val output = runCatching { File.createTempFile("p2p-audio-", ".m4a", directory) }.getOrElse {
                 error = "Couldn’t create an audio attachment."
@@ -84,7 +87,8 @@ internal fun AudioCapturePanel(limitSeconds: Int? = null, recorded: (File) -> Un
                 recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 recorder.setAudioChannels(1)
-                recorder.setAudioEncodingBitRate(64_000)
+                recorder.setAudioSamplingRate(44_100)
+                recorder.setAudioEncodingBitRate(checkNotNull(quality).voiceBitrate)
                 recorder.setOutputFile(output.absolutePath)
                 if (limitSeconds != null) {
                     recorder.setMaxDuration(limitSeconds * 1_000)

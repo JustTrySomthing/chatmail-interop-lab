@@ -66,9 +66,9 @@ class ConversationToolsTest {
     }
 
     @Test
-    fun appliesQualityFloorsAndPreservesContactCardLines() {
-        assertTrue(ratesForMedia(8_000, true).video > ratesForMedia(180_000, true).video)
-        assertEquals(48_000, ratesForMedia(600_000, false).audio)
+    fun mapsCoreMediaQualityAndPreservesContactCardLines() {
+        assertEquals(32_000, OutgoingMediaQuality.fromCore(null).voiceBitrate)
+        assertEquals(24_000, OutgoingMediaQuality.fromCore("1").voiceBitrate)
         assertEquals("A\\, B\\nC", escapeVCard("A, B\nC"))
     }
 }

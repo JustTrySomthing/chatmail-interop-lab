@@ -1089,7 +1089,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                     }
                     FullPageRoute.Notifications -> NotificationSettingsContent(model, appMuted, notificationsEnabled,
                         model::setAppNotificationsMuted, ::configureNotifications) { modal = "quiet-hours" }
-                    FullPageRoute.Compression -> CompressionSettingsContent()
+                    FullPageRoute.Compression -> CompressionSettingsContent(model)
                     FullPageRoute.Help -> HelpSettingsContent()
                     FullPageRoute.Address -> {
                         androidx.compose.foundation.text.selection.SelectionContainer { Text(peer) }
@@ -1958,7 +1958,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                         modal = null
                     }
                 }) {
-                    if (recording == null) AudioCapturePanel(limitSeconds = 60) { voiceFile = it.absolutePath }
+                    if (recording == null) AudioCapturePanel(model, limitSeconds = 60) { voiceFile = it.absolutePath }
                     else {
                         Text("Voice message ready")
                         Button(enabled = !sendingDraft, onClick = {
@@ -2372,7 +2372,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 Text("Check Android permissions, or select a photo, video, or audio file.")
             }
             "record-audio" -> Sheet("Record audio", { modal = "attach" }) {
-                AudioCapturePanel { file ->
+                AudioCapturePanel(model) { file ->
                     val id = thread
                     if (id != null) {
                         addDraft(id, listOf(AttachmentDraft(Uri.fromFile(file), "Recorded audio.m4a", "audio/mp4", false, temporary = true)))

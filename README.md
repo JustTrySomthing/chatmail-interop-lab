@@ -51,7 +51,7 @@ In **Contacts → Add contact → Send invite**, show your SecureJoin QR code, c
 
 Chatmail contacts appear in **Contacts** and **New chat**. Open a conversation to accept its contact request. **Chats** shows encrypted one-to-one conversations, and **Groups** creates and opens encrypted Chatmail groups. To share a group’s SecureJoin QR code or link, open the group and tap the invite icon. The receiving client can scan the QR code or open the link. Set an optional description when creating or editing a group. Tap the name in an open group to read it. Relay Lab uses Chatmail Core’s shared group description field.
 
-Chatmail Core handles message delivery, offline queuing, encrypted attachments, quotes, reactions, and group membership. Relay Lab still renders its own message bubbles, reaction animations, media controls, thumbnails, and web previews. Relay Lab trims and compresses media on the device before submitting it as a standard attachment.
+Chatmail Core handles message delivery, offline queuing, encrypted attachments, quotes, reactions, and group membership. Relay Lab still renders its own message bubbles, reaction animations, media controls, thumbnails, and web previews. Chatmail Core handles image compression. Relay Lab follows Delta Chat Android’s video preparation and voice recording settings and also allows clips to be trimmed before sending.
 
 Verified Chatmail mappings let earlier one-to-one conversations use Core while retaining their local history. Groups created with the earlier P2P protocol keep their original transport and history. Create a group in the current **Groups** screen to use it across clients.
 
@@ -63,7 +63,7 @@ Use the shared Chatmail Core adapter for both Delta Chat and ArcaneChat. Chats, 
 
 ## Help, compression, and notifications
 
-Open **Settings → Help** to search the in-app guide. **Settings → Compression** controls Relay Lab’s automatic media compression. It starts on. Use **Other File Type** to send an individual attachment as-is. An explicit trim still creates a new clip.
+Open **Settings → Help** to search the in-app guide. **Settings → Compression** sets outgoing media quality for the selected Chatmail profile. **Balanced** is the default. **Data saver** uses the same stronger Core quality setting as Delta Chat. Use **Other File Type** to share a photo or video at original quality. An explicit trim creates a new clip. Earlier signed P2P image transfers preserve the original file bytes.
 
 **Settings → Notifications** controls alert previews, sounds while a chat is open, replies in muted groups, and incoming calls. Android’s category settings control sound, vibration, and priority for chat, group, and call notifications. Background delivery uses the existing Chatmail connection and scheduled checks. Turn on **Reliable background connection** if you want an ongoing Android notification for a continuous connection.
 

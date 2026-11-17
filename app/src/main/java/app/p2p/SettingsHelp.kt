@@ -5,12 +5,15 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
@@ -26,7 +29,7 @@ private val helpEntries = listOf(
     HelpEntry("How do I share a photo, video, or other file?",
         "Tap the paperclip in a chat or group. Choose a media type for inline playback or Other File Type to send the original as a file. Local file selection follows the Android clients’ 1 GiB ceiling. Mail relays can enforce smaller message limits."),
     HelpEntry("How do I send media at its original quality?",
-        "Open Settings → Compression and turn off Automatic compression. You can also choose Other File Type for an individual attachment. Trimming a clip still prepares a new file."),
+        "Choose Other File Type in the attachment menu to send the original. Settings → Compression controls outgoing media quality for the current profile. A trimmed clip is saved as a new file."),
     HelpEntry("How do I add a mini-app or a game?",
         "Tap the four-square Apps button near the bottom of a Chatmail chat or group. Choose an app, tap Add to chat, and send it. Tap its message to open it. Shared apps and games can exchange updates with compatible clients."),
     HelpEntry("How do I call someone or turn on video?",
@@ -63,14 +66,56 @@ internal fun HelpSettingsContent() {
 }
 
 @Composable
-internal fun CompressionSettingsContent() {
-    val context = LocalContext.current
-    var automatic by remember { mutableStateOf(MediaCompression.enabled(context)) }
-    SettingsSwitch("Automatic compression", "Let Relay Lab reduce the size of photos, videos, and audio before sending.", automatic) {
-        MediaCompression.setEnabled(context, it)
-        automatic = it
+internal fun CompressionSettingsContent(model: P2pModel) {
+    val scope = rememberCoroutineScope()
+    var attempt by remember(model) { mutableIntStateOf(0) }
+    var busy by remember(model) { mutableStateOf(false) }
+    var error by remember(model) { mutableStateOf<String?>(null) }
+    val quality by produceState<Result<OutgoingMediaQuality>?>(null, model, attempt) {
+        value = runCatching { model.outgoingMediaQuality() }
     }
-    Text("Choose Other File Type to send a file as-is. Trimming still prepares a new clip.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text("Outgoing media quality", style = MaterialTheme.typography.titleMedium)
+    Text("Applies to this profile.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val selected = quality?.getOrNull()
+    Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutgoingMediaQuality.entries.forEach { choice ->
+            val balanced = choice == OutgoingMediaQuality.Balanced
+            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
+                Row(
+                    Modifier.fillMaxWidth().selectable(selected == choice,
+                        enabled = selected != null && !busy, role = Role.RadioButton, onClick = {
+                            if (choice != selected) {
+                                busy = true
+                                scope.launch {
+                                    try {
+                                        error = chatAction { model.setOutgoingMediaQuality(choice) }
+                                        if (error == null) attempt++
+                                    } finally { busy = false }
+                                }
+                            }
+                        }).padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    RadioButton(selected = selected == choice, onClick = null, enabled = selected != null && !busy)
+                    Column(Modifier.weight(1f)) {
+                        Text(if (balanced) "Balanced" else "Data saver",
+                            style = MaterialTheme.typography.titleMedium)
+                        Text(if (balanced) "Compress media for everyday sharing."
+                            else "Use less data with stronger media compression.")
+                    }
+                }
+            }
+        }
+    }
+    if (quality == null || busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+    if (quality?.isFailure == true) {
+        Text("Connect this profile to load its media quality setting.")
+        P2pTextButton(onClick = { attempt++ }) { Text("Retry") }
+    }
+    error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    Text("For an original, choose Other File Type in the attachment menu.",
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
