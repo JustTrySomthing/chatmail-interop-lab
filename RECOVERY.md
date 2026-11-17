@@ -4,9 +4,9 @@ Updated November 17, 2026. This GitHub repository is **public**.
 
 ## Current source
 
-Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Release source is tagged v0.7.23-rc58.
+Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc59.
 
-RC58 (0.7.23-rc58, version code 94) includes all recovered post-RC56 Webxdc and attachment fixes. RC57 was a preparation draft, not a supported upgrade.
+RC59 (0.7.23-rc59, version code 95) retains all RC58 updates and adds shared-app loading/error diagnostics. It uses the existing RC58 key and updates RC58 in place. The black-screen root cause remains unconfirmed; obtain phone diagnostics before claiming a fix. RC57 was a preparation draft, not a supported upgrade.
 
 ## Persistent signing identity
 
@@ -44,4 +44,4 @@ python3 scripts/check-call-apk.py app/build/outputs/apk/preview/app-preview.apk
 python3 scripts/check-release-signature.py app/build/outputs/apk/preview/app-preview.apk --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner"
 ```
 
-Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish as P2P-0.7.23-rc58-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
+Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc59-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
