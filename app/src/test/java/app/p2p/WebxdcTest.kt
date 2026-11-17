@@ -26,6 +26,8 @@ class WebxdcTest {
         assertEquals("TypeError", webxdcErrorCategory("Uncaught TypeError: secret payload at https://private.example/"))
         assertEquals("JavaScript error", webxdcErrorCategory("message containing private chat contents"))
         assertEquals("SyntaxError", webxdcErrorCategory("Uncaught SyntaxError: unexpected token"))
+        assertEquals("Content security policy", webxdcErrorCategory("Refused resource https://private.example/ because of Content Security Policy"))
+        assertEquals("Resource load failure", webxdcErrorCategory("Failed to load resource: private-file-name"))
     }
 
     @Test fun webxdcFilePickerReturnsTheSelectedContentUris() {

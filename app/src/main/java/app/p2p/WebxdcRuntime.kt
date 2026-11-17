@@ -47,8 +47,12 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal fun webxdcErrorCategory(message: String): String =
-    listOf("SyntaxError", "ReferenceError", "TypeError", "RangeError", "SecurityError", "EvalError", "URIError")
+    when {
+        message.contains("Content Security Policy", true) || message.contains("Content-Security-Policy", true) -> "Content security policy"
+        message.contains("Failed to load resource", true) -> "Resource load failure"
+        else -> listOf("SyntaxError", "ReferenceError", "TypeError", "RangeError", "SecurityError", "EvalError", "URIError")
         .firstOrNull { message.contains(it) } ?: "JavaScript error"
+    }
 
 internal val WEBXDC_EVENTS = setOf("WebxdcStatusUpdate", "WebxdcRealtimeData", "WebxdcInstanceDeleted")
 private const val BOOTSTRAP_PATH = "/webxdc_bootstrap324567869.html"
@@ -59,7 +63,7 @@ private val sandboxHeaders = mapOf(
         "style-src 'self' 'unsafe-inline' blob:; font-src 'self' data: blob:; " +
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; connect-src 'self' data: blob:; " +
         "img-src 'self' data: blob:; media-src 'self' data: blob:; frame-src 'self' data: blob:; " +
-        "worker-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'; webrtc 'block';"),
+        "worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; webrtc 'block';"),
     "X-DNS-Prefetch-Control" to "off",
     "X-Content-Type-Options" to "nosniff",
     "Cache-Control" to "no-store"
@@ -462,7 +466,7 @@ private fun ColumnScope.SandboxedWebxdc(
                                 200, "OK", if (permissions.motionAllowed) webxdcMotionHeaders else webxdcHeaders, stream)
                         } catch (_: Exception) {
                             val kind = if (path == "/index.html") "entry" else "asset"
-                            web.post { note("Missing or unreadable app $kind") }
+                            web.post { note("Missing or unreadable app $kind (${if (path == "/favicon.ico") "favicon" else webxdcMime(path)})") }
                             blocked()
                         }
                     }
@@ -529,7 +533,7 @@ private fun ColumnScope.SandboxedWebxdc(
                     }
                 }
                 web.addJavascriptInterface(WebxdcBridge(model, thread, id, info, context.cacheDir,
-                    live, joined, dispatch, startup = { ok ->
+                    live, joined, dispatch, diagnostic = { message -> web.post { note(message) } }, startup = { ok ->
                         web.post {
                             if (live.get() && !ready) {
                                 note("Frame load callback=$ok; entry served=${entryServed.get()}")
@@ -570,7 +574,14 @@ private fun ColumnScope.SandboxedWebxdc(
             }
         },
         update = { web ->
-            if (!destroyed.get()) web.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+            if (!destroyed.get()) {
+                web.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+                // A session can become visible without an Activity lifecycle transition.
+                if (visible && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    web.onResume()
+                    web.invalidate()
+                }
+            }
         },
         onRelease = ::releaseBrowser
         )
@@ -578,16 +589,30 @@ private fun ColumnScope.SandboxedWebxdc(
     if (visible) {
         TextButton(onClick = {
             val browser = view
+            fun copyReport(page: String, notify: Boolean = true) {
             val summary = buildString {
                 appendLine("Relay Lab ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 appendLine("Android ${android.os.Build.VERSION.SDK_INT}; Webxdc diagnostics")
                 appendLine("Frame loaded=$ready; startup error=$startError; renderer failed=$rendererFailed")
                 appendLine("View size=${browser?.width ?: 0}x${browser?.height ?: 0}; visible=${browser?.visibility}")
+                appendLine("Attached=${browser?.isAttachedToWindow}; window visibility=${browser?.windowVisibility}")
+                appendLine("Page state: $page")
                 diagnostics.forEach { appendLine(it) }
             }
             context.getSystemService(android.content.ClipboardManager::class.java)
                 .setPrimaryClip(android.content.ClipData.newPlainText("App diagnostics", summary))
-            android.widget.Toast.makeText(context, "App diagnostics copied", android.widget.Toast.LENGTH_SHORT).show()
+            if (notify) android.widget.Toast.makeText(context, "App diagnostics copied", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            copyReport("JavaScript snapshot pending", false)
+            if (browser == null || rendererFailed) copyReport("unavailable")
+            else browser.evaluateJavascript("""(()=>{try {
+                const f=document.getElementById('frame'); const w=f?.contentWindow; const d=w?.document;
+                const b=d?.body; const r=f?.getBoundingClientRect();
+                return JSON.stringify({ready:d?.readyState,api:!!w?.webxdc,
+                    bodyVisibility:b?w.getComputedStyle(b).visibility:null,
+                    bodyDisplay:b?w.getComputedStyle(b).display:null,
+                    frameWidth:r?.width,frameHeight:r?.height,scripts:d?.scripts.length});
+            } catch(e) {return 'unavailable';}})()""") { result -> copyReport(result ?: "unavailable") }
         }) { Text("Copy app diagnostics") }
     }
     if (visible && !rendererFailed) permissions.promptCapabilities?.let { capabilities ->
@@ -619,6 +644,7 @@ private class WebxdcBridge(
     private val model: P2pModel, private val thread: String, private val id: Int, private val info: WebxdcInfo,
     private val cache: File, private val live: AtomicBoolean, private val joined: AtomicBoolean,
     private val draft: (String, AttachmentDraft?) -> Unit,
+    private val diagnostic: (String) -> Unit,
     private val startup: (Boolean) -> Unit,
     private val speak: (String) -> Unit,
     private val sensorPermissionState: () -> String,
@@ -647,8 +673,15 @@ private class WebxdcBridge(
         return write { it.webxdcUpdate(id, update) }
     }
 
-    @JavascriptInterface fun getStatusUpdates(after: Int): String =
-        if (live.get()) runCatching { runBlocking { model.webxdcUpdates(id, after.coerceAtLeast(0)) } }.getOrDefault("[]") else "[]"
+    @JavascriptInterface fun getStatusUpdates(after: Int): String {
+        if (!live.get()) return "[]"
+        diagnostic("Status updates requested")
+        return runCatching {
+            runBlocking { withTimeout(8_000) { model.webxdcUpdates(id, after.coerceAtLeast(0)) } }
+        }.onSuccess { diagnostic("Status updates returned") }
+            .onFailure { diagnostic("Status updates unavailable (${it.javaClass.simpleName})") }
+            .getOrDefault("[]")
+    }
 
     @JavascriptInterface fun sendRealtimeAdvertisement() {
         if (joined.compareAndSet(false, true) && !write { it.webxdcAdvertise(id) }) joined.set(false)

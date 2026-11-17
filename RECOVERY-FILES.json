@@ -1,10 +1,10 @@
 {
-  "version": "0.7.23-rc59",
-  "version_code": 95,
+  "version": "0.7.23-rc60",
+  "version_code": 96,
   "sha256": {
     ".gitignore": "57752bc83258c3f60383f01be18a07066ff22025f89f995f19878ee0664e740b",
-    "README.md": "ef269c6eb473d9797a5b39d082f515aa2dae0e24ef288f2c761fcba984c2ad3d",
-    "app/build.gradle.kts": "6e0abe299160158d31166ed7f68b900a2bc88301846c5ef0929bbf37807072cb",
+    "README.md": "bbfd080cc85c49f07e4ac9f2f21af86fe41a054d39ae2cca8e7bd0d488d103de",
+    "app/build.gradle.kts": "6f4eb58900c9bbd60f8e6ce4bdd69a94aebd1a899af4cf5f3ceee6bb41577514",
     "app/proguard-rules.pro": "5c4bb565ceea112dfd25a087e5dbac2d4dcc1cd2f3a724d5b9031c836b39818b",
     "app/src/main/AndroidManifest.xml": "5c095e13ddb5babe513ff0d20c1c2d3cb2ffc1e2bf59e637e63773127e1d1e30",
     "app/src/main/assets/emoji.json": "513c7f8a8e07661e0aa16d27eea8a36dd813258f832e71d6f86f9411ff81dd94",
@@ -79,7 +79,7 @@
     "app/src/main/java/app/p2p/WebxdcCatalog.kt": "251a06e496ad82719e9616d4ec9decda12649526621d7678fe967370f0b3c73e",
     "app/src/main/java/app/p2p/WebxdcNetworkGuard.kt": "85aed9f8aa551135492540509de252adde62e6e893ccf1ef15611fc6a879477b",
     "app/src/main/java/app/p2p/WebxdcPermissions.kt": "d42eca028ec93be4eeafeda27c63e601fe7371421a85b1a302523765648df84a",
-    "app/src/main/java/app/p2p/WebxdcRuntime.kt": "203ebd56d35f3ec2cd0b107bb5ae47ce58885e7720b0077f2f9f42c1d31cfbb9",
+    "app/src/main/java/app/p2p/WebxdcRuntime.kt": "cedfbf7396cb40d3e6ba48e4366b9887abfad08cd94ed040007c0a0b2badf76f",
     "app/src/main/java/org/thoughtcrime/securesms/EglUtils.java": "e6011bb17bdea7d8d2c1b4bdcce65d6bc5c4fc4312508e41b94ad53316d2e624",
     "app/src/main/java/org/thoughtcrime/securesms/calls/MediaStreamManager.java": "5a581e0fb169cb2a80d80ac19b737f0971fea0953bf74e8bee320cff8f0d5028",
     "app/src/main/java/org/thoughtcrime/securesms/webrtc/WebRTCClient.java": "e46e9b2a9511bd6bc8462591f61c2dc30897c7b0cb025862f8b1b5088eb33ed9",
@@ -135,7 +135,7 @@
     "app/src/test/java/app/p2p/ThreadFeedTest.kt": "3e04e94840109c3fca20f33723b1db6d91ce74c3a04e59a3f62c2eb202d87827",
     "app/src/test/java/app/p2p/TransferDiskTest.kt": "65f9d4df8c494089e9fab4398f36495cf65ebdebab56f8f2771a0bec6bdc9ad3",
     "app/src/test/java/app/p2p/UpdateUiTest.kt": "699bc0efe3481fc4c93b846a5edf540c858733a2e3aaad05ac9255da27885f2f",
-    "app/src/test/java/app/p2p/WebxdcTest.kt": "c1bf68b05bc40e3dab2fc0b11a09ddbab6245eda7d207d67b986cb918dc9f497",
+    "app/src/test/java/app/p2p/WebxdcTest.kt": "393cee3d00eb6a7c9715e70188318c70eba9a188934d434f06b42172bed65487",
     "app/src/test/java/org/thoughtcrime/securesms/calls/CallCaptureFormatTest.java": "9e3d3b1cbd49dec82455928e1947bfff21ab15b46b704d1864c5062bd40929f3",
     "build.gradle.kts": "0762724f11dc1267d79f5d4bd4fca53c37d98cec7605880400688dba9fb2412b",
     "docs/RC28-NATIVE-ASSETS.json": "5bbc8f9ec7696e6324b69bf5f32e264fe603de3ae91a9fef80a3577bcae1b883",
@@ -190,8 +190,8 @@
     "third_party/webxdc/LICENSE": "c61f12da7cdad526bdcbed47a4c0a603e60dbbfdaf8b66933cd088e9132c303f",
     "third_party/webxdc/NOTICE.md": "da6aae6d1f7f768d8e32ecd4a5146a0ef1ff864946e71f32633781fb35093bb3",
     "AGENTS.md": "86444e4009890228fcf41eb7cca7b19fd3ccbe459dc02765dd94650e4e2f8d96",
-    "RECOVERY.md": "f2790473c333b6a1acb4ec31c394977b7128eed7f96b06517a8d5dbc2e12e3a4",
-    "docs/CONTINUE-HERE.md": "f481c31f87aff0395b14792a2e2064a0df0bc287171ab9ce9c3c7ea995e9a7c2",
+    "RECOVERY.md": "3fc25de26ae67b8765254749253c6d86082b39cafa1c6ba2d094e25a457481e0",
+    "docs/CONTINUE-HERE.md": "bccfb23af71cb3164a7aa7f91cc568d8b13fb3c40a6e8b11d309c6fd1b30ff4b",
     "scripts/check-release-signature.py": "0e0d2f2a1c229ed544a78b5837ae62db072dfc330cc11c563f9b01f65f7daab1",
     "recovery/relay-lab-signing.enc.base64": "7fa780a06b75ed0c592e479169f381e10b610a4aeb7bf8d550a07ed924dbb601"
   }
