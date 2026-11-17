@@ -48,6 +48,29 @@ class ChatmailTest {
     }
 
     @Test
+    fun aDeletedLocalCopyStaysAbsentUntilTheDownloadResumes() {
+        val dir = java.nio.file.Files.createTempDirectory("relay-test-attachment").toFile()
+        try {
+            val source = dir.resolve("core-copy").apply { writeText("attachment payload") }
+            val local = dir.resolve("relay-copy")
+            val attachment = ChatmailAttachment(source.path, "attachment.txt", "text/plain", source.length(), "File", "Done")
+            assertEquals("Complete", attachment.cacheForMessage(local, paused = false) { source }.getString("state"))
+            assertTrue(local.delete())
+
+            val paused = attachment.cacheForMessage(local, paused = true) { error("Sync tried to restore the local copy") }
+            assertEquals("Paused", paused.getString("state"))
+            assertFalse(paused.has("listed"))
+            assertFalse(local.exists())
+
+            val resumed = attachment.cacheForMessage(local, paused = false) { source }
+            assertEquals("Complete", resumed.getString("state"))
+            assertEquals(source.readText(), local.readText())
+        } finally {
+            dir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun forwardedStatusSurvivesNativeParsing() {
         val row = obj("id" to 13, "chatId" to 12, "kind" to "message", "fromId" to 1,
             "showPadlock" to true, "text" to "Forwarded text", "isForwarded" to true)

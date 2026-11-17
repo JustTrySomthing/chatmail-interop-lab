@@ -928,7 +928,7 @@ class P2pModel internal constructor(application: Application, internal val profi
 
     private suspend fun updateNativeHistory(
         core: Chatmail, chat: NativeThread, thread: String, limit: Int, before: Int? = null,
-        messageId: Int? = null, cached: List<Record> = emptyList()
+        messageId: Int? = null, cached: List<Record> = emptyList(), resumeAttachment: Boolean = false
     ): List<Int> {
         val saved = records.get(thread)?.data()
         val loaded = saved?.optInt("nativeHistoryFirst") ?: 0
@@ -1010,16 +1010,10 @@ class P2pModel internal constructor(application: Application, internal val profi
                 }
                 val kind = if (attachment == null) "message" else {
                     val folder = if (outgoingMessage) outgoing else incoming
-                    val existing = File(folder, id)
-                    val source = if (existing.isFile) null else availableChatmailFile(attachment)
-                    if (source != null) {
-                        val staged = File(folder, "$id-chatmail.tmp")
-                        try {
-                            source.copyTo(staged, overwrite = true)
-                            check(staged.renameTo(existing))
-                        } finally { staged.delete() }
+                    val paused = !outgoingMessage && data.optString("state") == "Paused" && !resumeAttachment
+                    val media = attachment.cacheForMessage(File(folder, id), paused) {
+                        availableChatmailFile(attachment)
                     }
-                    val media = attachment.displayData(existing.takeIf(File::isFile))
                     media.keys().forEach { key -> data.put(key, media.get(key)) }
                     if (outgoingMessage) "file-sent" else "file-received"
                 }
@@ -2937,11 +2931,11 @@ class P2pModel internal constructor(application: Application, internal val profi
     fun deleteReceivedCopy(id: String) = work {
         if (!isId(id)) return@work
         downloadLock.withLock {
-            val record = records.get(id)?.takeIf { it.kind == "file-received" } ?: return@withLock
-            if (record.data().optString("state") != "Complete") return@withLock
-            val file = File(incoming, id)
-            check(!file.exists() || file.delete()) { "P2P couldn’t delete the local copy." }
             database.withTransaction {
+                val record = records.get(id)?.takeIf { it.kind == "file-received" } ?: return@withTransaction
+                if (record.data().optString("state") != "Complete") return@withTransaction
+                val file = File(incoming, id)
+                check(!file.exists() || file.delete()) { "Relay Lab couldn’t delete the local copy." }
                 clearQueuedDownloads(id)
                 change(id) { put("state", "Paused"); put("offset", 0L); put("listed", false) }
             }
@@ -2982,7 +2976,7 @@ class P2pModel internal constructor(application: Application, internal val profi
                 require(attachment.size <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment exceeds the 1 GiB limit." }
                 if (attachment.canRequestDownload) core.download(native)
                 // A previous failure in Room must not end a newly started retry.
-                updateNativeHistory(core, chat, thread, 25, messageId = native)
+                updateNativeHistory(core, chat, thread, 25, messageId = native, resumeAttachment = true)
                 nextNativeSync = 0L
             }
             return

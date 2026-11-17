@@ -2520,7 +2520,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
             "delete-received-copy" -> P2pAlertDialog(
                 onDismissRequest = { modal = "file" },
                 title = { Text("Delete local copy?") },
-                text = { Text("The attachment will stay in the conversation.") },
+                text = {
+                    val native = records.firstOrNull { it.key == selected }?.data()?.optInt("nativeMessage") ?: 0
+                    Text(if (native > 9) "The attachment will stay in the conversation. Chatmail may keep its own copy."
+                        else "The attachment will stay in the conversation.")
+                },
                 confirmButton = { P2pTextButton(onClick = {
                     selected?.let { model.deleteReceivedCopy(it) }
                     modal = "file"

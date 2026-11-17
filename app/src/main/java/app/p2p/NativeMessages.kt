@@ -58,6 +58,26 @@ internal data class ChatmailAttachment(
             else -> "Available"
         }
     )
+
+    fun cacheForMessage(local: File, paused: Boolean, findSource: () -> File?): JSONObject {
+        if (paused) return displayData(null).apply {
+            put("state", "Paused")
+            remove("listed")
+        }
+        if (!local.isFile) {
+            val source = findSource()
+            if (source != null) {
+                val staged = File(local.parentFile, "${local.name}-chatmail.tmp")
+                try {
+                    source.copyTo(staged, overwrite = true)
+                    check(staged.renameTo(local))
+                } finally {
+                    staged.delete()
+                }
+            }
+        }
+        return displayData(local.takeIf(File::isFile))
+    }
 }
 
 internal fun readChatmailAttachment(row: JSONObject): ChatmailAttachment? {
