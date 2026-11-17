@@ -46,3 +46,11 @@ Use the current GitHub branches, README, RECOVERY-FILES.json, and scripts/verify
 Run ./gradlew :app:testDebugUnitTest :app:assembleDebug. Debug output is app/build/outputs/apk/debug/app-debug.apk.
 
 Release signing uses P2P_INTEROP_KEYSTORE and P2P_INTEROP_KEY_PASSWORD. Recover signing material through the established private environment. Keep credentials outside source, releases, and ChatGPT project attachments.
+
+## RC57 preparation on November 17, 2026
+
+The user requested a new APK containing every update from the prior conversation and publication on GitHub. Version 0.7.23-rc57, code 93, includes all source through ed5f9ed and its predecessors. Comparison with the recovered prior workspace found no additional source differences before version preparation.
+
+Publication is blocked on recovery of the established preview signing key. The downloaded RC56 APK has signer SHA-256 8f901d6be86ba90c7df654c43d42932758ac9f5d33925e1492dfcb94c3ac7ece. The only recovered local Android debug key has signer SHA-256 63a142dc1d9576493b560238328fc329d4d9042a91967df4be72af63b28110c1. The private key for RC56 was unavailable in this workspace, repository, and available signing-file inventory. The prepared preview therefore requires signing again with the RC56 key before publication as an in-place update.
+
+RC56 remains the published version until signing continuity is restored. Recover the original Relay Lab signing key, compare its public certificate with RC56, sign RC57, and publish with the versioned APK name from README. Keep native Chatmail history on the existing installation during recovery.
