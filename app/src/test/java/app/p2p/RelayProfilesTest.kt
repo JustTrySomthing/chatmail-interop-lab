@@ -29,6 +29,21 @@ class RelayProfilesTest {
         assertTrue(alternate in ProfileSelection(context).ids())
     }
 
+    @Test fun disablingAnInactiveProfilePersistsAndPreventsSwitchingUntilReenabled() {
+        val registry = ProfileSelection(context)
+        val alternate = registry.select(null)
+        assertThrows(IllegalStateException::class.java) { registry.setEnabled(alternate, false) }
+        registry.select(PRIMARY_PROFILE)
+        registry.setEnabled(alternate, false)
+        val reloaded = ProfileSelection(context)
+        assertFalse(reloaded.isEnabled(alternate))
+        assertTrue(reloaded.isEnabled(PRIMARY_PROFILE))
+        assertTrue(alternate in reloaded.ids())
+        assertThrows(IllegalArgumentException::class.java) { reloaded.select(alternate) }
+        reloaded.setEnabled(alternate, true)
+        assertEquals(alternate, reloaded.select(alternate))
+    }
+
     @Test fun profilesKeepSameRecordIdsAndSensitiveFilesSeparate() {
         val primary = ProfileStorage(context, PRIMARY_PROFILE)
         val alternateId = newId()

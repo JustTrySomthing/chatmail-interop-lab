@@ -106,7 +106,9 @@ private val notificationTypes = setOf("message", "messageReaction", "offer", "fr
 internal data class SheetSubmission(val sheet: String, val recipient: String? = null, val finished: Boolean = false,
     val error: String? = null)
 
-class P2pModel(application: Application, internal val profileId: String = PRIMARY_PROFILE) : AndroidViewModel(application) {
+class P2pModel(application: Application, internal val profileId: String = PRIMARY_PROFILE,
+    private val backgroundOnly: Boolean = false
+) : AndroidViewModel(application) {
     private val context = application
     internal val storage = ProfileStorage(application, profileId)
     @Volatile internal var retiring = false
@@ -193,6 +195,7 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
         }, onWebxdc = { event ->
             if (chatmail === core) webxdcEventFlow.tryEmit(event)
         }) { event ->
+            if (backgroundOnly) return@listenForEvents
             viewModelScope.launch {
                 val accepted = withContext(Dispatchers.IO) {
                     chatmailLock.withLock {
@@ -1288,7 +1291,7 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
         nextNetworkCheck = now + 350L
         val current = network.select()
         val next = current?.let { EngineRoute(it, network.addresses(it)) }
-        if (next == engineRoute && next == selectedNetwork) return
+        if (next == selectedNetwork && (backgroundOnly || next == engineRoute)) return
         if (selectedNetwork != next) chatmailLock.withLock {
             selectedNetwork = null
             chatmail?.disconnect()
@@ -1297,6 +1300,7 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
         }
         stopEngine()
         selectedNetwork = next ?: return
+        if (backgroundOnly) return
         val account = credentials ?: return
         if (next.addresses.isEmpty()) return
         val result = JSONObject(NativeEngine.start(account.deviceSecret, PORT, jsonArray(next.addresses).toString()))
@@ -1696,6 +1700,11 @@ class P2pModel(application: Application, internal val profileId: String = PRIMAR
         AppAlertMute.set(context, muted)
         notificationsMuted.value = muted
         refreshForegroundRinging()
+    }
+
+    internal fun enableBackgroundSync() {
+        check(backgroundOnly)
+        syncDemand.value = SyncDemand(jobs = 1)
     }
 
     internal suspend fun <T> withActiveSync(action: suspend () -> T): T {

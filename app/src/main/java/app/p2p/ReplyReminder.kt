@@ -39,7 +39,7 @@ class ReplyReminderJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
         val reminder = ReplyReminder.read(params.extras) ?: return false
         val profile = params.extras.getString(EXTRA_PROFILE) ?: PRIMARY_PROFILE
-        if (profile !in ProfileSelection(applicationContext).ids()) return false
+        if (!ProfileSelection(applicationContext).isEnabled(profile)) return false
         active.remove(params.jobId)?.cancel()
         active[params.jobId] = scope.launch {
             try {

@@ -73,7 +73,7 @@ In **Settings → Backup**, export a standard Chatmail archive that includes the
 
 In this development branch, open **Settings → Profiles** to switch profiles or add a profile. A new profile opens Setup, where you can create a Chatmail identity, restore a standard backup, or scan an Add Second Device QR code. Setup's **Switch profile** button lets you return to your original profile even before finishing setup. The original profile keeps its existing conversations, identity, and files. Other profiles have their own Chatmail database, local history, attachments, and Webxdc storage.
 
-The active profile receives background message and call checks. Other profiles catch up when selected. Finish a call, a backup or device transfer, or a message that's currently sending before switching. Android permissions and the app's updater apply to the whole installation. Creating, switching, and restoring profiles on Android still need device testing.
+Enabled profiles receive message checks through the existing background connection or scheduled synchronization. Only the active profile rings for incoming calls. In **Settings → Profiles**, disable an inactive profile to stop its background connection and alerts, or enable it to resume. Finish a call, a backup or device transfer, or a message that's currently sending before switching. Android permissions and the app's updater apply to the whole installation. Creating, switching, and restoring profiles on Android still need device testing.
 
 ## Feature parity countdown
 
@@ -86,14 +86,14 @@ The Android comparison uses Delta Chat and ArcaneChat 2.69.0. This list tracks t
 | Message Info | Implemented. Long-press a Chatmail message to see its status, timestamps, and recorded read receipts. |
 | Per-profile read receipts | Implemented under **Settings → Privacy**. Fresh Relay Lab profiles start with receipts off. |
 | Voice-message playback speed | Implemented in the audio player. Tap the speed to cycle 1×, 1.5×, and 2×. |
-| Background delivery for multiple profiles | Pending. Relay Lab currently checks messages and calls for the active profile. |
-| Explicitly disable and re-enable a profile | Pending |
+| Background delivery for multiple profiles | Partial. Enabled profiles receive background messages. Incoming-call alerts and answering are limited to the active profile. Android background timing still needs phone testing. |
+| Explicitly disable and re-enable a profile | Implemented under **Settings → Profiles** for inactive profiles. |
 | Compare encryption fingerprints | Implemented under **Chat options → Encryption info** for one-to-one Chatmail conversations. |
 | List and remove relays | Implemented under **Settings → Profile → Manage Chatmail relays**. The final relay is protected. |
 | Set channel photos | Implemented in **Edit channel** using the standard Chatmail channel image. |
 | Show channel post view counts | Implemented for channel owners using Core read receipts. |
 | Clone a Chatmail group | Implemented in **Group info**. Review the name, description, and members before creating the new group. |
-| Video-call picture-in-picture | Pending |
+| Video-call picture-in-picture | Implemented on Android devices that support PiP. Tap the floating-window button during a video call. |
 
 Background delivery is tracked for Relay Lab's no-Firebase setup.
 

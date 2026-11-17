@@ -120,7 +120,9 @@ internal class LocalAlerts(private val context: Context, private val profileId: 
         if (area == AlertArea.TALK && !quiet) notification.flags = notification.flags or Notification.FLAG_INSISTENT
         if (Build.VERSION.SDK_INT < 33 ||
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
-            AppAlertMute.deliver(context) { manager.notify(tag, id, notification) }
+            AppAlertMute.deliver(context) {
+                if (ProfileSelection(context).isEnabled(profileId)) manager.notify(tag, id, notification)
+            }
         }
     }
 

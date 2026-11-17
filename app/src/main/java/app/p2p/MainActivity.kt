@@ -106,6 +106,24 @@ class MainActivity : ComponentActivity() {
     private val readAloud by lazy { ReadAloud(applicationContext, lifecycleScope) }
     private val profiles get() = (application as P2pApplication).profiles
     private val model: P2pModel get() = profiles.model.value
+    private val pictureInPicture = MutableStateFlow(false)
+
+    private fun minimizeVideoCall() {
+        if (model.talk.state.value?.hasVideo != true || isInPictureInPictureMode) return
+        try {
+            val params = android.app.PictureInPictureParams.Builder()
+                .setAspectRatio(android.util.Rational(16, 9))
+                .build()
+            enterPictureInPictureMode(params)
+        } catch (_: IllegalStateException) {
+            // The activity may have lost focus before Android processed the request.
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: android.content.res.Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        pictureInPicture.value = isInPictureInPictureMode
+    }
     private val shared = MutableStateFlow<List<Uri>>(emptyList())
     private val alert = MutableStateFlow<AlertRoute?>(null)
     private val otherProfileAlert = MutableStateFlow<Pair<String, AlertRoute>?>(null)
@@ -124,12 +142,13 @@ class MainActivity : ComponentActivity() {
         val route = LocalAlerts.read(intent)
         val owner = intent?.getStringExtra(EXTRA_PROFILE) ?: PRIMARY_PROFILE
         alert.value = route?.takeIf { owner == model.profileId && !model.retiring }
-        otherProfileAlert.value = route?.takeIf { owner != model.profileId && it.area != AlertArea.TALK }
+        otherProfileAlert.value = route?.takeIf { owner != model.profileId && it.area != AlertArea.TALK && profiles.acceptsAlerts(owner) }
             ?.let { owner to it }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pictureInPicture.value = isInPictureInPictureMode
         enableEdgeToEdge()
         acceptShare(intent)
         acceptSecureJoinLink(intent)
@@ -137,6 +156,10 @@ class MainActivity : ComponentActivity() {
         openUpdates.value = intent.action == UpdateChecks.OPEN
         setContent {
             val current by profiles.model.collectAsState()
+            val inPip by pictureInPicture.collectAsState()
+            val canMinimize = remember {
+                packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+            }
             val switching by profiles.switching.collectAsState()
             val incoming by shared.collectAsState()
             val route by alert.collectAsState()
@@ -160,11 +183,12 @@ class MainActivity : ComponentActivity() {
                         P2pApp(current, updates, incoming, route, { alert.value = null }, ::clearShare,
                             updateRequested, { openUpdates.value = false },
                             secureJoinLink, { incomingSecureJoin.value = null },
-                            hasOtherProfiles = profiles.hasOtherProfiles(),
+                            hasOtherProfiles = profiles.hasOtherProfiles(), inPip = inPip,
+                            minimizeVideo = if (canMinimize) ::minimizeVideoCall else null,
                             openProfiles = { profilesOpen = true })
                     }
                 }
-                if (profilesOpen) {
+                if (profilesOpen && !inPip) {
                     val currentRecords by current.items.collectAsState()
                     val appearance = Appearance.read(currentRecords?.firstOrNull { it.kind == "appearance" }?.data())
                     P2pTheme(appearance) {
@@ -272,7 +296,7 @@ private enum class Area(val label: String, val icon: ImageVector) {
 private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, alert: AlertRoute?, clearAlert: () -> Unit,
                    clearShared: () -> Unit, updateRequested: Boolean, clearUpdateRequest: () -> Unit,
                    secureJoinLink: String?, clearSecureJoinLink: () -> Unit,
-                   hasOtherProfiles: Boolean, openProfiles: () -> Unit) {
+                   hasOtherProfiles: Boolean, inPip: Boolean, minimizeVideo: (() -> Unit)?, openProfiles: () -> Unit) {
     val loadedRecords by model.items.collectAsState()
     val records = loadedRecords.orEmpty()
     val appearance = Appearance.read(records.firstOrNull { it.kind == "appearance" }?.data())
@@ -765,15 +789,18 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
             modal = if (mediaKind(data.optString("mime"), data.optString("name")) != null &&
                 model.galleryFile(record) != null) "media" else "file"
         }
-        DisposableEffect(thread) {
-            model.setVisibleThread(thread)
+        val visibleChat = thread.takeUnless {
+            inPip || talkCall?.phase?.let { phase -> phase != TalkPhase.Finished } == true
+        }
+        DisposableEffect(visibleChat) {
+            model.setVisibleThread(visibleChat)
             onDispose { model.setVisibleThread(null) }
         }
-        val unreadThread = remember(records, thread) {
-            thread?.let { records.unreadThreadItems(it).map(Record::key) }.orEmpty()
+        val unreadThread = remember(records, visibleChat) {
+            visibleChat?.let { records.unreadThreadItems(it).map(Record::key) }.orEmpty()
         }
-        androidx.lifecycle.compose.LifecycleStartEffect(thread, unreadThread) {
-            if (unreadThread.isNotEmpty()) thread?.let { model.markRead(it) }
+        androidx.lifecycle.compose.LifecycleStartEffect(visibleChat, unreadThread) {
+            if (unreadThread.isNotEmpty()) visibleChat?.let { model.markRead(it) }
             onStopOrDispose {}
         }
         LaunchedEffect(alert, records) {
@@ -910,8 +937,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 reader?.clearError(speechError)
             }
         }
-        val showTalkCall = talkCall != null && modal !in setOf("talk-message", "talk-mic-required") &&
-            (talkCall?.phase != TalkPhase.Finished || modal == null)
+        val showTalkCall = inPip || (talkCall != null && modal !in setOf("talk-message", "talk-mic-required") &&
+            (talkCall?.phase != TalkPhase.Finished || modal == null))
         if (!appMuted && modal == null && download == null && !showTalkCall) UpdateNotice(updates) { modal = "updates" }
         val mainPageState = rememberSaveableStateHolder()
         val fullPage = if (showTalkCall) null else FullPageRoute.entries.firstOrNull { it.route == modal }
@@ -937,7 +964,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         }
         CompositionLocalProvider(LocalMediaDownload provides ::showDownload) {
         Box(Modifier.fillMaxSize().background(Panel)
-            .then(if (webxdcVisible) Modifier.clearAndSetSemantics {} else Modifier)
+            .then(if (webxdcVisible || showTalkCall) Modifier.clearAndSetSemantics {} else Modifier)
             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))) {
         AppBackground(Modifier.matchParentSize())
         if (fullPage != null) {
@@ -1592,13 +1619,18 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
         }
         }
         }
+        if (inPip && talkCall?.hasVideo != true) {
+            Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                Text(if (talkCall?.phase == TalkPhase.Active) "Call in progress" else "Call ended", color = Color.White)
+            }
+        }
         talkCall?.let { call ->
-            if (showTalkCall) {
+            if (showTalkCall && (!inPip || call.hasVideo)) {
                 val leaveMessage: (() -> Unit)? = if (call.contact.startsWith("chatmail:")) null
                     else ({ requestTalkMic(TalkMicAction.Message, call.contact) })
                 TalkCallPanel(call, call.displayName.ifBlank { name(call.contact) }, photo(call.contact), model.talk::end,
                     { requestTalkMic(TalkMicAction.Answer, call.id) }, model.talk::toggleSpeaker, model.talk::toggleMute,
-                    ::toggleCallCamera, model.talk::switchCamera, leaveMessage)
+                    ::toggleCallCamera, model.talk::switchCamera, leaveMessage, inPip, minimizeVideo)
             }
         }
 

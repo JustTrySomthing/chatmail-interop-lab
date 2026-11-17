@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -160,11 +161,14 @@ private fun RecentTalkCallRow(
     }
 }
 
+internal val TalkCall.hasVideo: Boolean
+    get() = phase == TalkPhase.Active && ((camera && localVideo != null) || (remoteCamera && remoteVideo != null))
+
 @Composable
 internal fun TalkCallPanel(
     call: TalkCall, name: String, photo: String, end: () -> Unit,
     answer: () -> Unit, speaker: () -> Unit, mute: () -> Unit, camera: () -> Unit,
-    switchCamera: () -> Unit, message: (() -> Unit)?
+    switchCamera: () -> Unit, message: (() -> Unit)?, inPip: Boolean, minimize: (() -> Unit)?
 ) {
     val colors = MaterialTheme.colorScheme
     val pending = call.phase == TalkPhase.Connecting || call.phase == TalkPhase.Incoming
@@ -178,20 +182,26 @@ internal fun TalkCallPanel(
             delay(500)
         }
     }
+    if (mainVideo != null) {
+        androidx.activity.compose.BackHandler(enabled = !inPip) { minimize?.invoke() }
+        val window = (LocalContext.current as? android.app.Activity)?.window
+        DisposableEffect(window, inPip) {
+            if (!inPip) window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        }
+        FullScreenTalkVideo(call, name, elapsed, mainVideo, local.takeIf { remote != null }, remote == null,
+            camera, switchCamera, mute, speaker, end, inPip, minimize)
+        return
+    }
     Dialog(onDismissRequest = { if (call.phase == TalkPhase.Finished) end() },
         properties = DialogProperties(
             dismissOnClickOutside = false, dismissOnBackPress = call.phase == TalkPhase.Finished,
-            usePlatformDefaultWidth = false, decorFitsSystemWindows = mainVideo == null
+            usePlatformDefaultWidth = false
         )) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         DisposableEffect(window, call.phase) {
             if (call.phase != TalkPhase.Finished) window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
-        }
-        if (mainVideo != null) {
-            FullScreenTalkVideo(call, name, elapsed, mainVideo, local.takeIf { remote != null }, remote == null,
-                camera, switchCamera, mute, speaker, end)
-            return@Dialog
         }
         Surface(Modifier.padding(horizontal = 20.dp).widthIn(max = 424.dp).fillMaxWidth(),
             shape = P2pDialogShape, color = colors.surface, contentColor = colors.onSurface) {
@@ -278,14 +288,17 @@ internal fun TalkCallPanel(
 @Composable
 private fun FullScreenTalkVideo(
     call: TalkCall, name: String, elapsed: Long, mainVideo: VideoTrack, corner: VideoTrack?, localMain: Boolean,
-    camera: () -> Unit, switchCamera: () -> Unit, mute: () -> Unit, speaker: () -> Unit, end: () -> Unit
+    camera: () -> Unit, switchCamera: () -> Unit, mute: () -> Unit, speaker: () -> Unit, end: () -> Unit,
+    inPip: Boolean, minimize: (() -> Unit)?
 ) {
     val colors = MaterialTheme.colorScheme
     val overlay = Color.Black.copy(alpha = 0.68f)
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize().background(Color.Black).pointerInput(Unit) {
+        awaitPointerEventScope { while (true) awaitPointerEvent() }
+    }) {
         TalkVideo(mainVideo, Modifier.matchParentSize(), mirror = localMain && call.frontCamera,
             localPreview = localMain, corner = false)
-        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)) {
+        if (!inPip) Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing).padding(12.dp)) {
             Surface(Modifier.align(Alignment.TopStart).widthIn(max = 208.dp), color = overlay,
                 contentColor = Color.White, shape = RoundedCornerShape(14.dp)) {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -326,6 +339,9 @@ private fun FullScreenTalkVideo(
                     }) {
                         Icon(if (call.speaker) Icons.AutoMirrored.Outlined.VolumeUp else Icons.Outlined.Hearing,
                             if (call.speaker) "Turn speaker off" else "Turn speaker on")
+                    }
+                    minimize?.let { action ->
+                        IconButton(onClick = action) { Icon(Icons.Outlined.PictureInPictureAlt, "Picture-in-picture") }
                     }
                     FilledIconButton(onClick = end, colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = colors.error, contentColor = colors.onError)) {
