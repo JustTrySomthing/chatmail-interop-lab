@@ -5,6 +5,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -12,7 +13,7 @@ import org.robolectric.annotation.Config
 class TalkEventTest {
     @Test
     fun notificationTokensAreScopedToTheProfileAndExpireWithTheCall() {
-        val inbox = ProfileCallInbox()
+        val inbox = ProfileCallInbox(RuntimeEnvironment.getApplication())
         val now = 100_000L
         val event = ChatmailCallEvent("IncomingCall", 12, 22, "v=0", false, false)
         val first = requireNotNull(inbox.offer("profile-a", event, now))
@@ -25,6 +26,26 @@ class TalkEventTest {
         assertNull(inbox.withdraw("profile-b", 13))
         assertEquals(second, inbox.withdraw("profile-b", 12))
         assertNull(inbox.find("profile-b", second.token, now + 1))
+    }
+
+    @Test
+    fun notificationRoutingSurvivesProcessRecreationWithoutSavingTheMediaOffer() {
+        val app = RuntimeEnvironment.getApplication()
+        val now = 100_000L
+        val offer = "v=0\r\na=private-test-offer"
+        val pending = requireNotNull(ProfileCallInbox(app).offer("profile-a",
+            ChatmailCallEvent("IncomingCall", 12, 22, offer, true, false), now))
+
+        val recreated = ProfileCallInbox(app)
+        assertEquals(pending, recreated.find("profile-a", pending.token, now + 1))
+        assertNull(recreated.find("profile-b", pending.token, now + 1))
+        assertNull(recreated.find("profile-a", pending.token, now - 1))
+        assertNull(recreated.find("profile-a", pending.token, now + TALK_RING_MS))
+        val stored = app.getSharedPreferences("incoming-profile-calls", android.content.Context.MODE_PRIVATE).all
+        assertFalse(stored.values.any { it.toString().contains("private-test-offer") })
+
+        recreated.withdraw("profile-a", pending.message)
+        assertNull(ProfileCallInbox(app).find("profile-a", pending.token, now + 2))
     }
 
     @Test

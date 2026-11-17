@@ -71,7 +71,7 @@ internal data class RelayProfileOption(val id: String, val name: String, val ena
 
 internal class RelayProfiles(private val application: Application) {
     private val selection = ProfileSelection(application)
-    private val incomingCalls = ProfileCallInbox()
+    private val incomingCalls = ProfileCallInbox(application)
     private fun newModel(id: String, background: Boolean = false) =
         P2pModel(application, id, background, ::onCallEvent)
     private val active = MutableStateFlow(newModel(selection.active()))
