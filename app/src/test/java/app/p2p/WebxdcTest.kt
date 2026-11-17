@@ -6,6 +6,7 @@ import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -26,6 +27,55 @@ class WebxdcTest {
           {"app_id":"escaped","name":"Escaped","category":"tool","cache_relname":"../app.xdc","size":500}
         ]"""
         assertEquals(listOf("calculator", "pong"), parseWebxdcCatalog(rows).map(CatalogApp::id))
+    }
+
+    @Test fun stagesCatalogArchivesLargerAndSmallerThanTheirListedSizes() {
+        val cache = java.nio.file.Files.createTempDirectory("catalog-test").toFile()
+        try {
+            val bytes = ByteArrayOutputStream().use { output ->
+                ZipOutputStream(output).use { zip ->
+                    zip.putNextEntry(ZipEntry("index.html"))
+                    zip.write("<html>App</html>".toByteArray())
+                    zip.closeEntry()
+                }
+                output.toByteArray()
+            }
+            for (listedSize in listOf(bytes.size - 20, bytes.size + 20)) {
+                val app = parseWebxdcCatalog("""[
+                    {"app_id":"pixel","name":"Pixel","category":"tool","cache_relname":"pixel.xdc","size":$listedSize}
+                ]""").single()
+                val draft = stageCatalogApp(cache, app) { filename, limit, output ->
+                    assertEquals("pixel.xdc", filename)
+                    assertEquals(CHATMAIL_FILE_LIMIT, limit)
+                    copyCatalogDownload(bytes.inputStream(), output, bytes.size.toLong(), limit)
+                }
+                assertArrayEquals(bytes, File(checkNotNull(draft.uri.path)).readBytes())
+                assertTrue(draft.temporary)
+            }
+            val app = CatalogApp("pixel", "Pixel", "", "tool", "pixel.xdc", "")
+            val captures = File(cache, "captures")
+            val accepted = captures.list().orEmpty().toSet()
+            assertThrows(java.util.zip.ZipException::class.java) {
+                stageCatalogApp(cache, app) { _, _, output -> output.write("not an archive".toByteArray()) }
+            }
+            assertEquals(accepted, captures.list().orEmpty().toSet())
+        } finally { cache.deleteRecursively() }
+    }
+
+    @Test fun rejectsTruncatedAndOversizedCatalogTransfers() {
+        val bytes = byteArrayOf(1, 2, 3)
+        assertThrows(IllegalStateException::class.java) {
+            copyCatalogDownload(bytes.inputStream(), ByteArrayOutputStream(), length = 4, limit = 5)
+        }
+        assertThrows(IllegalStateException::class.java) {
+            copyCatalogDownload(bytes.inputStream(), ByteArrayOutputStream(), length = 3, limit = 2)
+        }
+        assertThrows(IllegalStateException::class.java) {
+            copyCatalogDownload(bytes.inputStream(), ByteArrayOutputStream(), length = -1, limit = 2)
+        }
+        val output = ByteArrayOutputStream()
+        copyCatalogDownload(bytes.inputStream(), output, length = -1, limit = 3)
+        assertArrayEquals(bytes, output.toByteArray())
     }
 
     @Test fun resourceRequestsStayOnTheExactInstanceOrigin() {

@@ -21,9 +21,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
-import java.util.zip.ZipFile
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -36,7 +38,7 @@ private val catalogFilename = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,220}")
 
 internal data class CatalogApp(
     val id: String, val title: String, val description: String,
-    val category: String, val file: String, val icon: String, val size: Long
+    val category: String, val file: String, val icon: String
 )
 
 internal fun parseWebxdcCatalog(value: String): List<CatalogApp> {
@@ -52,11 +54,25 @@ internal fun parseWebxdcCatalog(value: String): List<CatalogApp> {
         val category = row.optString("category")
         if (id.isBlank() || title.isBlank() || !catalogFilename.matches(file) || !file.endsWith(".xdc") ||
             size !in 1..CHATMAIL_FILE_LIMIT || category !in setOf("tool", "game")) null
-        else CatalogApp(id, title, row.optString("description").take(8_000), category, file, icon, size)
+        else CatalogApp(id, title, row.optString("description").take(8_000), category, file, icon)
     }.distinctBy(CatalogApp::id)
 }
 
-private fun readCatalogFile(filename: String, limit: Int): ByteArray {
+internal fun copyCatalogDownload(input: InputStream, output: OutputStream, length: Long, limit: Long) {
+    check(length <= limit) { "The download exceeds the size limit." }
+    var bytes = 0L
+    val buffer = ByteArray(8192)
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        bytes += count
+        check(bytes <= limit) { "The download exceeds the size limit." }
+        output.write(buffer, 0, count)
+    }
+    check(length < 0 || bytes == length) { "The download is incomplete. Try again." }
+}
+
+private fun downloadCatalogFile(filename: String, limit: Long, output: OutputStream) {
     require(catalogFilename.matches(filename))
     val connection = URL("$CATALOG_HOST/$filename").openConnection() as HttpsURLConnection
     connection.instanceFollowRedirects = false
@@ -64,22 +80,19 @@ private fun readCatalogFile(filename: String, limit: Int): ByteArray {
     connection.readTimeout = 12_000
     try {
         check(connection.responseCode == 200) { "The app catalog couldn’t be reached." }
-        check(connection.contentLengthLong <= limit) { "The download exceeds the size limit." }
-        return connection.inputStream.use { input ->
-            val output = ByteArrayOutputStream()
-            val buffer = ByteArray(8192)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                check(output.size() + count <= limit) { "The download exceeds the size limit." }
-                output.write(buffer, 0, count)
-            }
-            output.toByteArray()
-        }
+        val length = connection.contentLengthLong
+        check(length <= limit) { "The download exceeds the size limit." }
+        connection.inputStream.use { input -> copyCatalogDownload(input, output, length, limit) }
     } finally {
         connection.disconnect()
     }
 }
+
+private fun readCatalogFile(filename: String, limit: Int): ByteArray =
+    ByteArrayOutputStream().use { output ->
+        downloadCatalogFile(filename, limit.toLong(), output)
+        output.toByteArray()
+    }
 
 private suspend fun loadCatalog(context: Context): List<CatalogApp> = withContext(Dispatchers.IO) {
     val cache = File(context.cacheDir, "webxdc-catalog.json")
@@ -89,27 +102,41 @@ private suspend fun loadCatalog(context: Context): List<CatalogApp> = withContex
             check(it.isNotEmpty()) { "The app catalog is empty." }
             runCatching { cache.writeText(json) }
         }
+    } catch (failure: CancellationException) {
+        throw failure
     } catch (failure: Exception) {
         if (!cache.isFile || cache.length() > INDEX_LIMIT) throw failure
         parseWebxdcCatalog(cache.readText())
     }
 }
 
-private suspend fun downloadCatalogApp(context: Context, app: CatalogApp): AttachmentDraft = withContext(Dispatchers.IO) {
-    val bytes = readCatalogFile(app.file, app.size.toInt())
-    check(bytes.size.toLong() == app.size) { "The app download is incomplete. Reload the catalog and try again." }
-    val folder = File(context.cacheDir, "captures").apply { mkdirs() }
+internal fun stageCatalogApp(
+    cache: File, app: CatalogApp, download: (String, Long, OutputStream) -> Unit = ::downloadCatalogFile
+): AttachmentDraft {
+    val folder = File(cache, "captures").apply { mkdirs() }
     val file = File.createTempFile("webxdc-", ".xdc", folder)
     try {
-        file.writeBytes(bytes)
-        ZipFile(file).use { zip ->
-            check(zip.getEntry("index.html")?.isDirectory == false) { "This package has no Webxdc entry page." }
-        }
+        // The catalog lists the upstream package size. Its served archive can have a different size.
+        file.outputStream().use { download(app.file, CHATMAIL_FILE_LIMIT, it) }
+        inspectWebxdc(file)
         val name = app.title.replace(Regex("[^\\p{L}\\p{N} ._-]"), "_").trim().take(90)
-        AttachmentDraft(Uri.fromFile(file), "${name.ifEmpty { "App" }}.xdc", WEBXDC_MIME, asFile = false, temporary = true)
+        return AttachmentDraft(Uri.fromFile(file), "${name.ifEmpty { "App" }}.xdc", WEBXDC_MIME, asFile = false, temporary = true)
     } catch (failure: Throwable) {
         file.delete()
         throw failure
+    }
+}
+
+private suspend fun attachCatalogApp(context: Context, app: CatalogApp, attach: (AttachmentDraft) -> Unit) {
+    var staged: AttachmentDraft? = null
+    try {
+        val draft = withContext(Dispatchers.IO) {
+            stageCatalogApp(context.cacheDir, app).also { staged = it }
+        }
+        attach(draft)
+        staged = null
+    } finally {
+        staged?.uri?.path?.let { File(it).delete() }
     }
 }
 
@@ -180,7 +207,7 @@ internal fun WebxdcCatalog(close: () -> Unit, attach: (AttachmentDraft) -> Unit)
                             downloadError = null
                             scope.launch {
                                 try {
-                                    downloadError = chatAction { attach(downloadCatalogApp(context, selection)) }
+                                    downloadError = chatAction { attachCatalogApp(context, selection, attach) }
                                 } finally { busy = false }
                             }
                         }) { Text("Add to chat") }
