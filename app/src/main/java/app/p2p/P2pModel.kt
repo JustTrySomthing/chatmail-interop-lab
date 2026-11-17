@@ -645,8 +645,10 @@ class P2pModel internal constructor(application: Application, internal val profi
     internal suspend fun requestChannelAttachment(id: Int) = withChatmail { core ->
         val post = channelAttachment(core, id)
         val attachment = requireNotNull(post.attachment) { "This post no longer has an attachment." }
+        if (post.localFile != null || attachment.downloadState == "InProgress") return@withChatmail
         require(attachment.size <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment exceeds the 1 GiB limit." }
-        if (post.localFile == null && attachment.downloadState != "InProgress") core.download(id)
+        check(attachment.canRequestDownload) { "This attachment is unavailable." }
+        core.download(id)
     }
 
     private fun channelAttachment(core: Chatmail, id: Int): ChannelPost =
@@ -2969,10 +2971,20 @@ class P2pModel internal constructor(application: Application, internal val profi
             (snapshot.optString("state") == "Complete" && File(incoming, id).isFile)) return
         val native = snapshot.optInt("nativeMessage")
         if (native > 9) {
-            if (snapshot.optString("state") == "Downloading") return
-            require(snapshot.optLong("size") <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment exceeds the 1 GiB limit." }
-            withChatmail { it.download(native) }
-            nextNativeSync = 0L
+            withChatmail { core ->
+                val thread = snapshot.optString("thread")
+                val chatId = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+                check(chatId > 9) { "This conversation is unavailable." }
+                val chat = checkNotNull(core.nativeThread(chatId)) { "This conversation is unavailable." }
+                val attachment = checkNotNull(core.nativeMessage(chatId, native)?.attachment) {
+                    "This attachment is unavailable."
+                }
+                require(attachment.size <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment exceeds the 1 GiB limit." }
+                if (attachment.canRequestDownload) core.download(native)
+                // A previous failure in Room must not end a newly started retry.
+                updateNativeHistory(core, chat, thread, 25, messageId = native)
+                nextNativeSync = 0L
+            }
             return
         }
         val chatmailMessage = snapshot.optInt("chatmailAttachment")

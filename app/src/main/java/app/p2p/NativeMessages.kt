@@ -45,14 +45,16 @@ internal data class ChatmailAttachment(
     val path: String?, val name: String, val mime: String, val size: Long,
     val viewType: String, val downloadState: String
 ) {
+    val canRequestDownload: Boolean get() = downloadState == "Available" || downloadState == "Failure"
+
     fun displayData(local: File?) = obj(
         "name" to name, "mime" to mime, "size" to size, "listed" to (viewType == "File"),
         "webxdc" to (viewType == "Webxdc"), "nativeVcard" to (viewType == "Vcard"),
         "state" to when {
-            local != null || downloadState == "Done" -> "Complete"
+            local != null -> "Complete"
             downloadState == "InProgress" -> "Downloading"
             downloadState == "Undecipherable" -> "Expired"
-            downloadState == "Failure" -> "Source unavailable"
+            downloadState == "Failure" || downloadState == "Done" -> "Source unavailable"
             else -> "Available"
         }
     )

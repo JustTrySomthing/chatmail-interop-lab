@@ -26,6 +26,28 @@ class ChatmailTest {
     }
 
     @Test
+    fun onlyDownloadableChatmailStatesCanStartOrRetryAnAttachment() {
+        val attachment = ChatmailAttachment(null, "clip.mp4", "video/mp4", 120L, "Video", "Available")
+        assertTrue(attachment.canRequestDownload)
+        assertTrue(attachment.copy(downloadState = "Failure").canRequestDownload)
+        assertFalse(attachment.copy(downloadState = "InProgress").canRequestDownload)
+        assertFalse(attachment.copy(downloadState = "Undecipherable").canRequestDownload)
+        assertFalse(attachment.copy(downloadState = "Done").canRequestDownload)
+    }
+
+    @Test
+    fun chatmailAttachmentShowsCompleteOnlyWhenThereIsAReadableLocalCopy() {
+        val attachment = ChatmailAttachment(null, "clip.mp4", "video/mp4", 120L, "Video", "Done")
+        assertEquals("Source unavailable", attachment.displayData(null).getString("state"))
+        val local = java.io.File.createTempFile("relay-test-attachment", ".mp4")
+        try {
+            assertEquals("Complete", attachment.displayData(local).getString("state"))
+        } finally {
+            local.delete()
+        }
+    }
+
+    @Test
     fun forwardedStatusSurvivesNativeParsing() {
         val row = obj("id" to 13, "chatId" to 12, "kind" to "message", "fromId" to 1,
             "showPadlock" to true, "text" to "Forwarded text", "isForwarded" to true)
