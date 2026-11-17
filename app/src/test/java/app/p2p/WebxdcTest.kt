@@ -38,6 +38,21 @@ class WebxdcTest {
         assertNull(WebxdcShortcut.read(launch.putExtra("message", 1)))
     }
 
+    @Test fun anOpenSessionRequiresItsOriginalMessageAndAvailablePackage() {
+        val thread = nativeThreadKey(12)
+        val id = 24
+        val path = File("app-package.xdc")
+        val session = WebxdcSession(thread, id, path, "", "Checklist")
+        val data = obj("thread" to thread, "nativeMessage" to id, "webxdc" to true)
+        fun record() = Record(nativeMessageKey(id), "file-received", data.toString())
+        assertTrue(session.matches(record(), path))
+        assertFalse(session.matches(null, path))
+        assertFalse(session.matches(record(), null))
+        assertFalse(session.matches(record(), File("different-package.xdc")))
+        data.put("locallyDeleted", true)
+        assertFalse(session.matches(record(), path))
+    }
+
     @Test fun acceptsOnlyCatalogAssetsAndKeepsGamesAndTools() {
         val rows = """[
           {"app_id":"calculator","name":"Calculator","category":"tool","cache_relname":"calc.xdc","size":500},

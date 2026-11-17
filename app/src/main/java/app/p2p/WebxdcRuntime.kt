@@ -174,15 +174,21 @@ private fun WebxdcFrame(
     }
 }
 
-internal data class WebxdcSession(val thread: String, val id: Int, val file: File, val href: String, val title: String)
+internal data class WebxdcSession(val thread: String, val id: Int, val file: File, val href: String, val title: String) {
+    fun matches(record: Record?, local: File?): Boolean =
+        record?.webxdcMessageId(thread) == id && local == file
+}
 internal const val MAX_OPEN_WEBXDC_APPS = 3
 
+internal fun Record.webxdcMessageId(thread: String): Int? {
+    val data = data()
+    if (data.optString("thread") != thread || !data.optBoolean("webxdc") ||
+        data.optBoolean("locallyDeleted")) return null
+    return data.optInt("nativeMessage").takeIf { it > 9 }
+}
+
 internal fun List<Record>.webxdcMessages(thread: String?): List<Record> =
-    if (thread == null) emptyList() else filter { record ->
-        val data = record.data()
-        data.optString("thread") == thread && data.optInt("nativeMessage") > 9 &&
-            data.optBoolean("webxdc") && !data.optBoolean("locallyDeleted")
-    }
+    if (thread == null) emptyList() else filter { it.webxdcMessageId(thread) != null }
 
 internal data class WebxdcShortcut(val profile: String, val thread: String, val id: Int) {
     fun intent(context: Context) = Intent(ACTION).setClass(context, MainActivity::class.java)
@@ -269,6 +275,7 @@ private fun ColumnScope.SandboxedWebxdc(
     var view by remember(id) { mutableStateOf<WebView?>(null) }
     var rendererFailed by remember(id) { mutableStateOf(false) }
     var ready by remember(id) { mutableStateOf(false) }
+    var startupAttempt by remember(id) { mutableIntStateOf(0) }
     val entryServed = remember(id) { AtomicBoolean(false) }
     var startError by remember(id) { mutableStateOf(false) }
     var fileCallback by remember(id) { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
@@ -311,7 +318,7 @@ private fun ColumnScope.SandboxedWebxdc(
             )
         }
     }
-    LaunchedEffect(id) {
+    LaunchedEffect(id, startupAttempt) {
         delay(35_000)
         if (!ready) startError = true
     }
@@ -492,6 +499,9 @@ private fun ColumnScope.SandboxedWebxdc(
                                 permissions.receiveMotion(permissionsInForeground()) { allowed ->
                                     if (allowed) {
                                         // Reload the trusted wrapper so the whole frame tree gets the new policy.
+                                        entryServed.set(false)
+                                        ready = false
+                                        startupAttempt++
                                         web.reload()
                                     } else if (live.get() && !rendererFailed) {
                                         web.evaluateJavascript(

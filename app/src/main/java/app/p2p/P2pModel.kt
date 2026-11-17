@@ -2563,12 +2563,16 @@ class P2pModel internal constructor(application: Application, internal val profi
         withContext(Dispatchers.IO) {
             check(shortcut.profile == profileId)
             val key = nativeMessageKey(shortcut.id)
-            val record = records.get(key)?.takeIf {
-                it.data().let { data -> data.optString("thread") == shortcut.thread &&
-                    data.optBoolean("webxdc") && !data.optBoolean("locallyDeleted") }
+            suspend fun readApp() = checkNotNull(records.get(key)?.takeIf {
+                it.webxdcMessageId(shortcut.thread) == shortcut.id
+            }) { "This shared app is no longer available." }
+            readApp()
+            val local = downloadForExport(key)
+            val record = readApp()
+            check(galleryFile(record) == local) {
+                "This shared app is no longer available."
             }
-            checkNotNull(record) { "This shared app is no longer available." }
-            record to downloadForExport(key)
+            record to local
         }
 
     internal suspend fun webxdcUpdates(id: Int, after: Int): String = withChatmail { it.webxdcUpdates(id, after) }

@@ -765,9 +765,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
         val appsInChat = remember(records, thread) { records.webxdcMessages(thread) }
         fun launchWebxdc(record: Record, local: File, href: String = "") {
             val data = record.data()
-            val appId = data.optInt("nativeMessage")
             val target = data.optString("thread")
-            if (appId <= 9 || !data.optBoolean("webxdc") || data.optBoolean("locallyDeleted") || blocked(target)) return
+            val appId = record.webxdcMessageId(target) ?: return
+            if (blocked(target) || model.galleryFile(record) != local) return
             val index = webxdcSessions.indexOfFirst { it.id == appId }
             if (index >= 0) {
                 if (href.isNotEmpty()) webxdcSessions[index] = webxdcSessions[index].copy(href = href)
@@ -788,8 +788,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
         LaunchedEffect(records, threadPreferences, hasWebxdcSessions) {
             if (!hasWebxdcSessions) return@LaunchedEffect
             webxdcSessions.removeAll { session ->
-                blocked(session.thread) || records.firstOrNull { it.key == nativeMessageKey(session.id) }
-                    ?.data()?.optBoolean("locallyDeleted") == true
+                val record = records.firstOrNull { it.key == nativeMessageKey(session.id) }
+                blocked(session.thread) || !session.matches(record, record?.let(model::galleryFile))
             }
             if (activeWebxdc != null && webxdcSessions.none { it.id == activeWebxdc }) activeWebxdc = null
         }
