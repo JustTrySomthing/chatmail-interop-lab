@@ -1,6 +1,16 @@
 # Continue Relay Lab development
 
-## Current checkpoint
+## RC62 startup checkpoint
+
+RC61 (97) is user-confirmed to open shared apps, with a positive frame height. The user reports 5–10 second opening latency on Android 36 / WebView 157. RC62 (98) keeps the guard alive for the lifetime of P2pApp and prewarms it from app browsing and chats with Webxdc messages. Previously closing the last session destroyed the 500-peer guard and the next open rebuilt it. Delta Chat retains its guard. Renderer loss still clears sessions and replaces the guard; each app still checks isolation before loading.
+
+New diagnostics separate preparation, guard wait, and frame-load elapsed milliseconds. No phone timing or emulator performance result is claimed for RC62. Compare first opening, closing/reopening, and switching apps on device.
+
+Inspected catalog package nelson9608-calculator-xdc-V1.0.0.xdc: index.html requests /assets/ds.js, which is absent from its ZIP. It loads assets/main.js and does not request webxdc.js. Thus api=false is expected for this standalone Calculator, and the missing JavaScript request is an upstream package defect; do not substitute a fake script or relax sandboxing to hide it.
+
+RC62 automated verification: 172 unit tests passed with no failures/errors/skips; debug and signed preview builds passed; signature and WebRTC packaging checks passed; recovery manifest verified 192 files. APK SHA-256: d003e681979eb0d036b297cd96e9004051656f157c38098d75ac6d66d942147d. Device speed measurements remain pending.
+
+## Historical recovery checkpoint
 
 This repository is public. Read RECOVERY.md for exact source and signing recovery instructions. RC58 (94) includes all recovered changes on securejoin-invites, draft PR #1. Main has older application source; use the development branch or RC58 tag.
 

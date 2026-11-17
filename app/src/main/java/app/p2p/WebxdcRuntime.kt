@@ -241,12 +241,19 @@ internal fun WebxdcRunner(
     val (thread, id, file, href, title) = session
     BackHandler(enabled = visible, onBack = minimize)
     val context = LocalContext.current
+    val openedAt = remember(id) { android.os.SystemClock.elapsedRealtime() }
+    var preparationMs by remember(id) { mutableStateOf<Long?>(null) }
+    var guardWaitMs by remember(id) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(hasGuard) {
+        if (hasGuard != null) guardWaitMs = android.os.SystemClock.elapsedRealtime() - openedAt
+    }
     var info by remember(id) { mutableStateOf<WebxdcInfo?>(null) }
     var loadError by remember(id) { mutableStateOf<String?>(null) }
     LaunchedEffect(id, file) {
         loadError = chatAction {
             withContext(Dispatchers.IO) { inspectWebxdc(file) }
             info = model.openWebxdc(thread, id)
+            preparationMs = android.os.SystemClock.elapsedRealtime() - openedAt
         }
     }
     val bounds = if (visible) Modifier.fillMaxSize() else Modifier.size(0.dp).clearAndSetSemantics {}
@@ -262,7 +269,7 @@ internal fun WebxdcRunner(
         when {
             loadError != null -> Text(loadError.orEmpty(), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
             current == null || hasGuard == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
-            else -> SandboxedWebxdc(model, thread, id, file, current, href, visible, hasGuard, close, sendDraft)
+            else -> SandboxedWebxdc(model, thread, id, file, current, href, visible, hasGuard, preparationMs, guardWaitMs, close, sendDraft)
         }
     }
 }
@@ -271,9 +278,12 @@ internal fun WebxdcRunner(
 @Composable
 private fun ColumnScope.SandboxedWebxdc(
     model: P2pModel, thread: String, id: Int, file: File, info: WebxdcInfo, href: String,
-    visible: Boolean, hasGuard: Boolean, close: () -> Unit, sendDraft: (String, AttachmentDraft?) -> Unit
+    visible: Boolean, hasGuard: Boolean, preparationMs: Long?, guardWaitMs: Long?, close: () -> Unit, sendDraft: (String, AttachmentDraft?) -> Unit
 ) {
     val context = LocalContext.current
+    val frameStartedAt = remember(id) { android.os.SystemClock.elapsedRealtime() }
+    val currentPreparationMs by rememberUpdatedState(preparationMs)
+    val currentGuardWaitMs by rememberUpdatedState(guardWaitMs)
     val closeAction by rememberUpdatedState(close)
     val isVisible by rememberUpdatedState(visible)
     val draftAction by rememberUpdatedState(sendDraft)
@@ -541,7 +551,7 @@ private fun ColumnScope.SandboxedWebxdc(
                     live, joined, dispatch, diagnostic = { message -> web.post { note(message) } }, startup = { ok ->
                         web.post {
                             if (live.get() && !ready) {
-                                note("Frame load callback=$ok; entry served=${entryServed.get()}")
+                                note("Frame load callback=$ok; entry served=${entryServed.get()}; frame load ms=${android.os.SystemClock.elapsedRealtime() - frameStartedAt}")
                                 ready = ok && entryServed.get()
                                 startError = !ready
                             }
@@ -598,6 +608,7 @@ private fun ColumnScope.SandboxedWebxdc(
             val summary = buildString {
                 appendLine("Relay Lab ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
                 appendLine("Android ${android.os.Build.VERSION.SDK_INT}; Webxdc diagnostics")
+                appendLine("Preparation ms=$currentPreparationMs; guard wait ms=$currentGuardWaitMs")
                 appendLine("Frame loaded=$ready; startup error=$startError; renderer failed=$rendererFailed")
                 appendLine("View size=${browser?.width ?: 0}x${browser?.height ?: 0}; visible=${browser?.visibility}")
                 appendLine("Attached=${browser?.isAttachedToWindow}; window visibility=${browser?.windowVisibility}")

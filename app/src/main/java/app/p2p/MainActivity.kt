@@ -431,15 +431,19 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
         val webxdcSessions = remember { mutableStateListOf<WebxdcSession>() }
         var activeWebxdc by remember { mutableStateOf<Int?>(null) }
         val hasWebxdcSessions = webxdcSessions.isNotEmpty()
-        val guard = remember(hasWebxdcSessions) {
-            if (hasWebxdcSessions) WebxdcNetworkGuard(context) else null
-        }
+        // Keep the completed isolation budget while this screen is alive. Closing
+        // the last mini-app must not make the next app allocate 500 peers again.
+        var guardEpoch by remember { mutableIntStateOf(0) }
+        var warmWebxdcGuard by remember { mutableStateOf(false) }
+        val guard = remember(context, guardEpoch) { WebxdcNetworkGuard(context) }
         var webxdcGuardConfirmed by remember(guard) { mutableStateOf<Boolean?>(null) }
-        LaunchedEffect(guard) {
-            if (guard != null) webxdcGuardConfirmed = try {
+        LaunchedEffect(guard, warmWebxdcGuard) {
+            if (warmWebxdcGuard) webxdcGuardConfirmed = try {
                 guard.start {
                     webxdcSessions.clear()
                     activeWebxdc = null
+                    warmWebxdcGuard = false
+                    guardEpoch++
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -448,7 +452,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                 false
             }
         }
-        DisposableEffect(guard) { onDispose { guard?.close() } }
+        DisposableEffect(guard) { onDispose { guard.close() } }
         var threadView by rememberSaveable { mutableStateOf(Feed) }
         var threadQuery by rememberSaveable(thread) { mutableStateOf("") }
         var quote by rememberSaveable { mutableStateOf<String?>(null) }
@@ -763,6 +767,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                 threadPreferences[id]?.optBoolean("blocked") == true
         val inlineAudio = LocalInlineAudio.current
         val appsInChat = remember(records, thread) { records.webxdcMessages(thread) }
+        LaunchedEffect(guard, hasWebxdcSessions, appsInChat.isNotEmpty(), modal) {
+            if (hasWebxdcSessions || appsInChat.isNotEmpty() ||
+                modal == "webxdc-catalog" || modal == "webxdc-sessions") warmWebxdcGuard = true
+        }
         LaunchedEffect(records, threadPreferences, hasWebxdcSessions) {
             if (!hasWebxdcSessions) return@LaunchedEffect
             webxdcSessions.removeAll { session ->
