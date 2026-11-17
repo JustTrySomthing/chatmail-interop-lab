@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.AtomicFile
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,6 +35,7 @@ import org.json.JSONArray
 internal const val WEBXDC_MIME = "application/webxdc+zip"
 private const val CATALOG_HOST = "https://apps.testrun.org"
 private const val INDEX_LIMIT = 2 * 1024 * 1024
+private val catalogCacheLock = Any()
 private val catalogFilename = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,220}")
 
 internal data class CatalogApp(
@@ -86,19 +88,49 @@ private fun readCatalogFile(filename: String, limit: Int): ByteArray =
         output.toByteArray()
     }
 
-private suspend fun loadCatalog(context: Context): List<CatalogApp> = withContext(Dispatchers.IO) {
-    val cache = File(context.cacheDir, "webxdc-catalog.json")
+internal data class CatalogIndex(val entries: List<CatalogApp>, val cached: Boolean)
+
+internal fun loadCatalogIndex(file: File, fetch: () -> String): CatalogIndex {
+    val cache = AtomicFile(file)
+    fun parse(json: String) = parseWebxdcCatalog(json).also {
+        check(it.isNotEmpty()) { "The app catalog is empty." }
+    }
     try {
-        val json = readCatalogFile("xdcget-lock.json", INDEX_LIMIT).toString(Charsets.UTF_8)
-        parseWebxdcCatalog(json).also {
-            check(it.isNotEmpty()) { "The app catalog is empty." }
-            runCatching { cache.writeText(json) }
+        val json = fetch()
+        val entries = parse(json)
+        synchronized(catalogCacheLock) {
+            runCatching {
+                val output = cache.startWrite()
+                try {
+                    output.write(json.toByteArray(Charsets.UTF_8))
+                    cache.finishWrite(output)
+                } catch (failure: Exception) {
+                    cache.failWrite(output)
+                    throw failure
+                }
+            }
         }
+        return CatalogIndex(entries, cached = false)
     } catch (failure: CancellationException) {
         throw failure
     } catch (failure: Exception) {
-        if (!cache.isFile || cache.length() > INDEX_LIMIT) throw failure
-        parseWebxdcCatalog(cache.readText())
+        val saved = synchronized(catalogCacheLock) {
+            runCatching {
+                cache.openRead().use { input ->
+                    ByteArrayOutputStream().use { output ->
+                        copyCatalogDownload(input, output, length = -1, limit = INDEX_LIMIT.toLong())
+                        parse(output.toString(Charsets.UTF_8.name()))
+                    }
+                }
+            }.getOrNull()
+        } ?: throw failure
+        return CatalogIndex(saved, cached = true)
+    }
+}
+
+private suspend fun loadCatalog(context: Context): CatalogIndex = withContext(Dispatchers.IO) {
+    loadCatalogIndex(File(context.cacheDir, "webxdc-catalog.json")) {
+        readCatalogFile("xdcget-lock.json", INDEX_LIMIT).toString(Charsets.UTF_8)
     }
 }
 
@@ -140,26 +172,39 @@ internal fun WebxdcCatalog(close: () -> Unit, attach: (AttachmentDraft) -> Unit)
     var query by rememberSaveable { mutableStateOf("") }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var attempt by remember { mutableIntStateOf(0) }
-    var entries by remember { mutableStateOf<List<CatalogApp>?>(null) }
+    var index by remember { mutableStateOf<CatalogIndex?>(null) }
+    var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var downloadError by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     LaunchedEffect(attempt) {
-        error = null
-        error = chatAction { entries = loadCatalog(context) }
+        try {
+            error = chatAction { index = loadCatalog(context) }
+        } finally {
+            loading = false
+        }
     }
+    val entries = index?.entries
     val selection = entries?.firstOrNull { it.id == selectedId }
     WebxdcPage(title = "Apps", close = { if (!busy) close() }) {
+        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (error != null || index?.cached == true || downloadError != null) {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (index?.cached == true) Text("Showing the saved app catalog.")
+                P2pTextButton(enabled = !loading && !busy, onClick = {
+                    error = null
+                    downloadError = null
+                    loading = true
+                    attempt++
+                }) { Text("Refresh catalog") }
+            }
+        }
         if (selection == null) {
             Segments(listOf("Home", "Tools", "Games"), tab) { tab = it }
             Box(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
                 SearchField(query, { query = it }, label = "Search apps")
             }
-            error?.let {
-                Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-                P2pTextButton(onClick = { attempt++ }) { Text("Retry") }
-            }
-            if (entries == null && error == null) LinearProgressIndicator(Modifier.fillMaxWidth())
             val matches = entries.orEmpty().filter {
                 (tab == "Home" || it.category == if (tab == "Games") "game" else "tool") &&
                     (it.title.contains(query.trim(), true) || it.description.contains(query.trim(), true))

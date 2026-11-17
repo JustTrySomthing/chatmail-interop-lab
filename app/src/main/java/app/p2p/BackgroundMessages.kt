@@ -117,9 +117,15 @@ class ChatmailConnectionService : Service() {
         }
         if (connection?.isActive != true) {
             connection = scope.launch {
-                val profiles = (application as P2pApplication).profiles
-                profiles.withBackgroundSync {
-                    while (BackgroundMessages.keepConnection(this@ChatmailConnectionService)) delay(15_000L)
+                try {
+                    val profiles = (application as P2pApplication).profiles
+                    profiles.withBackgroundSync {
+                        while (BackgroundMessages.keepConnection(this@ChatmailConnectionService)) delay(15_000L)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    AppLog.record(this@ChatmailConnectionService, "Background Chatmail connection failed", failure)
                 }
                 stopSelf()
             }

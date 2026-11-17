@@ -29,6 +29,23 @@ class WebxdcTest {
         assertEquals(listOf("calculator", "pong"), parseWebxdcCatalog(rows).map(CatalogApp::id))
     }
 
+    @Test fun catalogKeepsLastGoodIndexAcrossAnInterruptedWriteAndInvalidResponses() {
+        val directory = java.nio.file.Files.createTempDirectory("webxdc-index").toFile()
+        try {
+            val file = File(directory, "index.json")
+            val json = """[
+                {"app_id":"pixel","name":"Pixel","category":"tool","cache_relname":"pixel.xdc","size":400}
+            ]"""
+            val fetched = loadCatalogIndex(file) { json }
+            assertFalse(fetched.cached)
+            android.util.AtomicFile(file).startWrite().use { it.write("[".toByteArray()) }
+            val cached = loadCatalogIndex(file) { "[]" }
+            assertTrue(cached.cached)
+            assertEquals(fetched.entries, cached.entries)
+            assertEquals(fetched.entries, loadCatalogIndex(file) { error("Offline") }.entries)
+        } finally { directory.deleteRecursively() }
+    }
+
     @Test fun stagesCatalogArchivesLargerAndSmallerThanTheirListedSizes() {
         val cache = java.nio.file.Files.createTempDirectory("catalog-test").toFile()
         try {
