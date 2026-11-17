@@ -4,9 +4,9 @@ Updated November 17, 2026. This GitHub repository is **public**.
 
 ## Current source
 
-Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc61.
+Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc62.
 
-RC61 (97) fixes the zero-height shared-app frame demonstrated by RC60 phone diagnostics. WebViews now use explicit MATCH_PARENT layout parameters and the wrapper fills the viewport with a fixed inset frame instead of 100vh. API initialization and status updates were already succeeding on the affected phone. Install over RC58–RC60 with the saved signing key. Confirm the frame has a positive height and Calendar/Calculator/Checklist display; post-fix phone verification is pending.
+RC62 (98) retains the WebRTC isolation guard after shared apps close and prepares it when browsing apps or entering a chat containing them. Per-frame isolation checks remain enabled. Diagnostics now include preparation, guard wait and frame-load timings. The user confirmed RC61 opens apps on their phone, but reported 5–10 second startup. RC62 performance still needs phone verification. Install over RC58–RC61 using the same saved signing identity.
 
 ## Persistent signing identity
 
@@ -44,4 +44,4 @@ python3 scripts/check-call-apk.py app/build/outputs/apk/preview/app-preview.apk
 python3 scripts/check-release-signature.py app/build/outputs/apk/preview/app-preview.apk --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner"
 ```
 
-Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc61-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
+Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc62-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
