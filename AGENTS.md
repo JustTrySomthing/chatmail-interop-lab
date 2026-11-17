@@ -1,13 +1,9 @@
 # Relay Lab continuity and publishing
 
-Read RECOVERY.md on main at the start of each continuation. Follow its current development branch and then read docs/CONTINUE-HERE.md there. Fetch the remote before editing. Preserve uncommitted work before changing checkouts.
+This repository is public. Read RECOVERY.md on main, fetch the current development branch, then read its README and docs/CONTINUE-HERE.md. Preserve uncommitted work before changing checkouts.
 
-The user has authorized maintaining recovery information alongside development. Keep source, native runtime assets, Gradle wrapper, exact dependency versions, tests, and meaningful progress checkpoints in this repository. Commit and push authorized completed changes before ending a development session. Record unfinished edits and the exact branch and commit. Update the recovery pointer on main when the working branch or recovery state changes.
+Keep all Relay Lab experiments and releases here, separate from P2P. Package app.p2p.interop has its own data, update feed, and signing identity. Keep source, native runtime assets, Gradle wrapper, dependency versions, tests and progress checkpoints committed. Update main recovery pointers at each release or branch change.
 
-A successful build alone does not establish signing recovery. Before publishing an APK, run scripts/check-release-signature.py with the SDK apksigner and the actual APK. Compare package and version code to the preceding release. Verify the uploaded asset digest.
+RC58 establishes a new persistent signing identity, explicitly authorized after the RC56 key could not be recovered. Do not claim RC56 can update in place. Do not generate another key for a routine build. Restore the saved key using RECOVERY.md; verify the restored copy by signing and checking an APK. Keep unencrypted key material and passwords out of this public repository. The encrypted backup belongs in recovery/.
 
-The original RC56 private signing key is currently missing. The local debug key recovered in November 2026 has a different certificate. Never describe that key as the recovered release identity. A matching private key must be restored and exercised by signing a test APK before claiming signing recovery is complete.
-
-When the original key is recovered, save it with its required credentials in private persistent storage outside this repository, record the exact persistent file ID and certificate fingerprint in the recovery note, then restore that saved copy into a new temporary directory and verify it can sign an APK matching RC56. Do not depend on a temporary workspace path. Keep private signing material out of source and release assets.
-
-Document build checks and physical-device checks separately. New source and new build verification remain possible while signing recovery is blocked.
+Before publishing run the required Gradle tests/build, recovery manifest check, APK packaging check and scripts/check-release-signature.py. Check package and increasing version code; compare uploaded asset digest with the local APK. Record device-tested behavior separately from automated checks. Push completed work and document unfinished work before ending a session.

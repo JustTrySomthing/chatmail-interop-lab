@@ -1,13 +1,10 @@
 # Continue Relay Lab development
 
-## Recovered on November 17, 2026
+## Current checkpoint
 
-- Repository is JustTrySomthing/chatmail-interop-lab.
-- Read main and its README first. Main currently points to 144dacaeb74c35c2c1ce0696b145055384dd5258 and links RC53.
-- Latest published release candidate is v0.7.23-rc56, version code 92. The securejoin-invites branch README links that release.
-- Ongoing implementation is in draft PR #1, on securejoin-invites. It has changes newer than RC56. Review that branch before continuing or publishing.
-- The recovered Webxdc checkpoint is ed5f9ed4e56106d464ed93ed13cd4cce53998bbc. It includes source and a regression test recovered from the prior workspace after the conversation named Relay Lab development update reached its limit.
-- Keep experimental work here. Relay Lab uses app.p2p.interop, its own update feed and signing identity, and fresh test profiles.
+This repository is public. Read RECOVERY.md for exact source and signing recovery instructions. RC58 (94) includes all recovered changes on securejoin-invites, draft PR #1. Main has older application source; use the development branch or RC58 tag.
+
+The recovered Webxdc checkpoint is ed5f9ed4e56106d464ed93ed13cd4cce53998bbc. It includes final source and tests recovered from the prior conversation workspace. No additional source differences remained in that workspace before version preparation.
 
 ## Last work and user requests
 
@@ -32,27 +29,14 @@ The environment used an existing dependency cache and a local Maven routing init
 
 ## Next work
 
-1. Continue the Webxdc review from the recovered checkpoint. Verify blank-page recovery, separate shared instances, cross-chat switching, file picking, and Android launcher shortcuts on a phone.
-2. Prepare an incremented preview release containing the post-RC56 fixes when requested, using the existing Relay Lab signing identity for in-place updates. Confirm package, version code, certificate, APK digest, and update feed before release.
-3. Reconcile main's older release link and draft PR state during the intended release or merge.
-4. Record phone verification separately from build and automated results.
+Verify Webxdc blank-page recovery, separate shared app instances, cross-chat switching, file picking and launcher shortcuts on a phone. Record phone verification separately from automated results.
 
-The branch README records user-reported successful Delta Chat calls in both directions on November 16. Exact client versions, network type, and individual video checks were not recorded. SecureJoin, text, channels, ArcaneChat calls, and Webxdc runtime and multiplayer checks remain pending where marked in the README.
+The branch README records user-reported successful Delta Chat calls in both directions on November 16. Exact client versions and networks were not recorded. Other cross-client checks remain pending where indicated in README.
 
-## Recovery and build
+## RC58 signing transition
 
-Use the current GitHub branches, README, RECOVERY-FILES.json, and scripts/verify-recovery.py to recover source. Build with JDK 17 or 21 and Android SDK Platform 35.
+User authorized a new persistent key after RC56 key recovery failed. RC58 cannot update RC56 in place; export Chatmail history before reinstalling. RC57 remains an unpublished draft. RC58 uses the dedicated signing configuration, with encrypted backup in GitHub and an independently saved recovery ZIP. RECOVERY.md contains the exact saved-file ID, certificate, restore and build commands. Never generate another key for routine builds.
 
-Run ./gradlew :app:testDebugUnitTest :app:assembleDebug. Debug output is app/build/outputs/apk/debug/app-debug.apk.
+## RC58 build verification, November 17, 2026
 
-Release signing uses P2P_INTEROP_KEYSTORE and P2P_INTEROP_KEY_PASSWORD. Recover signing material through the established private environment. Keep credentials outside source, releases, and ChatGPT project attachments.
-
-## RC57 preparation on November 17, 2026
-
-The user requested a new APK containing every update from the prior conversation and publication on GitHub. Version 0.7.23-rc57, code 93, includes all source through ed5f9ed and its predecessors. Comparison with the recovered prior workspace found no additional source differences before version preparation.
-
-Publication is blocked on recovery of the established preview signing key. The downloaded RC56 APK has signer SHA-256 8f901d6be86ba90c7df654c43d42932758ac9f5d33925e1492dfcb94c3ac7ece. The only recovered local Android debug key has signer SHA-256 63a142dc1d9576493b560238328fc329d4d9042a91967df4be72af63b28110c1. The private key for RC56 was unavailable in this workspace, repository, and available signing-file inventory. The prepared preview therefore requires signing again with the RC56 key before publication as an in-place update.
-
-RC56 remains the published version until signing continuity is restored. Recover the original Relay Lab signing key, compare its public certificate with RC56, sign RC57, and publish with the versioned APK name from README. Keep native Chatmail history on the existing installation during recovery.
-
-RC57 automated checks passed with 171 tests and zero failures, errors, or skipped tests. A notification-bell smoke test now waits for startup before its first assertion, matching the surrounding navigation tests. Debug APK packaging and the WebRTC packaging check passed.
+171 tests passed with zero failures/errors/skips. Debug and preview assembly and preview vital lint passed. Final APK package app.p2p.interop, version code 94, version 0.7.23-rc58. WebRTC packaging and signature guard passed. The distribution APK was signed using the independently restored saved key. SHA-256: d749d308c25277dfdf2b3974d0e6ff5375545b6c36f73a4b4f56efbe7f076ab2.

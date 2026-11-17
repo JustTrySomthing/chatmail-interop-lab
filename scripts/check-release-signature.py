@@ -5,7 +5,7 @@ import re
 import subprocess
 from pathlib import Path
 
-EXPECTED = "8f901d6be86ba90c7df654c43d42932758ac9f5d33925e1492dfcb94c3ac7ece"
+EXPECTED = "0b569d33543efb55c13c87bff6041944118dfff00c9a350e96776712e22347b0"
 
 def certificate(apksigner, apk):
     result = subprocess.run(
@@ -25,8 +25,8 @@ def main():
     actual = certificate(args.apksigner, args.apk)
     if actual != EXPECTED:
         raise SystemExit(
-            "BLOCKED: APK signer differs from published Relay Lab RC56. "
-            "Recover the original private signing key before publishing an update. "
+            "BLOCKED: APK signer differs from persistent Relay Lab RC58 identity. "
+            "Restore the saved RC58 signing backup before publishing an update. "
             f"Expected {EXPECTED}; received {actual}."
         )
     print("PASS: verified APK signature matches the established Relay Lab certificate.")

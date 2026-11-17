@@ -1,10 +1,10 @@
 {
-  "version": "0.7.23-rc56",
-  "version_code": 92,
+  "version": "0.7.23-rc58",
+  "version_code": 94,
   "sha256": {
     ".gitignore": "57752bc83258c3f60383f01be18a07066ff22025f89f995f19878ee0664e740b",
-    "README.md": "9e3823b8a3d5390e435d35af1d6dbcc9405e5758b7299ca58206ef9305a88e7c",
-    "app/build.gradle.kts": "5e0ddffbfc05eef9b3f0082dc628878f497fe7312da5ef1b0757808416062b0b",
+    "README.md": "83f59b014b5806f784c7533d5ce7f8085a0b4c8ee5325c7ccbef554e4c223806",
+    "app/build.gradle.kts": "d4b863e29fd5dc6e02ba7ff3ee7ae96484b41891830ddea7978a703ccb997326",
     "app/proguard-rules.pro": "5c4bb565ceea112dfd25a087e5dbac2d4dcc1cd2f3a724d5b9031c836b39818b",
     "app/src/main/AndroidManifest.xml": "5c095e13ddb5babe513ff0d20c1c2d3cb2ffc1e2bf59e637e63773127e1d1e30",
     "app/src/main/assets/emoji.json": "513c7f8a8e07661e0aa16d27eea8a36dd813258f832e71d6f86f9411ff81dd94",
@@ -188,6 +188,11 @@
     "third_party/speech/speech-dependencies.json": "8353e6222a0c672f2e01daa27427624b5f47e74dba6fc563082ad9e9cc3f6f63",
     "third_party/speech/speech-native-provenance.json": "e8381242a1814a410916fb274b3aaab84e3c80178665da8141fd878443f32adc",
     "third_party/webxdc/LICENSE": "c61f12da7cdad526bdcbed47a4c0a603e60dbbfdaf8b66933cd088e9132c303f",
-    "third_party/webxdc/NOTICE.md": "da6aae6d1f7f768d8e32ecd4a5146a0ef1ff864946e71f32633781fb35093bb3"
+    "third_party/webxdc/NOTICE.md": "da6aae6d1f7f768d8e32ecd4a5146a0ef1ff864946e71f32633781fb35093bb3",
+    "AGENTS.md": "86444e4009890228fcf41eb7cca7b19fd3ccbe459dc02765dd94650e4e2f8d96",
+    "RECOVERY.md": "c644d7b3ca674636feca17462c43f2ca048527facdd16e60c3a31360b9ebe7d6",
+    "docs/CONTINUE-HERE.md": "e0becb8ffd141ad09f937c11da90f05363ebe9d5eccb6d91e5ff5fb1e9eed7e5",
+    "scripts/check-release-signature.py": "0e0d2f2a1c229ed544a78b5837ae62db072dfc330cc11c563f9b01f65f7daab1",
+    "recovery/relay-lab-signing.enc.base64": "7fa780a06b75ed0c592e479169f381e10b610a4aeb7bf8d550a07ed924dbb601"
   }
 }

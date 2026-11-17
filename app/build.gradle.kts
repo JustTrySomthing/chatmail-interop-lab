@@ -15,8 +15,8 @@ android {
         applicationId = "app.p2p.interop"
         minSdk = 31
         targetSdk = 35
-        versionCode = 93
-        versionName = "0.7.23-rc57"
+        versionCode = 94
+        versionName = "0.7.23-rc58"
         manifestPlaceholders["p2pAppLabel"] = "Relay Lab"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
@@ -40,8 +40,8 @@ android {
     }
     buildTypes.create("preview") {
         initWith(buildTypes.getByName("release"))
-        // Keep the existing test install eligible for in-place upgrades.
-        signingConfig = signingConfigs.getByName("debug")
+        // RC58 establishes the persistent Relay Lab signing identity.
+        signingConfig = signingConfigs.getByName("p2pRelease")
         matchingFallbacks += "release"
     }
     androidResources { noCompress += "voicepack" }
