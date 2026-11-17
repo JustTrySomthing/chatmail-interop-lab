@@ -643,7 +643,7 @@ class P2pModel internal constructor(application: Application, internal val profi
     internal suspend fun requestChannelAttachment(id: Int) = withChatmail { core ->
         val post = channelAttachment(core, id)
         val attachment = requireNotNull(post.attachment) { "This post no longer has an attachment." }
-        require(attachment.size <= CHATMAIL_FILE_LIMIT) { "This attachment exceeds the 20 MB limit." }
+        require(attachment.size <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment exceeds the 1 GiB limit." }
         if (post.localFile == null && attachment.downloadState != "InProgress") core.download(id)
     }
 
@@ -651,7 +651,7 @@ class P2pModel internal constructor(application: Application, internal val profi
         channelPostMedia(requireNotNull(core.channelPost(id)) { "This post is unavailable." })
 
     private fun availableChatmailFile(attachment: ChatmailAttachment): File? =
-        attachment.path?.let(storage::chatmailFile)?.takeIf { it.length() in 0..CHATMAIL_FILE_LIMIT }
+        attachment.path?.let(storage::chatmailFile)?.takeIf { it.length() in 0..NATIVE_ATTACHMENT_FILE_LIMIT }
 
     internal suspend fun createChatmailChannel(name: String) =
         withChatmail { it.createChannel(checkedChannelName(name)) }
@@ -2556,7 +2556,9 @@ class P2pModel internal constructor(application: Application, internal val profi
         val start = if (attachments.isEmpty()) 0 else records.get(checkpoint)?.data()?.optInt("next") ?: 0
         val staged = mutableListOf<JSONObject>()
         try {
-            for (item in attachments.drop(start)) staged.add(stageFile(item.uri, thread, "", item.asFile, draft = item))
+            for (item in attachments.drop(start)) {
+                staged.add(stageFile(item.uri, thread, "", item.asFile, draft = item, native = true))
+            }
             withChatmail { core ->
                 val channel = if (channelPost) requireNotNull(core.channel(chat)) { "Channel unavailable." } else null
                 if (attachments.isEmpty()) {
@@ -2696,7 +2698,8 @@ class P2pModel internal constructor(application: Application, internal val profi
     }
 
     private suspend fun stageFile(
-        uri: Uri, thread: String, group: String, asFile: Boolean, post: String = "", draft: AttachmentDraft? = null
+        uri: Uri, thread: String, group: String, asFile: Boolean, post: String = "",
+        draft: AttachmentDraft? = null, native: Boolean = false
     ): JSONObject {
         val id = newId()
         val attachment = draft ?: describeAttachment(context, uri, asFile)
@@ -2707,7 +2710,13 @@ class P2pModel internal constructor(application: Application, internal val profi
             val originalHash = MessageDigest.getInstance("SHA-256")
             context.contentResolver.openInputStream(uri)?.use { input ->
                 source.outputStream().buffered().use { output ->
-                    java.security.DigestInputStream(input, originalHash).copyTo(output, 128 * 1024)
+                    val hashingInput = java.security.DigestInputStream(input, originalHash)
+                    if (native) {
+                        hashingInput.copyBoundedTo(output, NATIVE_ATTACHMENT_FILE_LIMIT,
+                            "This attachment exceeds the 1 GiB limit.", bufferSize = 128 * 1024)
+                    } else {
+                        hashingInput.copyTo(output, 128 * 1024)
+                    }
                 }
             } ?: error("Couldn’t open " + name)
             val compressed = AttachmentCompressor(context).compress(source, attachment)
@@ -2733,8 +2742,12 @@ class P2pModel internal constructor(application: Application, internal val profi
                     compressed.file.delete()
                 }
             }
-            require(source.length() <= CHATMAIL_FILE_LIMIT) {
-                "$name is over the 20 MB file limit. Choose a smaller file or trim the video."
+            if (native) {
+                require(source.length() <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment exceeds the 1 GiB limit." }
+            } else {
+                require(source.length() <= CHATMAIL_FILE_LIMIT) {
+                    "$name is over the 20 MB file limit. Choose a smaller file or trim the video."
+                }
             }
             return obj("type" to "offer", "id" to id, "name" to name, "mime" to mime,
                 "size" to source.length(), "digest" to hash, "thread" to thread,
@@ -2915,7 +2928,7 @@ class P2pModel internal constructor(application: Application, internal val profi
         val native = snapshot.optInt("nativeMessage")
         if (native > 9) {
             if (snapshot.optString("state") == "Downloading") return
-            require(snapshot.optLong("size") <= CHATMAIL_FILE_LIMIT) { "This attachment exceeds the 20 MB limit." }
+            require(snapshot.optLong("size") <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment exceeds the 1 GiB limit." }
             withChatmail { it.download(native) }
             nextNativeSync = 0L
             return

@@ -3,16 +3,33 @@ package app.p2p
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 internal const val CHATMAIL_FILE_LIMIT = 20_000_000L
+// Delta Chat and ArcaneChat Android use this local picker ceiling. Relay limits apply during delivery.
+internal const val NATIVE_ATTACHMENT_FILE_LIMIT = 1024L * 1024 * 1024
+
 internal const val CHATMAIL_SUBMITTED = "Sent via Chatmail"
 internal const val CHATMAIL_REQUEST_QUEUED = "Queued for Chatmail delivery"
 internal const val CHATMAIL_REQUEST_SENT = "Sent via Chatmail · waiting for their device"
 internal const val PACKET_PREFIX = "P2P/1 "
 private val MESSAGE_EVENTS = setOf("IncomingMsg", "MsgsChanged", "MsgsNoticed", "MsgDelivered", "MsgFailed",
     "MsgRead", "ChatModified", "ChatlistChanged", "ReactionsChanged")
+
+internal fun InputStream.copyBoundedTo(output: OutputStream, limit: Long, error: String, bufferSize: Int = 8192): Long {
+    val buffer = ByteArray(bufferSize)
+    var bytes = 0L
+    while (true) {
+        val count = read(buffer)
+        if (count < 0) return bytes
+        bytes += count
+        check(bytes <= limit) { error }
+        output.write(buffer, 0, count)
+    }
+}
 
 internal object ChatmailNative {
     init { System.loadLibrary("p2p_chatmail") }

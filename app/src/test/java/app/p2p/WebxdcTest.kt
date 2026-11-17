@@ -46,7 +46,7 @@ class WebxdcTest {
                 ]""").single()
                 val draft = stageCatalogApp(cache, app) { filename, limit, output ->
                     assertEquals("pixel.xdc", filename)
-                    assertEquals(CHATMAIL_FILE_LIMIT, limit)
+                    assertEquals(NATIVE_ATTACHMENT_FILE_LIMIT, limit)
                     copyCatalogDownload(bytes.inputStream(), output, bytes.size.toLong(), limit)
                 }
                 assertArrayEquals(bytes, File(checkNotNull(draft.uri.path)).readBytes())
@@ -76,6 +76,26 @@ class WebxdcTest {
         val output = ByteArrayOutputStream()
         copyCatalogDownload(bytes.inputStream(), output, length = -1, limit = 3)
         assertArrayEquals(bytes, output.toByteArray())
+    }
+
+    @Test fun nativeSizeGuardAcceptsFilesAboveTheLegacyLimit() {
+        val input = object : java.io.InputStream() {
+            private var remaining = CHATMAIL_FILE_LIMIT + 1
+            override fun read() = error("Expected buffered reads")
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                if (remaining == 0L) return -1
+                val count = minOf(remaining, length.toLong()).toInt()
+                remaining -= count
+                return count
+            }
+        }
+        var written = 0L
+        val output = object : java.io.OutputStream() {
+            override fun write(value: Int) = error("Expected buffered writes")
+            override fun write(buffer: ByteArray, offset: Int, length: Int) { written += length }
+        }
+        assertEquals(CHATMAIL_FILE_LIMIT + 1, input.copyBoundedTo(output, NATIVE_ATTACHMENT_FILE_LIMIT, "Too large"))
+        assertEquals(CHATMAIL_FILE_LIMIT + 1, written)
     }
 
     @Test fun resourceRequestsStayOnTheExactInstanceOrigin() {

@@ -53,22 +53,14 @@ internal fun parseWebxdcCatalog(value: String): List<CatalogApp> {
         val size = row.optLong("size", -1)
         val category = row.optString("category")
         if (id.isBlank() || title.isBlank() || !catalogFilename.matches(file) || !file.endsWith(".xdc") ||
-            size !in 1..CHATMAIL_FILE_LIMIT || category !in setOf("tool", "game")) null
+            size !in 1..NATIVE_ATTACHMENT_FILE_LIMIT || category !in setOf("tool", "game")) null
         else CatalogApp(id, title, row.optString("description").take(8_000), category, file, icon)
     }.distinctBy(CatalogApp::id)
 }
 
 internal fun copyCatalogDownload(input: InputStream, output: OutputStream, length: Long, limit: Long) {
     check(length <= limit) { "The download exceeds the size limit." }
-    var bytes = 0L
-    val buffer = ByteArray(8192)
-    while (true) {
-        val count = input.read(buffer)
-        if (count < 0) break
-        bytes += count
-        check(bytes <= limit) { "The download exceeds the size limit." }
-        output.write(buffer, 0, count)
-    }
+    val bytes = input.copyBoundedTo(output, limit, "The download exceeds the size limit.")
     check(length < 0 || bytes == length) { "The download is incomplete. Try again." }
 }
 
@@ -117,7 +109,7 @@ internal fun stageCatalogApp(
     val file = File.createTempFile("webxdc-", ".xdc", folder)
     try {
         // The catalog lists the upstream package size. Its served archive can have a different size.
-        file.outputStream().use { download(app.file, CHATMAIL_FILE_LIMIT, it) }
+        file.outputStream().use { download(app.file, NATIVE_ATTACHMENT_FILE_LIMIT, it) }
         inspectWebxdc(file)
         val name = app.title.replace(Regex("[^\\p{L}\\p{N} ._-]"), "_").trim().take(90)
         return AttachmentDraft(Uri.fromFile(file), "${name.ifEmpty { "App" }}.xdc", WEBXDC_MIME, asFile = false, temporary = true)

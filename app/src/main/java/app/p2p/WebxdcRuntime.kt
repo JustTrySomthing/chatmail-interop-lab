@@ -70,7 +70,7 @@ internal data class WebxdcInfo(
 }
 
 internal fun inspectWebxdc(file: File) {
-    require(file.length() in 1..CHATMAIL_FILE_LIMIT) { "This app exceeds the message attachment limit." }
+    require(file.length() in 1..NATIVE_ATTACHMENT_FILE_LIMIT) { "This app exceeds the 1 GiB attachment limit." }
     ZipFile(file).use { zip ->
         require(zip.size() <= 4096 && zip.getEntry("index.html")?.isDirectory == false) { "This Webxdc package is invalid." }
         val names = HashSet<String>()

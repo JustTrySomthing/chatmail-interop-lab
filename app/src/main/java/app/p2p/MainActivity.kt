@@ -2359,7 +2359,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: List<Uri>, 
                 }, close = { modal = null })
             }
             "attach" -> Sheet("Add attachment", { modal = null }) {
-                Text("(20 MB Max File Size)", style = MaterialTheme.typography.bodySmall)
+                val native = records.firstOrNull { it.key == thread }?.data()?.optInt("nativeChat")?.let { it > 9 } == true
+                val sizeNote = if (native) "File size depends on the recipient’s mail relay." else "20 MB maximum file size"
+                Text(sizeNote, style = MaterialTheme.typography.bodySmall)
                 P2pRow("Other File Type", "", Icons.Outlined.AttachFile) { chooseAttachment(true, "*/*") }
                 P2pRow("Take photo", "", Icons.Outlined.PhotoCamera) { capture("photo") }
                 P2pRow("Record video", "", Icons.Outlined.Videocam) { capture("video") }
