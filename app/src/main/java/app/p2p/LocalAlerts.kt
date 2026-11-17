@@ -172,7 +172,8 @@ class TalkDeclineReceiver : android.content.BroadcastReceiver() {
         val app = context.applicationContext as P2pApplication
         val model = app.model
         val owner = intent.getStringExtra(EXTRA_PROFILE) ?: PRIMARY_PROFILE
-        if (intent.action == LocalAlerts.ACTION_DECLINE && app.profiles.hasIncomingCall(owner, call)) {
+        val hasLiveCall = owner == model.profileId && !model.retiring && model.talk.state.value?.id == call
+        if (intent.action == LocalAlerts.ACTION_DECLINE && !hasLiveCall && app.profiles.hasIncomingCall(owner, call)) {
             val pending = goAsync()
             CoroutineScope(Dispatchers.Main.immediate).launch {
                 try {

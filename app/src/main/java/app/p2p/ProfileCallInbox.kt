@@ -14,17 +14,22 @@ internal class ProfileCallInbox(context: Context) {
     fun offer(profile: String, event: ChatmailCallEvent, now: Long): ProfileIncomingCall? {
         if (read(profile)?.expiresAt?.let { it - now in 1..TALK_RING_MS } == true) return null
         val call = ProfileIncomingCall(profile, newId(), event.id, event.chatId, now + TALK_RING_MS)
+        return call.takeIf { save(it) }
+    }
+
+    fun save(call: ProfileIncomingCall): Boolean {
         val record = obj("token" to call.token, "message" to call.message, "chat" to call.chat,
             "expiresAt" to call.expiresAt)
         // Save before posting the notification, which Android can retain after the process exits.
-        return call.takeIf { pending.edit().putString(profile, record.toString()).commit() }
+        return pending.edit().putString(call.profile, record.toString()).commit()
     }
 
     fun find(profile: String, token: String, now: Long): ProfileIncomingCall? =
         read(profile)?.takeIf { it.token == token && it.expiresAt - now in 1..TALK_RING_MS }
 
-    fun withdraw(profile: String, message: Int? = null): ProfileIncomingCall? {
-        val entry = read(profile)?.takeIf { message == null || it.message == message } ?: return null
+    fun withdraw(profile: String, message: Int? = null, token: String? = null): ProfileIncomingCall? {
+        val entry = read(profile)?.takeIf { (message == null || it.message == message) &&
+            (token == null || it.token == token) } ?: return null
         pending.edit().remove(profile).commit()
         return entry
     }

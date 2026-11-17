@@ -142,7 +142,9 @@ class MainActivity : ComponentActivity() {
     private fun acceptAlert(intent: Intent?) {
         val route = LocalAlerts.read(intent)
         val owner = intent?.getStringExtra(EXTRA_PROFILE) ?: PRIMARY_PROFILE
-        val pendingCall = route?.takeIf { it.area == AlertArea.TALK && profiles.hasIncomingCall(owner, it.target) }
+        val pendingCall = route?.takeIf { it.area == AlertArea.TALK &&
+            (owner != model.profileId || model.talk.state.value?.id != it.target) &&
+            profiles.hasIncomingCall(owner, it.target) }
         if (pendingCall != null) incomingProfileCall.value = owner to pendingCall
         alert.value = route?.takeIf { pendingCall == null && owner == model.profileId && !model.retiring }
         otherProfileAlert.value = route?.takeIf { owner != model.profileId && it.area != AlertArea.TALK && profiles.acceptsAlerts(owner) }

@@ -49,6 +49,23 @@ class TalkEventTest {
     }
 
     @Test
+    fun savesTheSelectedProfilesLiveTokenAndIgnoresCleanupForAnOlderNotification() {
+        val app = RuntimeEnvironment.getApplication()
+        val now = 100_000L
+        val earlier = ProfileIncomingCall(PRIMARY_PROFILE, newId(), 12, 22, now + TALK_RING_MS)
+        val latest = earlier.copy(token = newId(), message = 13, expiresAt = now + 200 + TALK_RING_MS)
+        val inbox = ProfileCallInbox(app)
+
+        assertTrue(inbox.save(earlier))
+        assertTrue(inbox.save(latest))
+        val recreated = ProfileCallInbox(app)
+        assertNull(recreated.withdraw(PRIMARY_PROFILE, token = earlier.token))
+        assertEquals(latest, recreated.find(PRIMARY_PROFILE, latest.token, now + 201))
+        assertEquals(latest, recreated.withdraw(PRIMARY_PROFILE, token = latest.token))
+        assertNull(recreated.find(PRIMARY_PROFILE, latest.token, now + 202))
+    }
+
+    @Test
     fun restoresTheOriginalOfferOnlyWhileCoreReportsThatTheCallIsRinging() {
         val pending = ProfileIncomingCall("profile-a", "token", 13, 14, 100_000L)
         val sdp = "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\n"

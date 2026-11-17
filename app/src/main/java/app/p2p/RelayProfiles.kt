@@ -117,18 +117,24 @@ internal class RelayProfiles(private val application: Application) {
         workerLock.withLock {
             val call = incomingCalls.find(profile, token, System.currentTimeMillis()) ?: return
             if (!selection.isEnabled(profile)) return
-            val owner = if (active.value.profileId == profile) active.value else workers[profile]
+            val owner = callProfileModel(profile)
             if (owner != null) owner.declineProfileCall(call)
-            else withContext(Dispatchers.IO) {
-                val path = ProfileStorage(application, profile).noBackup("chatmail")
-                if (path.isDirectory) Chatmail(path).use { core ->
-                    if (core.isRingingCall(call.message)) core.endCall(call.message)
-                }
+            else withStoredCallCore(profile) { core ->
+                if (core.isRingingCall(call.message)) core.endCall(call.message)
             }
-            clearIncomingCall(incomingCalls.withdraw(profile, call.message))
+            clearIncomingCall(incomingCalls.withdraw(profile, token = call.token))
         }
         BackgroundMessages.start(application, catchUp = true)
     }
+
+    private fun callProfileModel(profile: String): P2pModel? =
+        active.value.takeIf { it.profileId == profile } ?: workers[profile]
+
+    private suspend fun <T> withStoredCallCore(profile: String, read: (Chatmail) -> T): T? =
+        withContext(Dispatchers.IO) {
+            val path = ProfileStorage(application, profile).noBackup("chatmail")
+            if (path.isDirectory) Chatmail(path).use(read) else null
+        }
 
     private suspend fun reconcileWorkers() {
         val wanted = if (backgroundSessions > 0) selection.ids().filterTo(mutableSetOf()) { id ->
@@ -231,6 +237,15 @@ internal class RelayProfiles(private val application: Application) {
                     }
                     if (target != previous.profileId) {
                         previous.checkCanSwitchProfiles()
+                        if (incoming != null) {
+                            val ringing = callProfileModel(incoming.profile)?.isProfileCallRinging(incoming)
+                                ?: (withStoredCallCore(incoming.profile) { it.isRingingCall(incoming.message) } == true)
+                            if (!ringing || !hasIncomingCall(incoming.profile, incoming.token)) {
+                                clearIncomingCall(incomingCalls.withdraw(incoming.profile, token = incoming.token))
+                                return@withLock null
+                            }
+                            previous.checkCanSwitchProfiles()
+                        }
                         val next = selection.select(target)
                         workers.remove(next)?.retireForProfileSwitch()
                         previous.retireForProfileSwitch()
@@ -241,7 +256,10 @@ internal class RelayProfiles(private val application: Application) {
                     try {
                         active.value.resumeProfileCall(incoming)
                     } finally {
-                        clearIncomingCall(incomingCalls.withdraw(incoming.profile, incoming.message))
+                        // Keep the route while the active model owns the same notification token.
+                        if (active.value.talk.incomingIdFor(incoming.message) != incoming.token) {
+                            clearIncomingCall(incomingCalls.withdraw(incoming.profile, token = incoming.token))
+                        }
                     }
                 }
             }

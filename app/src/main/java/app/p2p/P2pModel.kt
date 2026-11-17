@@ -148,6 +148,7 @@ class P2pModel internal constructor(application: Application, internal val profi
     private val downloadLock = Mutex()
     private val outboxLock = Mutex()
     private val alerts = LocalAlerts(application, profileId)
+    private val incomingCallRoutes = ProfileCallInbox(application)
     private val notificationsMuted = MutableStateFlow(AppAlertMute.isMuted(context))
     internal val appNotificationsMuted = notificationsMuted.asStateFlow()
     internal val talk = TalkCalls(application, viewModelScope, ::resolveTalkContact, ::talkIce,
@@ -155,6 +156,7 @@ class P2pModel internal constructor(application: Application, internal val profi
         { id, answer -> withChatmail { it.acceptCall(id, answer) } },
         { id -> withChatmail { it.endCall(id) } },
         ::announceTalkCall, { call -> alerts.clear(AlertArea.TALK, call) },
+        { call -> incomingCallRoutes.withdraw(profileId, token = call) },
         { call -> save("call:" + call.id, "call-history", obj("contact" to call.contact,
             "name" to call.displayName, "outgoing" to call.outgoing, "detail" to call.detail,
             "unread" to (!call.outgoing && call.connectedAt == 0L))) })
@@ -228,6 +230,11 @@ class P2pModel internal constructor(application: Application, internal val profi
         talk.incomingIdFor(call.message)
     }
 
+    internal suspend fun isProfileCallRinging(call: ProfileIncomingCall): Boolean = withActiveSync {
+        check(call.profile == profileId)
+        withChatmail { core -> core.isRingingCall(call.message) }
+    }
+
     internal suspend fun declineProfileCall(call: ProfileIncomingCall) = withActiveSync {
         check(call.profile == profileId)
         withChatmail { core ->
@@ -235,14 +242,17 @@ class P2pModel internal constructor(application: Application, internal val profi
         }
     }
 
-    private suspend fun announceTalkCall(call: String, expiresAt: Long) {
+    private fun announceTalkCall(call: String, expiresAt: Long) {
         val name = talk.state.value?.displayName.orEmpty().ifBlank { "Chatmail contact" }
         if (talk.state.value?.let { it.id == call && it.phase == TalkPhase.Incoming } != true ||
             System.currentTimeMillis() >= expiresAt) return
         if (visible && !QuietHours.read(context).active()) {
             AppAlertMute.deliver(context, talk::ring)
         } else if (!visible) {
-            alerts.show(AlertArea.TALK, call, name, "Incoming Talk call", expiresAt)
+            val route = talk.incomingRoute(profileId)?.takeIf { it.token == call } ?: return
+            if (incomingCallRoutes.save(route)) {
+                alerts.show(AlertArea.TALK, call, name, "Incoming Talk call", expiresAt)
+            }
         }
     }
 
@@ -1713,8 +1723,10 @@ class P2pModel internal constructor(application: Application, internal val profi
 
     internal fun setForeground(foreground: Boolean) {
         syncDemand.update { it.copy(foreground = foreground) }
-        if (!foreground) talk.onAppHidden()
-        else refreshForegroundRinging()
+        if (!foreground) {
+            talk.onAppHidden()
+            talk.incomingRoute(profileId)?.let { announceTalkCall(it.token, it.expiresAt) }
+        } else refreshForegroundRinging()
     }
 
     private fun refreshForegroundRinging() {

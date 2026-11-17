@@ -82,6 +82,7 @@ internal class TalkCalls(
     private val terminate: suspend (Int) -> Unit,
     private val incomingAlert: suspend (String, Long) -> Unit,
     private val clearAlert: (String) -> Unit,
+    private val clearIncomingRoute: (String) -> Unit,
     private val completed: suspend (TalkCall) -> Unit
 ) {
     private val current = MutableStateFlow<TalkCall?>(null)
@@ -104,6 +105,7 @@ internal class TalkCalls(
     private var chatId = 0
     private var messageId = 0
     private var incomingOffer = ""
+    private var incomingExpiresAt = 0L
 
     fun start(contact: String) {
         if (busy()) return
@@ -122,6 +124,10 @@ internal class TalkCalls(
 
     fun incomingIdFor(nativeMessage: Int): String? =
         current.value?.takeIf { messageId == nativeMessage && it.phase == TalkPhase.Incoming }?.id
+
+    fun incomingRoute(profile: String): ProfileIncomingCall? =
+        current.value?.takeIf { it.phase == TalkPhase.Incoming && incomingExpiresAt > System.currentTimeMillis() }
+            ?.let { ProfileIncomingCall(profile, it.id, messageId, chatId, incomingExpiresAt) }
 
     suspend fun event(
         event: ChatmailCallEvent, caller: ChatmailCallContact? = null,
@@ -144,6 +150,7 @@ internal class TalkCalls(
                 chatId = event.chatId
                 messageId = event.id
                 incomingOffer = event.sdp
+                incomingExpiresAt = expiresAt
                 current.value = TalkCall(id, "chatmail:${event.chatId}", TalkPhase.Incoming, outgoing = false,
                     displayName = caller.name, startsWithVideo = event.video, remoteCamera = event.video)
                 armTimeout(id, remaining, "Missed call")
@@ -170,6 +177,7 @@ internal class TalkCalls(
         val offer = incomingOffer.takeIf { it.isNotBlank() } ?: return
         silence()
         clearAlert(id)
+        clearIncomingRoute(id)
         current.value = call.copy(phase = TalkPhase.Connecting, setupStep = TalkSetupStep.ConnectingAudio)
         scope.launch { guarded(id) { prepare(id, offer) } }
     }
@@ -406,6 +414,7 @@ internal class TalkCalls(
         messageId = 0
         chatId = 0
         incomingOffer = ""
+        incomingExpiresAt = 0L
         deferredEvent = null
         current.value = call.copy(phase = TalkPhase.Finished, detail = detail, camera = false,
             localVideo = null, remoteVideo = null, remoteCamera = false)
@@ -414,6 +423,7 @@ internal class TalkCalls(
         videoStats = null
         silence()
         clearAlert(call.id)
+        clearIncomingRoute(call.id)
         runCatching { media?.dispose() }
         runCatching { client?.dispose() }
         media = null
