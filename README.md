@@ -8,12 +8,12 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc61**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc61/P2P-0.7.23-rc61-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc62**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc62/P2P-0.7.23-rc62-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC61 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC62 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
-RC61 (97) fixes the zero-height shared-app frame demonstrated by RC60 phone diagnostics. WebViews now use explicit MATCH_PARENT layout parameters and the wrapper fills the viewport with a fixed inset frame instead of 100vh. API initialization and status updates were already succeeding on the affected phone. Install over RC58–RC60 with the saved signing key. Confirm the frame has a positive height and Calendar/Calculator/Checklist display; post-fix phone verification is pending.
+RC62 (98) retains the WebRTC isolation guard after shared apps close and prepares it when browsing apps or entering a chat containing them. Per-frame isolation checks remain enabled. Diagnostics now include preparation, guard wait and frame-load timings. The user confirmed RC61 opens apps on their phone, but reported 5–10 second startup. RC62 performance still needs phone verification. Install over RC58–RC61 using the same saved signing identity.
 
 ### Update from the app
 
@@ -31,7 +31,7 @@ Relay Lab uses Chatmail Core for interoperability. Cross-app support varies by c
 
 ## Build a debug APK
 
-First check out `securejoin-invites` (active development) or `v0.7.23-rc61` (release source); main currently retains older application source. Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
+First check out `securejoin-invites` (active development) or `v0.7.23-rc62` (release source); main currently retains older application source. Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
 
 ```sh
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
@@ -41,7 +41,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 
 
 For a non-debuggable development APK, run `./gradlew :app:assemblePreview`. The output is `app/build/outputs/apk/preview/app-preview.apk`. This variant uses the dedicated Relay Lab signing configuration. Set both signing environment variables using the restored backup described in RECOVERY.md. Do not distribute a debug-signed replacement.
 
-The downloadable APK's source is at the [RC61 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc61). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and automatic update checks off by default.
+The downloadable APK's source is at the [RC62 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc62). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and automatic update checks off by default.
 
 ### Release publishing
 
