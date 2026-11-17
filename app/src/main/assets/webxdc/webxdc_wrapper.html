@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="color-scheme" content="dark light">
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      .iframe-container {
+        overflow: hidden;
+        height: 100vh;
+        width: 100vw;
+        position: relative;
+      }
+      .iframe-container iframe {
+        display: none;
+        border: 0;
+        height: 100%;
+        left: 0;
+        position: absolute;
+        top: 0;
+        width: 100%;
+      }
+      #progress {
+        width: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading">
+      <progress id="progress" max="500" value="0" style="display: none"></progress>
+    </div>
+    <div class="iframe-container">
+      <iframe
+        id="frame"
+        allow="camera 'self'; microphone 'self'; geolocation 'self'; accelerometer 'self'; gyroscope 'self'; magnetometer 'self'"
+      ></iframe>
+    </div>
+    <iframe
+      id="test-isolated-sandbox-context"
+      sandbox="allow-scripts"
+      src="./sandboxed_iframe_rtcpeerconnection_check_5965668501706.html"
+      style="display: none"
+    ></iframe>
+    <script>
+      const frame = document.getElementById("frame");
+      const isolated = document.getElementById("test-isolated-sandbox-context");
+      const progress = document.getElementById("progress");
+      // Keep live references for the lifetime of this renderer document.
+      const reserved = [];
+      const settle = (ok) => InternalJSApi.startupFinished(ok);
+      const connectionBlocked = () => {
+        try {
+          const connection = new RTCPeerConnection();
+          connection.close();
+          return false;
+        } catch (_) {
+          return true;
+        }
+      };
+
+      const checkIsolatedFrame = () => new Promise(resolve => {
+        const ask = () => isolated.contentWindow.postMessage("performCheck", "*");
+        const finish = (ok) => {
+          clearInterval(retry);
+          clearTimeout(timeout);
+          window.removeEventListener("message", onMessage);
+          resolve(ok);
+        };
+        const onMessage = event => {
+          if (event.source !== isolated.contentWindow || event.origin !== "null") return;
+          if (event.data?.msgType === "ready") ask();
+          if (event.data?.msgType === "result") finish(event.data.rtcpcCreationFailed === true);
+        };
+        const retry = setInterval(ask, 200);
+        const timeout = setTimeout(() => finish(false), 5000);
+        window.addEventListener("message", onMessage);
+        ask();
+      });
+
+      (async () => {
+        try {
+          const params = new URLSearchParams(location.search);
+          const entry = new URL(params.get("href"));
+          if (entry.origin !== location.origin || entry.pathname !== "/index.html") {
+            throw new Error("Invalid app entry point");
+          }
+          if (params.get("h") !== "1" && typeof RTCPeerConnection === "function") {
+            progress.style.display = "";
+            const certificate = await RTCPeerConnection.generateCertificate({
+              name: "ECDSA", namedCurve: "P-256",
+            });
+            const deadline = performance.now() + 7000;
+            while (reserved.length < 500) {
+              let connection;
+              try {
+                connection = new RTCPeerConnection({ certificates: [certificate] });
+              } catch (_) {
+                if (performance.now() >= deadline) throw new Error("WebRTC budget unavailable");
+                await new Promise(resolve => setTimeout(resolve, 100));
+                continue;
+              }
+              connection.close();
+              reserved.push(connection);
+              if (reserved.length % 25 === 0) {
+                progress.value = reserved.length;
+                await new Promise(resolve => setTimeout(resolve, 0));
+              }
+            }
+          }
+          if (!connectionBlocked() || !(await checkIsolatedFrame())) {
+            throw new Error("WebRTC isolation check failed");
+          }
+          isolated.remove();
+          document.getElementById("loading").remove();
+          frame.style.display = "block";
+          frame.addEventListener("load", () => settle(true), { once: true });
+          frame.src = entry.href;
+        } catch (_) {
+          settle(false);
+        }
+      })();
+    </script>
+  </body>
+</html>

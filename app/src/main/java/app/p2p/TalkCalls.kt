@@ -9,34 +9,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 import org.webrtc.PeerConnection
-import org.webrtc.SessionDescription
+import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import org.thoughtcrime.securesms.calls.MediaStreamManager
+import org.thoughtcrime.securesms.webrtc.WebRTCClient
+import org.webrtc.AudioTrack
+import org.webrtc.MediaStream
+import org.webrtc.VideoTrack
 
-internal const val TALK_SIGNAL = "talkCall"
 internal const val TALK_RING_MS = 45_000L
-internal const val MISSED_CALL_WINDOW = 24 * 60 * 60_000L
 internal const val TALK_CONNECT_MS = 30_000L
-
-internal data class TalkSignal(val call: String, val action: String, val expires: Long, val sdp: String = "") {
-    fun packet() = obj("type" to TALK_SIGNAL, "id" to newId(), "call" to call,
-        "action" to action, "expires" to expires, "sdp" to sdp)
-
-    companion object {
-        fun read(data: JSONObject, now: Long, allowMissedOffer: Boolean = false): TalkSignal? {
-            val call = data.optString("call")
-            val action = data.optString("action")
-            val expires = data.optLong("expires")
-            val sdp = data.optString("sdp")
-            if (!isId(call) || expires <= 0 || expires > now + TALK_RING_MS + 15_000) return null
-            if (expires <= now && !(allowMissedOffer && action == "offer" && expires > now - MISSED_CALL_WINDOW)) return null
-            val valid = when (action) {
-                "offer", "answer" -> validTalkSdp(sdp)
-                "decline", "end", "busy" -> sdp.isEmpty()
-                else -> false
-            }
-            return if (valid) TalkSignal(call, action, expires, sdp) else null
-        }
-    }
-}
 
 internal enum class TalkPhase { Connecting, Incoming, Active, Finished }
 
@@ -44,7 +28,7 @@ internal enum class TalkSetupStep(val label: String) {
     FindingRoute("Finding a route…"),
     SendingInvite("Sending invite…"),
     WaitingForAnswer("Waiting for answer…"),
-    ConnectingAudio("Connecting audio…")
+    ConnectingAudio("Connecting call…")
 }
 
 internal data class TalkCall(
@@ -56,47 +40,330 @@ internal data class TalkCall(
     val muted: Boolean = false,
     val connectedAt: Long = 0,
     val detail: String = "",
-    val setupStep: TalkSetupStep = TalkSetupStep.FindingRoute
+    val setupStep: TalkSetupStep = TalkSetupStep.FindingRoute,
+    val displayName: String = "",
+    val startsWithVideo: Boolean = false,
+    val camera: Boolean = false,
+    val frontCamera: Boolean = true,
+    val switchingCamera: Boolean = false,
+    val localVideo: VideoTrack? = null,
+    val remoteVideo: VideoTrack? = null,
+    val remoteCamera: Boolean = false
 )
+
+internal data class ChatmailCallEvent(
+    val kind: String, val id: Int, val chatId: Int, val sdp: String, val video: Boolean, val thisDevice: Boolean
+)
+
+internal fun readChatmailCallEvent(event: JSONObject): ChatmailCallEvent? {
+    val kind = event.optString("kind")
+    if (kind !in setOf("IncomingCall", "IncomingCallAccepted", "OutgoingCallAccepted", "CallEnded")) return null
+    val id = event.optInt("msg_id", event.optInt("msgId"))
+    val chat = event.optInt("chat_id", event.optInt("chatId"))
+    if (id <= 9 || chat <= 9) return null
+    val sdp = when (kind) {
+        "IncomingCall" -> event.optString("place_call_info", event.optString("placeCallInfo"))
+        "OutgoingCallAccepted" -> event.optString("accept_call_info", event.optString("acceptCallInfo"))
+        else -> ""
+    }
+    if (kind in setOf("IncomingCall", "OutgoingCallAccepted") &&
+        (sdp.length !in 1..65_536 || !sdp.startsWith("v=0"))) return null
+    return ChatmailCallEvent(kind, id, chat, sdp, event.optBoolean("has_video", event.optBoolean("hasVideo")),
+        event.optBoolean("from_this_device", event.optBoolean("fromThisDevice")))
+}
 
 internal class TalkCalls(
     private val context: Context,
     private val scope: CoroutineScope,
-    private val signal: suspend (String, TalkSignal) -> Unit,
+    private val resolve: suspend (String) -> ChatmailCallContact,
     private val ice: suspend () -> String,
-    private val incomingAlert: suspend (String, String, Long) -> Unit,
+    private val place: suspend (Int, String) -> Int,
+    private val answer: suspend (Int, String) -> Unit,
+    private val terminate: suspend (Int) -> Unit,
+    private val incomingAlert: suspend (String, Long) -> Unit,
     private val clearAlert: (String) -> Unit,
-    private val missedCall: suspend (TalkCall) -> Unit = {},
-    private val completedCall: suspend (TalkCall) -> Unit = {}
+    private val clearIncomingRoute: (String) -> Unit,
+    private val completed: suspend (TalkCall) -> Unit
 ) {
     private val current = MutableStateFlow<TalkCall?>(null)
     val state = current.asStateFlow()
-    private var media: TalkAudio? = null
-    private var task: Job? = null
-    private var timeout: Job? = null
+    private val audio = context.getSystemService(AudioManager::class.java)
+    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+        .setOnAudioFocusChangeListener { change ->
+            if (change == AudioManager.AUDIOFOCUS_LOSS) finish("Call audio interrupted")
+        }.build()
+    private var previousMode: Int? = null
+    private var previousDevice: AudioDeviceInfo? = null
+    private var deferredEvent: ChatmailCallEvent? = null
+    private var client: WebRTCClient? = null
+    private var media: MediaStreamManager? = null
+    private var timer: Job? = null
+    private var videoStats: Job? = null
     private var ringtone: Ringtone? = null
-    private var offer = ""
-    private var ringUntil = 0L
-    private var awaitingAnswer = false
-    private val recentlyEnded = mutableMapOf<Pair<String, String>, Long>()
+    private var chatId = 0
+    private var messageId = 0
+    private var incomingOffer = ""
+    private var incomingExpiresAt = 0L
 
     fun start(contact: String) {
-        if (current.value?.phase?.let { it != TalkPhase.Finished } == true) return
-        AppLog.record(context, "Talk: outgoing call started")
+        if (busy()) return
         val call = TalkCall(newId(), contact, TalkPhase.Connecting, outgoing = true)
         current.value = call
-        awaitingAnswer = true
-        ringUntil = 0L
-        prepare(call, null)
+        scope.launch {
+            guarded(call.id) {
+                val chat = resolve(contact)
+                if (!active(call.id)) return@guarded
+                chatId = chat.id
+                current.value = current.value?.copy(displayName = chat.name)
+                prepare(call.id, null)
+            }
+        }
+    }
+
+    fun incomingIdFor(nativeMessage: Int): String? =
+        current.value?.takeIf { messageId == nativeMessage && it.phase == TalkPhase.Incoming }?.id
+
+    fun incomingRoute(profile: String): ProfileIncomingCall? =
+        current.value?.takeIf { it.phase == TalkPhase.Incoming && incomingExpiresAt > System.currentTimeMillis() }
+            ?.let { ProfileIncomingCall(profile, it.id, messageId, chatId, incomingExpiresAt) }
+
+    suspend fun event(
+        event: ChatmailCallEvent, caller: ChatmailCallContact? = null,
+        incomingId: String? = null, expiresAt: Long = System.currentTimeMillis() + TALK_RING_MS
+    ) {
+        if (messageId == 0 && chatId == event.chatId && current.value?.outgoing == true &&
+            event.kind in setOf("OutgoingCallAccepted", "CallEnded")) {
+            deferredEvent = event
+            return
+        }
+        when (event.kind) {
+            "IncomingCall" -> {
+                val remaining = expiresAt - System.currentTimeMillis()
+                if (caller == null || remaining <= 0L) return
+                if (busy()) {
+                    if (messageId != event.id) runCatching { terminate(event.id) }
+                    return
+                }
+                val id = incomingId ?: newId()
+                chatId = event.chatId
+                messageId = event.id
+                incomingOffer = event.sdp
+                incomingExpiresAt = expiresAt
+                current.value = TalkCall(id, "chatmail:${event.chatId}", TalkPhase.Incoming, outgoing = false,
+                    displayName = caller.name, startsWithVideo = event.video, remoteCamera = event.video)
+                armTimeout(id, remaining, "Missed call")
+                incomingAlert(id, expiresAt)
+            }
+            "OutgoingCallAccepted" -> if (messageId == event.id && chatId == event.chatId) {
+                current.value?.let {
+                    current.value = it.copy(setupStep = TalkSetupStep.ConnectingAudio)
+                    armTimeout(it.id, TALK_CONNECT_MS, "Couldn’t connect")
+                }
+                client?.handleAnswerSdp(event.sdp)
+            }
+            "IncomingCallAccepted" -> if (messageId == event.id && !event.thisDevice) {
+                finish("Answered on another device", sendEnd = false)
+            }
+            "CallEnded" -> if (messageId == event.id && chatId == event.chatId) {
+                finish(if (current.value?.phase == TalkPhase.Incoming) "Missed call" else "Call ended", sendEnd = false)
+            }
+        }
+    }
+
+    fun accept(id: String) {
+        val call = current.value?.takeIf { it.id == id && it.phase == TalkPhase.Incoming } ?: return
+        val offer = incomingOffer.takeIf { it.isNotBlank() } ?: return
+        silence()
+        clearAlert(id)
+        clearIncomingRoute(id)
+        current.value = call.copy(phase = TalkPhase.Connecting, setupStep = TalkSetupStep.ConnectingAudio)
+        scope.launch { guarded(id) { prepare(id, offer) } }
+    }
+
+    private suspend fun prepare(id: String, offer: String?) {
+        armTimeout(id, TALK_CONNECT_MS, "Couldn’t connect")
+        TalkCallService.ensure(context, id)
+        val servers = ice()
+        if (!active(id)) return
+        check(audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { "Call audio is busy." }
+        previousMode = audio.mode
+        previousDevice = audio.communicationDevice
+        audio.mode = AudioManager.MODE_IN_COMMUNICATION
+        val rtc = WebRTCClient(context, object : WebRTCClient.Callbacks {
+            override fun onOfferReady(sdp: String) {
+                val target = chatId
+                if (!active(id) || target <= 9) return
+                current.value = current.value?.copy(setupStep = TalkSetupStep.SendingInvite)
+                scope.launch {
+                    guarded(id) {
+                        val placed = place(target, sdp)
+                        if (!active(id)) {
+                            runCatching { terminate(placed) }
+                            return@guarded
+                        }
+                        messageId = placed
+                        current.value = current.value?.copy(setupStep = TalkSetupStep.WaitingForAnswer)
+                        armTimeout(id, TALK_RING_MS, "No answer")
+                        val early = deferredEvent
+                        deferredEvent = null
+                        if (early?.id == placed) event(early)
+                    }
+                }
+            }
+
+            override fun onAnswerReady(sdp: String) {
+                val target = messageId
+                scope.launch { if (active(id) && target > 9) guarded(id) { answer(target, sdp) } }
+            }
+
+            override fun onRemoteVideoTrack(track: VideoTrack) {
+                if (active(id)) current.value = current.value?.copy(remoteVideo = track)
+            }
+            override fun onRemoteAudioTrack(track: AudioTrack) = Unit
+            override fun onRemoteMutedStateChanged(audioEnabled: Boolean, videoEnabled: Boolean) {
+                if (active(id)) current.value = current.value?.copy(remoteCamera = videoEnabled)
+            }
+            override fun onConnectionStateChanged(state: PeerConnection.PeerConnectionState) {
+                if (!active(id)) return
+                when (state) {
+                    PeerConnection.PeerConnectionState.CONNECTED -> {
+                        timer?.cancel()
+                        val call = current.value ?: return
+                        current.value = call.copy(phase = TalkPhase.Active,
+                            connectedAt = call.connectedAt.takeIf { it > 0 } ?: SystemClock.elapsedRealtime())
+                        client?.sendMutedState(!call.muted, call.camera)
+                    }
+                    PeerConnection.PeerConnectionState.FAILED -> finish("Couldn’t connect")
+                    else -> Unit
+                }
+            }
+            override fun onRelayUsageChanged(isRelayUsed: Boolean?) = Unit
+            override fun onError(error: String) {
+                if (active(id)) finish("Couldn’t connect")
+            }
+        })
+        client = rtc
+        rtc.configure(servers)
+        val manager = MediaStreamManager(context, rtc.peerConnectionFactory)
+        media = manager
+        manager.createMediaStream(object : MediaStreamManager.Callback {
+            override fun onMediaStreamReady(stream: MediaStream) {
+                if (!active(id)) return
+                rtc.setLocalMediaStream(stream)
+                rtc.setVideoEnabled(false)
+                current.value = current.value?.copy(localVideo = rtc.localVideoTrack)
+                if (offer == null) rtc.startOutgoingCall() else rtc.acceptIncomingCall(offer)
+            }
+            override fun onError(error: String) {
+                if (active(id)) finish("Couldn’t open call media")
+            }
+        })
+    }
+
+    fun toggleCamera() {
+        val call = current.value?.takeIf { it.phase == TalkPhase.Active && !it.switchingCamera } ?: return
+        setCameraEnabled(call, !call.camera)
+    }
+
+    private fun setCameraEnabled(call: TalkCall, enabled: Boolean) {
+        val manager = media ?: return
+        val rtc = client ?: return
+        if (enabled) {
+            if (!manager.startVideoCapture()) return
+            rtc.setVideoEnabled(true)
+        } else {
+            rtc.setVideoEnabled(false)
+            manager.stopVideoCapture()
+        }
+        current.value = call.copy(camera = enabled, frontCamera = manager.isFrontCamera, switchingCamera = false)
+        rtc.sendMutedState(!call.muted, enabled)
+        videoStats?.cancel()
+        videoStats = if (enabled) sampleOutgoingVideo(call.id, rtc) else null
+    }
+
+    fun switchCamera() {
+        val call = current.value?.takeIf { it.phase == TalkPhase.Active && it.camera && !it.switchingCamera } ?: return
+        val manager = media ?: return
+        current.value = call.copy(switchingCamera = true)
+        manager.switchCamera(object : MediaStreamManager.CameraSwitchCallback {
+            override fun onCameraSwitch(isFrontCamera: Boolean) {
+                scope.launch {
+                    val currentCall = current.value?.takeIf { it.id == call.id && it.camera && it.switchingCamera }
+                        ?: return@launch
+                    current.value = currentCall.copy(frontCamera = isFrontCamera, switchingCamera = false)
+                    videoStats?.cancel()
+                    videoStats = client?.let { sampleOutgoingVideo(call.id, it) }
+                }
+            }
+
+            override fun onError(error: String) {
+                scope.launch {
+                    val currentCall = current.value?.takeIf { it.id == call.id && it.switchingCamera } ?: return@launch
+                    current.value = currentCall.copy(switchingCamera = false)
+                    AppLog.record(context, "Talk: couldn’t switch cameras")
+                }
+            }
+        })
+    }
+
+    private fun sampleOutgoingVideo(id: String, rtc: WebRTCClient): Job = scope.launch {
+        repeat(2) {
+            delay(if (it == 0) 3_000 else 6_000)
+            if (current.value?.let { call -> call.id == id && call.camera } != true) return@launch
+            rtc.getCallStats { report ->
+                val stats = report.statsMap
+                val outbound = stats.values
+                    .filter { it.type == "outbound-rtp" && it.members["kind"] == "video" }
+                    .maxByOrNull { (it.members["framesEncoded"] as? Number)?.toLong() ?: 0L }
+                    ?.members ?: return@getCallStats
+                val width = (outbound["frameWidth"] as? Number)?.toInt() ?: return@getCallStats
+                val height = (outbound["frameHeight"] as? Number)?.toInt() ?: return@getCallStats
+                val fps = (outbound["framesPerSecond"] as? Number)?.toInt()?.let { " at $it fps" }.orEmpty()
+                val codec = (outbound["codecId"] as? String)
+                    ?.let { stats[it]?.members?.get("mimeType") as? String }
+                    ?.takeIf { it in setOf("video/VP8", "video/VP9", "video/H264", "video/AV1") }
+                val limit = (outbound["qualityLimitationReason"] as? String)
+                    ?.takeIf { it in setOf("none", "cpu", "bandwidth", "other") }
+                scope.launch(Dispatchers.IO) {
+                    if (current.value?.let { call -> call.id == id && call.camera } == true) {
+                        val details = listOfNotNull(codec, limit?.let { "limited by $it" }).joinToString(", ")
+                        AppLog.record(context, "Talk: outgoing video ${width}x$height$fps" +
+                            if (details.isBlank()) "" else " ($details)")
+                    }
+                }
+            }
+        }
+    }
+
+    fun toggleMute() {
+        val call = current.value?.takeIf { it.phase == TalkPhase.Active } ?: return
+        client?.setAudioEnabled(call.muted)
+        current.value = call.copy(muted = !call.muted)
+        client?.sendMutedState(call.muted, call.camera)
+    }
+
+    fun toggleSpeaker() {
+        val call = current.value?.takeIf { it.phase == TalkPhase.Active } ?: return
+        val devices = audio.availableCommunicationDevices
+        val device = if (call.speaker) devices.firstOrNull {
+            it.id == previousDevice?.id && it.type != AudioDeviceInfo.TYPE_BUILTIN_SPEAKER
+        } ?: devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
+        else devices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+        if (device != null && audio.setCommunicationDevice(device)) current.value = call.copy(speaker = !call.speaker)
+        else if (call.speaker && device == null) {
+            audio.clearCommunicationDevice()
+            current.value = call.copy(speaker = false)
+        }
     }
 
     fun ring() {
         val call = current.value?.takeIf { it.phase == TalkPhase.Incoming } ?: return
         clearAlert(call.id)
-        if (ringtone != null || System.currentTimeMillis() >= ringUntil) return
-        runCatching {
-            ringtone = RingtoneManager.getRingtone(context, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
-                ?.apply { isLooping = true; play() }
+        if (ringtone == null) {
+            ringtone = runCatching { RingtoneManager.getRingtone(context,
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))?.apply { isLooping = true; play() } }.getOrNull()
         }
     }
 
@@ -105,234 +372,77 @@ internal class TalkCalls(
         ringtone = null
     }
 
-    fun accept(id: String) {
-        val call = current.value?.takeIf { it.phase == TalkPhase.Incoming && it.id == id } ?: return
-        val sdp = offer
-        if (System.currentTimeMillis() >= ringUntil || sdp.isEmpty()) {
-            finish("Missed call", null)
-            return
-        }
+    fun onAppHidden() {
+        current.value?.takeIf { it.camera }?.let { setCameraEnabled(it, false) }
         silence()
-        clearAlert(call.id)
-        current.value = call.copy(phase = TalkPhase.Connecting, setupStep = TalkSetupStep.ConnectingAudio)
-        timeout?.cancel()
-        prepare(call, sdp)
     }
 
-    private fun prepare(call: TalkCall, remoteOffer: String?) {
-        task = scope.launch {
-            try {
-                withTimeout(25_000) {
-                    TalkCallService.ensure(context, call.id)
-                    val servers = ice()
-                    if (!isCurrent(call)) return@withTimeout
-                    val audio = TalkAudio(context, servers, { state -> scope.launch { connectionChanged(call, state) } },
-                        { scope.launch { if (isCurrent(call)) finish("Audio was interrupted", "end") } },
-                        { scope.launch { if (isCurrent(call)) finish("Couldn’t start call audio", "end") } })
-                    media = audio
-                    val sdp = audio.prepare(remoteOffer)
-                    if (!isCurrent(call)) return@withTimeout
-                    if (remoteOffer == null) {
-                        ringUntil = System.currentTimeMillis() + TALK_RING_MS
-                        startTimer(call, TALK_RING_MS)
-                    } else if (current.value?.phase == TalkPhase.Connecting) startTimer(call, TALK_CONNECT_MS)
-                    val expires = if (remoteOffer == null) ringUntil else System.currentTimeMillis() + TALK_CONNECT_MS
-                    if (remoteOffer == null) advanceSetup(call.id, TalkSetupStep.SendingInvite)
-                    send(call, if (remoteOffer == null) "offer" else "answer", sdp, expires)
-                }
-            } catch (_: TimeoutCancellationException) {
-                if (isCurrent(call)) finish("Couldn’t connect", "end")
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                AppLog.record(context, "Talk: call setup failed", error)
-                if (isCurrent(call)) finish("Couldn’t connect", "end")
-            } catch (_: LinkageError) {
-                if (isCurrent(call)) finish("Call audio is unavailable on this device", "end")
-            }
-        }
-    }
-
-    suspend fun receive(contact: String, received: TalkSignal) = withContext(Dispatchers.Main.immediate) {
-        val now = System.currentTimeMillis()
-        if (received.expires <= now) return@withContext
-        AppLog.record(context, "Talk: received ${received.action}")
-        recentlyEnded.entries.removeIf { it.value <= now }
-        val key = contact to received.call
-        if (received.action == "end") recentlyEnded[key] = received.expires
-        val active = current.value?.takeIf { it.phase != TalkPhase.Finished }
-        if (received.action == "offer") {
-            if (key in recentlyEnded) return@withContext
-            if (active?.id == received.call) return@withContext
-            if (active != null) {
-                val crossed = active.contact == contact && active.outgoing && active.phase == TalkPhase.Connecting
-                if (!crossed || active.id < received.call) {
-                    signal(contact, TalkSignal(received.call, "busy", received.expires))
-                    return@withContext
-                }
-                finish("Call replaced", null, keepResult = false)
-            }
-            val call = TalkCall(received.call, contact, TalkPhase.Incoming, outgoing = false)
-            offer = received.sdp
-            ringUntil = received.expires
-            current.value = call
-            startTimer(call, (ringUntil - System.currentTimeMillis()).coerceAtLeast(1L))
-            incomingAlert(contact, call.id, ringUntil)
-            return@withContext
-        }
-        if (active == null || active.id != received.call || active.contact != contact) return@withContext
-        when (received.action) {
-            "answer" -> if (active.outgoing && awaitingAnswer) {
-                advanceSetup(active.id, TalkSetupStep.ConnectingAudio)
-                awaitingAnswer = false
-                startTimer(active, TALK_CONNECT_MS)
-                task = scope.launch {
-                    try {
-                        withTimeout(8_000) {
-                            val audio = checkNotNull(media)
-                            audio.applyRemote(SessionDescription.Type.ANSWER, received.sdp)
-                        }
-                    } catch (_: TimeoutCancellationException) {
-                        if (isCurrent(active)) finish("Couldn’t connect", "end")
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (error: Exception) {
-                        AppLog.record(context, "Talk: could not apply answer", error)
-                        if (isCurrent(active)) finish("Couldn’t connect", "end")
-                    }
-                }
-            }
-            "busy" -> if (active.outgoing && awaitingAnswer) finish("Contact is busy", null)
-            "decline" -> if (active.outgoing && awaitingAnswer) finish("Call declined", null)
-            "end" -> finish(if (active.phase == TalkPhase.Incoming) "Missed call" else "Call ended", null)
-        }
-    }
-
-    private fun connectionChanged(call: TalkCall, state: PeerConnection.PeerConnectionState) {
-        if (!isCurrent(call)) return
-        AppLog.record(context, "Talk: WebRTC connection $state")
-        when (state) {
-            PeerConnection.PeerConnectionState.CONNECTED -> {
-                timeout?.cancel()
-                awaitingAnswer = false
-                val latest = current.value ?: return
-                if (latest.phase != TalkPhase.Active) {
-                    try { media?.activate() } catch (error: Exception) {
-                        AppLog.record(context, "Talk: audio activation failed", error)
-                        finish("Audio was interrupted", "end")
-                        return
-                    }
-                    current.value = latest.copy(phase = TalkPhase.Active, connectedAt = SystemClock.elapsedRealtime())
-                }
-            }
-            PeerConnection.PeerConnectionState.DISCONNECTED -> startTimer(call, 10_000)
-            PeerConnection.PeerConnectionState.FAILED -> finish("Connection lost", "end")
-            else -> Unit
-        }
-    }
-
-    private fun startTimer(call: TalkCall, delayMs: Long) {
-        timeout?.cancel()
-        timeout = scope.launch {
-            delay(delayMs)
-            if (isCurrent(call)) {
-                val detail = when (current.value?.phase) {
-                    TalkPhase.Incoming -> "Missed call"
-                    TalkPhase.Active -> "Connection lost"
-                    else -> if (awaitingAnswer) "No answer" else "Couldn’t connect"
-                }
-                finish(detail, "end")
-            }
-        }
-    }
-
-    fun toggleMute() {
-        val call = current.value?.takeIf { it.phase == TalkPhase.Active } ?: return
-        media?.muteMicrophone(!call.muted)
-        current.value = call.copy(muted = !call.muted)
-    }
-
-    fun toggleSpeaker() {
-        val call = current.value?.takeIf { it.phase == TalkPhase.Active } ?: return
-        if (media?.speaker(!call.speaker) == true) current.value = call.copy(speaker = !call.speaker)
-    }
-
-    fun decline(id: String) {
-        if (current.value?.let { it.phase == TalkPhase.Incoming && it.id == id } == true) end()
-    }
+    fun decline(id: String) { if (current.value?.id == id) finish("Call declined") }
 
     fun end() {
-        val call = current.value ?: return
-        if (call.phase == TalkPhase.Finished) current.value = null
-        else finish("Call ended", if (call.phase == TalkPhase.Incoming) "decline" else "end",
-            keepResult = call.outgoing)
+        if (current.value?.phase == TalkPhase.Finished) current.value = null
+        else finish("Call ended")
     }
 
-    fun onAppHidden() {
-        silence()
-        val call = current.value ?: return
-        when (call.phase) {
-            TalkPhase.Incoming -> {
-                val expiresAt = ringUntil
-                scope.launch {
-                    if (current.value == call && System.currentTimeMillis() < expiresAt) {
-                        incomingAlert(call.contact, call.id, expiresAt)
-                    }
-                }
-            }
-            TalkPhase.Active, TalkPhase.Connecting -> Unit
-            TalkPhase.Finished -> Unit
+    private fun busy() = current.value?.phase?.let { it != TalkPhase.Finished } == true
+    private fun active(id: String) = current.value?.let { it.id == id && it.phase != TalkPhase.Finished } == true
+
+    private fun armTimeout(id: String, time: Long, reason: String) {
+        timer?.cancel()
+        timer = scope.launch {
+            delay(time)
+            if (active(id)) finish(reason)
         }
     }
 
-    private fun finish(detail: String, response: String?, keepResult: Boolean = true) {
-        val call = current.value ?: return
-        AppLog.record(context, "Talk: $detail")
-        scope.launch { completedCall(call.copy(detail = detail)) }
-        task?.cancel()
-        timeout?.cancel()
+    private suspend fun guarded(id: String, action: suspend () -> Unit) {
+        try {
+            action()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            AppLog.record(context, "Talk: Chatmail call failed", failure)
+            if (active(id)) finish(failure.message ?: "Couldn’t connect")
+        } catch (_: LinkageError) {
+            if (active(id)) finish("Call media is unavailable on this device")
+        }
+    }
+
+    private fun finish(detail: String, sendEnd: Boolean = true) {
+        val call = current.value?.takeIf { it.phase != TalkPhase.Finished } ?: return
+        val message = messageId
+        messageId = 0
+        chatId = 0
+        incomingOffer = ""
+        incomingExpiresAt = 0L
+        deferredEvent = null
+        current.value = call.copy(phase = TalkPhase.Finished, detail = detail, camera = false,
+            localVideo = null, remoteVideo = null, remoteCamera = false)
+        timer?.cancel()
+        videoStats?.cancel()
+        videoStats = null
         silence()
-        TalkCallService.stop(context)
-        val audio = media
-        media = null
-        runCatching { audio?.close() }
-        offer = ""
-        awaitingAnswer = false
         clearAlert(call.id)
-        recentlyEnded[call.contact to call.id] = System.currentTimeMillis() + TALK_RING_MS
-        current.value = if (keepResult) call.copy(phase = TalkPhase.Finished, speaker = false, detail = detail) else null
-        if (call.phase == TalkPhase.Incoming && detail == "Missed call") scope.launch { missedCall(call) }
-        if (response != null) scope.launch {
-            try {
-                send(call, response, "", System.currentTimeMillis() + TALK_RING_MS)
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                // The remote invitation expires even when signaling is unavailable.
+        clearIncomingRoute(call.id)
+        runCatching { media?.dispose() }
+        runCatching { client?.dispose() }
+        media = null
+        client = null
+        previousMode?.let {
+            audio.clearCommunicationDevice()
+            previousDevice?.let { device ->
+                audio.availableCommunicationDevices.firstOrNull { current -> current.id == device.id }
+                    ?.let(audio::setCommunicationDevice)
             }
+            audio.mode = it
+            audio.abandonAudioFocusRequest(focus)
         }
-    }
-
-    internal fun inviteSent(id: String) {
-        scope.launch(Dispatchers.Main.immediate) {
-            if (current.value?.let { it.id == id && it.setupStep < TalkSetupStep.WaitingForAnswer } == true) {
-                AppLog.record(context, "Talk: invite delivered")
-            }
-            advanceSetup(id, TalkSetupStep.WaitingForAnswer)
+        previousMode = null
+        previousDevice = null
+        TalkCallService.stop(context)
+        scope.launch {
+            if (sendEnd && message > 9) runCatching { terminate(message) }
+            completed(call.copy(detail = detail))
         }
-    }
-
-    private fun advanceSetup(id: String, step: TalkSetupStep) {
-        val latest = current.value ?: return
-        if (latest.id == id && latest.phase == TalkPhase.Connecting && step > latest.setupStep) {
-            current.value = latest.copy(setupStep = step)
-        }
-    }
-
-    private fun isCurrent(call: TalkCall) = current.value?.let { it.id == call.id && it.phase != TalkPhase.Finished } == true
-
-    private suspend fun send(call: TalkCall, action: String, sdp: String, expires: Long) {
-        signal(call.contact, TalkSignal(call.id, action, expires, sdp))
-        AppLog.record(context, "Talk: $action queued")
     }
 }

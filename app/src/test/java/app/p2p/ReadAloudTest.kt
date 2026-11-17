@@ -15,6 +15,14 @@ class ReadAloudTest {
     }
 
     @Test
+    fun normalizationKeepsOffsetsForCarriageReturnAndCrLfMessages() {
+        val source = "GOOD MORNING\r\nSEE YOU\rSOON"
+        val prepared = SpeechReading.prepare(source)
+        assertEquals("good morning\r\nsee you\rsoon", prepared.text)
+        assertEquals(source.indexOf("SOON"), prepared.original(prepared.text.indexOf("soon")))
+    }
+
+    @Test
     fun keepsShortMessagesAndLimitsSavedSpeed() {
         assertEquals(listOf("See you soon."), speechChunks("See you soon.").toList())
         assertEquals(1f, readingSpeed(Float.NaN))

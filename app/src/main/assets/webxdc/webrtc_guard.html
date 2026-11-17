@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'">
+<script>
+  // Retain the closed connections so the Chromium renderer keeps the allocation slots.
+  const reserved = [];
+  (async () => {
+    try {
+      const certificate = await RTCPeerConnection.generateCertificate({ name: "ECDSA", namedCurve: "P-256" });
+      const options = { certificates: [certificate] };
+      while (reserved.length < 500) {
+        const connection = new RTCPeerConnection(options);
+        connection.close();
+        reserved.push(connection);
+        if (reserved.length % 25 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      try {
+        const extra = new RTCPeerConnection(options);
+        extra.close();
+        RelayGuard.complete(false);
+      } catch (_) {
+        RelayGuard.complete(true);
+      }
+    } catch (_) {
+      RelayGuard.complete(false);
+    }
+  })();
+</script>

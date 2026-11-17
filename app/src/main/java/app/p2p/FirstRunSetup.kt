@@ -31,8 +31,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import kotlinx.coroutines.Job
 
-internal fun setupPreferences(context: Context) =
-    context.getSharedPreferences("first-run-setup", Context.MODE_PRIVATE)
+internal fun setupPreferences(context: Context, profileId: String = PRIMARY_PROFILE) =
+    ProfileStorage(context, profileId).preferences("first-run-setup")
 
 private data class PermissionStep(val permission: String, val title: String, val detail: String, val action: String)
 
@@ -42,6 +42,10 @@ internal fun FirstRunSetup(
     name: String,
     saveName: (String, () -> Unit) -> Job,
     back: (() -> Unit)? = null,
+    restoreBackup: (() -> Unit)? = null,
+    restoringBackup: Boolean = false,
+    receiveProfile: (() -> Unit)? = null,
+    switchProfile: (() -> Unit)? = null,
     finish: () -> Unit
 ) {
     val context = LocalContext.current
@@ -69,7 +73,8 @@ internal fun FirstRunSetup(
     var editing by rememberSaveable { mutableStateOf(name.isBlank()) }
     var draft by rememberSaveable { mutableStateOf(name) }
     var saving by remember { mutableStateOf<Job?>(null) }
-    val busy = saving != null
+    val busy = saving != null || restoringBackup
+    LaunchedEffect(name) { if (name.isNotBlank() && draft.isBlank()) editing = false }
     var background by remember { mutableStateOf(BackgroundMessages.enabled(context)) }
     var batteryExempt by remember { mutableStateOf(BackgroundMessages.batteryExempt(context)) }
     var backgroundError by rememberSaveable { mutableStateOf(false) }
@@ -119,7 +124,9 @@ internal fun FirstRunSetup(
     val completed = (if (name.isNotBlank()) 1 else 0) + permissions.size - pending.size + (if (liveDelivery) 1 else 0)
     if (back != null) BackHandler(onBack = back)
     Scaffold(topBar = {
-        TopAppBar(title = { Text("Setup") }, navigationIcon = {
+        TopAppBar(title = { Text("Setup") }, actions = {
+            if (switchProfile != null) P2pTextButton(onClick = switchProfile) { Text("Switch profile") }
+        }, navigationIcon = {
             if (back != null) IconButton(onClick = back) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
             }
@@ -139,6 +146,13 @@ internal fun FirstRunSetup(
                         Button(onClick = { saving = saveName(draft) { editing = false } },
                             enabled = !busy && draft.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
                             Text(if (name.isBlank()) "Continue" else "Save display name")
+                        }
+                        if (name.isBlank() && restoreBackup != null) {
+                            P2pTextButton(onClick = restoreBackup, enabled = !busy) { Text("Restore Chatmail backup") }
+                            receiveProfile?.let { action ->
+                                P2pTextButton(onClick = action, enabled = !busy) { Text("Add as second device") }
+                            }
+                            if (restoringBackup) LinearProgressIndicator(Modifier.fillMaxWidth())
                         }
                     } else {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

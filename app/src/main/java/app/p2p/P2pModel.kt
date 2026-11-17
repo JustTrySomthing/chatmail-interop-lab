@@ -9,10 +9,13 @@ import androidx.room.withTransaction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.SharingStarted
@@ -26,18 +29,19 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.io.File
 import java.io.RandomAccessFile
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal const val PORT = 41736
-private const val INVITE_WINDOW = 3_600_000L
-
-internal data class InviteCreationState(val busy: Boolean = false, val invite: OutgoingInvite? = null, val error: String? = null)
+private const val RETIRED_TALK_PACKET = "talkCall"
 
 internal data class InviteImportState(
-    val busy: Boolean = false, val message: String? = null, val failed: Boolean = false, val peer: String? = null
+    val busy: Boolean = false, val message: String? = null, val failed: Boolean = false, val peer: String? = null,
+    val joinedChannel: Int? = null, val joinedChat: Int? = null, val joinedGroup: Boolean = false
 )
 internal const val INVITE_CONNECTING = "Waiting to reach the other device"
 internal const val INVITE_APPROVAL = "Waiting for their approval"
@@ -104,9 +108,15 @@ private val notificationTypes = setOf("message", "messageReaction", "offer", "fr
 internal data class SheetSubmission(val sheet: String, val recipient: String? = null, val finished: Boolean = false,
     val error: String? = null)
 
-class P2pModel(application: Application) : AndroidViewModel(application) {
+class P2pModel internal constructor(application: Application, internal val profileId: String = PRIMARY_PROFILE,
+    private val backgroundOnly: Boolean = false,
+    private val profileCallEvent: (String, ChatmailCallEvent, ChatmailCallContact?) -> Unit = { _, _, _ -> }
+) : AndroidViewModel(application) {
     private val context = application
-    private val database = LocalStore.open(application)
+    internal val storage = ProfileStorage(application, profileId)
+    @Volatile internal var retiring = false
+        private set
+    private val database = LocalStore.open(application, profileId)
     private val records = database.records()
     private val devices = DeviceDirectory(records)
     @Volatile private var credentials: DeviceAccount? = null
@@ -124,7 +134,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private var pendingBackupPassword: CharArray? = null
     private val backupWorking = MutableStateFlow(false)
     internal val backupBusy = backupWorking.asStateFlow()
-    private val backupStaging get() = File(context.noBackupFilesDir, "restore-attachments")
+    private val backupStaging get() = storage.noBackup("restore-attachments")
     private val rendezvousLookups = mutableMapOf<String, Pair<String, String>>()
     private val observedRoutes = linkedMapOf<String, Long>()
     private val punches = linkedMapOf<String, Punch>()
@@ -139,57 +149,117 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private val pending = mutableMapOf<String, Attempt>()
     private val downloadLock = Mutex()
     private val outboxLock = Mutex()
-    private val alerts = LocalAlerts(application)
+    private val alerts = LocalAlerts(application, profileId)
+    private val incomingCallRoutes = ProfileCallInbox(application)
     private val notificationsMuted = MutableStateFlow(AppAlertMute.isMuted(context))
     internal val appNotificationsMuted = notificationsMuted.asStateFlow()
-    internal val talk = TalkCalls(application, viewModelScope, ::sendTalkSignal, ::talkIce,
+    internal val talk = TalkCalls(application, viewModelScope, ::resolveTalkContact, ::talkIce,
+        { chat, offer -> withChatmail { it.placeCall(chat, offer) } },
+        { id, answer -> withChatmail { it.acceptCall(id, answer) } },
+        { id -> withChatmail { it.endCall(id) } },
         ::announceTalkCall, { call -> alerts.clear(AlertArea.TALK, call) },
-        { call -> announceMissedCall(call.contact) },
-        { call -> save("call:" + call.id, "call-history", obj("contact" to call.contact, "outgoing" to call.outgoing,
-            "detail" to call.detail, "unread" to (!call.outgoing && call.connectedAt == 0L))) })
+        { call -> incomingCallRoutes.withdraw(profileId, token = call) },
+        { call -> save("call:" + call.id, "call-history", obj("contact" to call.contact,
+            "name" to call.displayName, "outgoing" to call.outgoing, "detail" to call.detail,
+            "unread" to (!call.outgoing && call.connectedAt == 0L))) })
 
-    private suspend fun announceMissedCall(contact: String) {
-        val record = records.get(contact)?.takeIf { it.kind == "contact" }?.data() ?: return
-        if (record.optBoolean("blocked")) return
-        val name = record.optString("name").ifBlank { "P2P contact" }
-        alerts.show(AlertArea.MISSED_CALLS, contact, name, "Missed Talk call")
+    private suspend fun resolveTalkContact(contact: String): ChatmailCallContact {
+        val chat = if (contact.startsWith("chatmail:")) contact.substringAfter(':').toIntOrNull()
+        else records.get(contact)?.takeIf { it.kind == "contact" && !it.data().optBoolean("blocked") }
+            ?.data()?.let { it.optInt("nativeChat").takeIf { id -> id > 9 } ?: it.optInt("chatmailChat") }
+        require(chat != null && chat > 9) { "Exchange a Chatmail invite before calling this contact." }
+        return withChatmail { core ->
+            check(!isBlockedChatmailContact(chat)) { "Unblock this contact before calling." }
+            requireNotNull(core.callContact(chat)) {
+                "An accepted, encrypted contact is required to call."
+            }
+        }
     }
 
-    private suspend fun announceTalkCall(contact: String, call: String, expiresAt: Long) {
-        val name = records.get(contact)?.data()?.optString("name").orEmpty().ifBlank { "P2P contact" }
+    private suspend fun isBlockedChatmailContact(chat: Int): Boolean =
+        records.get(nativeThreadKey(chat))?.data()?.optBoolean("blocked") == true ||
+            records.all("contact").any {
+                val data = it.data()
+                data.optBoolean("blocked") &&
+                    (data.optInt("nativeChat") == chat || data.optInt("chatmailChat") == chat)
+            }
+
+    private val webxdcEventFlow = kotlinx.coroutines.flow.MutableSharedFlow<JSONObject>(extraBufferCapacity = 64,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
+    internal val webxdcEvents = webxdcEventFlow.asSharedFlow()
+
+    private val incomingCoreEvents = Channel<Pair<Chatmail, ChatmailCallEvent>>(Channel.UNLIMITED)
+
+    private fun openChatmail(directory: File): Chatmail {
+        directory.parentFile?.mkdirs()
+        return Chatmail(directory).also(::listenForChatmailEvents)
+    }
+
+    private fun listenForChatmailEvents(core: Chatmail) {
+        core.listenForEvents(onMessagesChanged = { changed ->
+            nativeChangedMessages.addAll(changed)
+            nextNativeSync = 0L
+        }, onWebxdc = { event ->
+            if (chatmail === core) webxdcEventFlow.tryEmit(event)
+        }) { event -> incomingCoreEvents.trySend(core to event) }
+    }
+
+    private suspend fun handleChatmailCall(core: Chatmail, event: ChatmailCallEvent) {
+        val caller = withContext(Dispatchers.IO) {
+            chatmailLock.withLock {
+                if (retiring || chatmail !== core) return@withLock null
+                if (event.kind == "IncomingCall" && !isBlockedChatmailContact(event.chatId)) {
+                    core.callContact(event.chatId)?.takeIf { core.isRingingCall(event.id) }
+                } else null
+            }
+        }
+        if (retiring || chatmail !== core) return
+        profileCallEvent(profileId, event, caller)
+        if (!backgroundOnly) talk.event(event, caller)
+    }
+
+    internal suspend fun resumeProfileCall(call: ProfileIncomingCall): String? = withActiveSync {
+        check(call.profile == profileId)
+        val incoming = withChatmail { core ->
+            val event = core.ringingOffer(call)
+            val caller = if (event != null && !isBlockedChatmailContact(call.chat)) core.callContact(call.chat) else null
+            if (event != null && caller != null) event to caller else null
+        } ?: return@withActiveSync null
+        val pending = talk.incomingIdFor(call.message)
+        if (pending != null) return@withActiveSync pending
+        if (talk.state.value?.phase?.let { it != TalkPhase.Finished } == true) return@withActiveSync null
+        talk.event(incoming.first, incoming.second, call.token, call.expiresAt)
+        talk.incomingIdFor(call.message)
+    }
+
+    internal suspend fun isProfileCallRinging(call: ProfileIncomingCall): Boolean = withActiveSync {
+        check(call.profile == profileId)
+        withChatmail { core -> core.isRingingCall(call.message) }
+    }
+
+    internal suspend fun declineProfileCall(call: ProfileIncomingCall) = withActiveSync {
+        check(call.profile == profileId)
+        withChatmail { core ->
+            if (core.isRingingCall(call.message)) core.endCall(call.message)
+        }
+    }
+
+    private fun announceTalkCall(call: String, expiresAt: Long) {
+        val name = talk.state.value?.displayName.orEmpty().ifBlank { "Chatmail contact" }
         if (talk.state.value?.let { it.id == call && it.phase == TalkPhase.Incoming } != true ||
             System.currentTimeMillis() >= expiresAt) return
         if (visible && !QuietHours.read(context).active()) {
             AppAlertMute.deliver(context, talk::ring)
         } else if (!visible) {
-            alerts.show(AlertArea.TALK, call, name, "Incoming Talk call", expiresAt)
-        }
-    }
-
-    private suspend fun sendTalkSignal(contact: String, signal: TalkSignal) {
-        outboxLock.withLock {
-            database.withTransaction {
-                val row = records.get(contact)?.takeIf { it.kind == "contact" && !it.data().optBoolean("blocked") }
-                check(row != null) { "Contact is unavailable" }
-                if (signal.action == "end" || signal.action == "decline") {
-                    records.all("outbox").filter {
-                        val data = it.data()
-                        val payload = data.optJSONObject("payload")
-                        data.optString("to") == contact && payload?.optString("type") == TALK_SIGNAL &&
-                            payload.optString("call") == signal.call && payload.optString("action") in setOf("offer", "answer")
-                    }.forEach { retireSend(it) }
-                }
-                queue(contact, signal.packet())
+            val route = talk.incomingRoute(profileId)?.takeIf { it.token == call } ?: return
+            if (incomingCallRoutes.save(route)) {
+                alerts.show(AlertArea.TALK, call, name, "Incoming Talk call", expiresAt)
             }
-        }
-        if (!visible && signal.action in setOf("end", "decline", "busy")) {
-            BackgroundMessages.start(context, catchUp = true)
         }
     }
 
     private suspend fun talkIce(): String = withContext(Dispatchers.IO) {
-        // The configured Chatmail profile supplies its ICE servers. Nearby contacts can
-        // still negotiate a local connection if the relay has no ICE configuration.
+        // Existing direct calls can still negotiate locally when the relay supplies no ICE servers.
         val name = requireChatmailName()
         chatmailLock.withLock {
             try {
@@ -211,22 +281,22 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     private val visible: Boolean get() = syncDemand.value.foreground
     @Volatile private var visibleThread: String? = null
     private val retryAfter = mutableMapOf<String, Long>()
-    private val outgoing = File(context.filesDir, "sent").apply { mkdirs() }
-    private val incoming = File(context.filesDir, "received").apply { mkdirs() }
-    private val partial = File(context.filesDir, "partial").apply { mkdirs() }
+    private val outgoing = storage.files("sent").apply { mkdirs() }
+    private val incoming = storage.files("received").apply { mkdirs() }
+    private val partial = storage.files("partial").apply { mkdirs() }
 
     private val chatmailLock = Mutex()
-    private var chatmail: Chatmail? = null
+    @Volatile private var chatmail: Chatmail? = null
     private var chatmailNetwork: Network? = null
     @Volatile private var selectedNetwork: EngineRoute? = null
+    @Volatile private var nextNativeSync = 0L
+    private val nativeChangedMessages = ConcurrentHashMap.newKeySet<Int>()
     private var nextChatmailPoll = 0L
     private var nextChatmailConnect = 0L
     private var chatmailCursor: Int? = null
     private val chatmailState = MutableStateFlow("Set your display name to start Chatmail")
     internal val chatmailStatus = chatmailState.asStateFlow()
 
-    private val inviteCreationState = MutableStateFlow(InviteCreationState())
-    internal val inviteCreation = inviteCreationState.asStateFlow()
     private val inviteImportState = MutableStateFlow(InviteImportState())
     internal val inviteImport = inviteImportState.asStateFlow()
     private val listenerState = MutableStateFlow<Set<String>>(emptySet())
@@ -237,6 +307,17 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var engineRoute: EngineRoute? = null
 
     init {
+        viewModelScope.launch {
+            for ((core, event) in incomingCoreEvents) {
+                try {
+                    handleChatmailCall(core, event)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    AppLog.record(context, "Chatmail call event couldn’t be handled.", failure)
+                }
+            }
+        }
         work {
             val networkChanges = Channel<Unit>(Channel.CONFLATED)
             val networkObserver = runCatching {
@@ -334,7 +415,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun initializeAccount(): Boolean = recoveryLock.withLock {
         try {
-            val vault = IdentityVault(context)
+            val vault = IdentityVault(context, profileId)
             val pending = vault.pendingRecovery()
             if (pending != null) {
                 credentials = null
@@ -388,15 +469,253 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         records.get("profile")?.data()?.optString("name")?.takeIf(String::isNotBlank)
             ?: error("Set your display name in Settings to use Chatmail.")
 
-    private fun connectedChatmail(name: String): Chatmail {
+    @Volatile private var initialChatmailInvite: String? = null
+
+    internal fun hintInitialChatmailInvite(invite: String) {
+        initialChatmailInvite = invite
+    }
+
+    private suspend fun connectedChatmail(name: String, setupQr: String? = null): Chatmail {
         val current = selectedNetwork?.network
             ?: error("Connect to the internet to set up Chatmail.")
-        val service = chatmail ?: Chatmail(File(context.noBackupFilesDir, "chatmail")).also { chatmail = it }
+        val service = chatmail ?: openChatmail(storage.noBackup("chatmail")).also { chatmail = it }
         if (chatmailNetwork != current) service.disconnect()
-        service.connect(name)
+        val profile = records.get("profile")?.data()
+        if (profile != null && service.profileNeedsSync(profile.optLong("revision"))) {
+            val photo = profile.optString("photo").takeIf(String::isNotBlank)?.let(::checkedPhoto)
+            val avatar = photo?.let { File.createTempFile("chatmail-avatar-", ".jpg", context.cacheDir) }
+            try {
+                if (photo != null) avatar?.writeBytes(photo)
+                service.applyProfile(profile.optLong("revision"), profile.takeIf { it.has("bio") }?.optString("bio"),
+                    avatar, profile.has("photo") && (avatar != null || profile.optString("photo").isEmpty()))
+            } finally {
+                avatar?.delete()
+            }
+        }
+        val onboardingHint = initialChatmailInvite
+        val candidate = setupQr ?: onboardingHint?.takeIf { raw ->
+            runCatching { service.inviteKind(raw) in setOf("askVerifyContact", "askJoinBroadcast") }.getOrDefault(false)
+        }
+        service.connect(name, candidate)
+        if (onboardingHint == initialChatmailInvite) initialChatmailInvite = null
         chatmailNetwork = current
         return service
     }
+
+    internal suspend fun createSecureJoinInvite(): String =
+        withChatmail(requireNetwork = true) { it.secureJoinInvite() }
+
+    private suspend fun <T> withChatmail(
+        requireNetwork: Boolean = false, setupQr: String? = null, action: suspend (Chatmail) -> T
+    ): T = withContext(Dispatchers.IO) {
+        check(!retiring) { "Relay Lab is switching profiles." }
+        awaitInviteAccount()
+        if (requireNetwork) awaitInviteNetwork()
+        val name = requireChatmailName()
+        chatmailLock.withLock {
+            check(!retiring) { "Relay Lab is switching profiles." }
+            check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
+            val directory = storage.noBackup("chatmail")
+            val service = if (selectedNetwork != null || requireNetwork) connectedChatmail(name, setupQr)
+            else chatmail ?: directory.takeIf(File::isDirectory)?.let { openChatmail(it).also { opened -> chatmail = opened } }
+            check(service != null && service.isConfigured()) { "Connect to the internet to set up Chatmail." }
+            action(service)
+        }
+    }
+
+    private suspend fun signedChatmailIds(): Set<Int> =
+        listOf("contact", "invite-in", "invite-pending").flatMap { records.all(it) }
+            .mapTo(mutableSetOf()) { it.data().optInt("chatmailChat") }
+
+    internal suspend fun nativeContacts(): List<ChatmailContact> = withChatmail { core ->
+        val hiddenIds = signedChatmailIds().filter { it > 9 }
+            .mapNotNullTo(mutableSetOf()) { runCatching { core.chatContactId(it) }.getOrNull() }
+        records.all("contact").forEach { record ->
+            val data = record.data()
+            if (data.optBoolean("blocked")) data.optInt("nativeContact").takeIf { it > 9 }?.let(hiddenIds::add)
+        }
+        core.contacts().filterNot { it.id in hiddenIds }
+    }
+
+    internal suspend fun openNativeContact(contact: Int): Int = withChatmail { core ->
+        core.openContact(contact).also { id ->
+            core.nativeThread(id)?.let { cacheNativeThread(it) }
+            nextNativeSync = 0L
+        }
+    }
+
+    internal suspend fun nativeGroupContacts(): List<Record> = withChatmail { core ->
+        core.contacts().map { contact ->
+            Record(nativePeerKey(contact.id), "contact", obj("name" to contact.name).toString(), 0L)
+        }
+    }
+
+    internal fun acceptNativeThread(thread: String, chat: Int) = work {
+        withChatmail { core ->
+            core.nativeAccept(chat)
+            core.nativeThread(chat)?.let { cacheNativeThread(it, thread) }
+            nextNativeSync = 0L
+        }
+    }
+
+    internal suspend fun chatmailDescription(id: Int) = withChatmail { it.chatDescription(id) }
+
+    internal fun saveNativeGroup(
+        chat: Int?, name: String, description: String?, members: Set<String>, cloneFrom: Int? = null
+    ) = submitSheet(SheetSubmission(when {
+        cloneFrom != null -> "group-clone"
+        chat != null -> "group-edit"
+        else -> "group-new"
+    })) {
+            val title = name.trim()
+            require(title.isNotBlank() && title.length <= 80) { "Enter a group name of up to 80 characters." }
+            val details = description?.let(::checkedChatDescription)
+            val ids = members.filter { it.startsWith("chatmail-peer:") }
+                .mapNotNull { it.substringAfter(':').toIntOrNull()?.takeIf { id -> id > 9 } }.toSet()
+            require(chat != null || ids.isNotEmpty()) { "Choose at least one contact." }
+            withChatmail { core ->
+                val id = when {
+                    cloneFrom != null -> {
+                        val original = requireNotNull(core.nativeThread(cloneFrom)?.takeIf { it.group && !it.request }) {
+                            "This group is unavailable."
+                        }
+                        val allowed = core.contacts().mapTo(mutableSetOf(), ChatmailContact::id)
+                        require(ids.all { it in allowed }) { "Choose contacts available on this profile." }
+                        val photo = original.imagePath?.let(storage::chatmailFile)
+                        core.nativeCreateGroup(title, details ?: core.chatDescription(original.id), ids, photo)
+                    }
+                    chat == null -> core.nativeCreateGroup(title, details.orEmpty(), ids)
+                    else -> chat.also { core.nativeUpdateGroup(it, title, details, ids) }
+                }
+                core.nativeThread(id)?.let { cacheNativeThread(it) }
+                nextNativeSync = 0L
+                nativeThreadKey(id)
+            }
+        }
+
+    internal suspend fun updateNativeGroupImage(thread: String, uri: Uri?) = withChatmail { core ->
+        val chat = writableNativeChat(core, thread)
+        check(chat.group) { "This conversation is not a group." }
+        withPreparedChatImage(uri) { file -> core.setChatImage(chat.id, file) }
+        core.nativeThread(chat.id)?.let { cacheNativeThread(it, thread) }
+        nextNativeSync = 0L
+    }
+
+    private fun withPreparedChatImage(uri: Uri?, update: (File?) -> Unit) {
+        val file = uri?.let {
+            val photo = requireNotNull(checkedPhoto(prepareProfilePhoto(context, it)))
+            File.createTempFile("chat-photo-", ".jpg", context.cacheDir).also { file ->
+                try { file.writeBytes(photo) }
+                catch (failure: Exception) { file.delete(); throw failure }
+            }
+        }
+        try {
+            update(file)
+        } finally {
+            file?.delete()
+        }
+    }
+
+    internal suspend fun nativeGroupInvite(chat: Int): String = withChatmail { it.nativeGroupInvite(chat) }
+
+    internal fun addChatmailRelay(code: String, saved: () -> Unit) = work {
+        withChatmail { it.addRelay(code.trim()) }
+        withContext(Dispatchers.Main) { saved() }
+    }
+
+    internal suspend fun chatmailChannels() = withChatmail(action = Chatmail::channels)
+
+    internal suspend fun chatmailChannelHistory(id: Int, limit: Int) = withChatmail { core ->
+        val channel = requireNotNull(core.channel(id)) { "Waiting for the channel owner to process your join request." }
+        core.noticeChannel(channel)
+        val history = core.channelPosts(channel, limit)
+        history.copy(posts = history.posts.map(::channelPostMedia))
+    }
+
+    internal suspend fun chatmailChannelFeed(channels: List<ChatmailChannel>, limit: Int) =
+        withChatmail { core ->
+            channels.asSequence().filterNot { it.owned }.flatMap { core.channelPosts(it, limit).posts }
+                .sortedWith(compareByDescending<ChannelPost> { it.time }.thenByDescending { it.id })
+                .take(limit).map(::channelPostMedia).toList()
+        }
+
+    private fun channelPostMedia(post: ChannelPost): ChannelPost =
+        post.copy(localFile = post.attachment?.let(::availableChatmailFile))
+
+    internal suspend fun requestChannelAttachment(id: Int) = withChatmail { core ->
+        val post = channelAttachment(core, id)
+        val attachment = requireNotNull(post.attachment) { "This post no longer has an attachment." }
+        if (post.localFile != null || attachment.downloadState == "InProgress") return@withChatmail
+        require(attachment.size <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment exceeds the 1 GiB limit." }
+        check(attachment.canRequestDownload) { "This attachment is unavailable." }
+        core.download(id)
+    }
+
+    private fun channelAttachment(core: Chatmail, id: Int): ChannelPost =
+        channelPostMedia(requireNotNull(core.channelPost(id)) { "This post is unavailable." })
+
+    private fun availableChatmailFile(attachment: ChatmailAttachment): File? =
+        attachment.path?.let(storage::chatmailFile)?.takeIf { it.length() in 0..NATIVE_ATTACHMENT_FILE_LIMIT }
+
+    internal suspend fun createChatmailChannel(name: String) =
+        withChatmail { it.createChannel(checkedChannelName(name)) }
+
+    internal suspend fun updateChatmailChannel(id: Int, name: String, description: String) =
+        withChatmail {
+            it.updateChannel(id, checkedChannelName(name), checkedChatDescription(description))
+        }
+
+    private fun checkedChatDescription(description: String): String = description.trim().also {
+        require(it.length <= INTEROP_TEXT_LIMIT) { "The description is too long." }
+    }
+
+    internal suspend fun setChatmailChannelImage(id: Int, uri: Uri?) = withChatmail { core ->
+        withPreparedChatImage(uri) { file -> core.setChannelImage(id, file) }
+    }
+
+    internal suspend fun chatmailChannelImage(path: String): String = withContext(Dispatchers.IO) {
+        val file = storage.chatmailFile(path)?.takeIf { it.length() in 1..NATIVE_ATTACHMENT_FILE_LIMIT }
+        if (file != null) prepareProfilePhoto(context, Uri.fromFile(file)) else ""
+    }
+
+    internal suspend fun chatmailChannelViewCount(post: Int): Int = withChatmail { it.channelViewCount(post) }
+
+    internal suspend fun pinChatmailChannel(id: Int, pinned: Boolean) =
+        withChatmail { it.pinChannel(id, pinned) }
+
+    private fun checkedChannelName(name: String): String = name.trim().also {
+        require(it.isNotEmpty() && it.length <= 80) { "Enter a channel name of up to 80 characters." }
+    }
+
+    internal suspend fun chatmailChannelInvite(id: Int) = withChatmail { core ->
+        core.channelInvite(requireNotNull(core.channel(id)) { "Channel unavailable." })
+    }
+
+    internal suspend fun publishChatmailChannelPost(id: Int, text: String, attachments: List<AttachmentDraft>) =
+        withContext(Dispatchers.IO) {
+            require(text.isNotBlank() || attachments.isNotEmpty()) { "Add text or media before publishing." }
+            sendChatmailDraft(id, nativeThreadKey(id), text.trim(), null, attachments, channelPost = true)
+            deleteTemporaryDrafts(attachments)
+        }
+
+    private suspend fun importSecureJoinInvite(code: String, channelOnly: Boolean): InviteImportState =
+        withChatmail(requireNetwork = true, setupQr = code) { core ->
+            val kind = core.inviteKind(code)
+            val channel = kind == "askJoinBroadcast"
+            val group = kind == "askVerifyGroup"
+            require(channel || (!channelOnly && (kind == "askVerifyContact" || group))) {
+                if (channelOnly) "This isn’t a channel invite." else "This isn’t a contact, group, or channel invite."
+            }
+            val chat = core.joinChecked(code)
+            check(chat > 9) { "Chatmail couldn’t open this conversation." }
+            if (channel) InviteImportState(joinedChannel = chat)
+            else {
+                core.nativeThread(chat)?.let { cacheNativeThread(it) }
+                nextNativeSync = 0L
+                InviteImportState(message = "SecureJoin started. Keep both apps online while they verify the connection.",
+                    joinedChat = chat, joinedGroup = group)
+            }
+        }
 
     private suspend fun importChatmailInvite(text: String): InviteImportState {
         val bytes = chatmailInviteBytes(text)
@@ -421,7 +740,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val name = requireChatmailName()
         awaitInviteNetwork()
         return chatmailLock.withLock {
-            check(!recoveryQueued.get() && credentials != null) { "P2P is restoring your identity. Try again in a moment." }
+            check(!recoveryQueued.get() && credentials != null) { "Relay Lab is restoring your identity. Try again in a moment." }
             require(id != peer.value) { "This is your own invite. Use the invite from the other device." }
             require(expires > System.currentTimeMillis()) { "This invite expired. Ask for a fresh invite." }
             val contact = records.get(id)?.takeIf { it.kind == "contact" }?.data()
@@ -442,7 +761,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             require(grantDecision(known?.device.orEmpty(), known?.revision ?: 0L, grant.device, grant.revision) != GrantDecision.REJECT) {
                 "This invite is from a replaced device. Ask for a fresh invite."
             }
-            val chat = connectedChatmail(name).join(qr)
+            val chat = connectedChatmail(name).joinLegacyContact(qr)
             check(chat > 9) { "Chatmail couldn’t create this conversation." }
             check(devices.accept(grant)) { "This invite is from a replaced device. Ask for a fresh invite." }
             database.withTransaction {
@@ -493,7 +812,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
         chatmailState.value = if (service.connectivity() >= 3000) "Connected to Chatmail" else "Connecting to Chatmail"
         val cursor = chatmailCursor ?: (records.get("chatmail-cursor")?.data()?.optInt("id") ?: 0)
-        val queued = service.unread(cursor).take(64)
+        val queued = service.legacyInboxAfter(cursor).take(64)
         val messages = service.messages(queued)
         for (id in queued) {
             val message = messages.optJSONObject(id.toString())
@@ -523,6 +842,220 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
         cancelChatmailSends(service, now)
         dispatchChatmail(service, now)
+        try { updateNativeCatalog(service, now) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { AppLog.record(context, "Chatmail conversation sync failed", failure) }
+    }
+
+    private suspend fun updateNativeCatalog(core: Chatmail, now: Long) {
+        if (now < nextNativeSync) return
+        nextNativeSync = now + 8_000
+        val legacy = records.all("contact").mapNotNull { row ->
+            row.data().optInt("chatmailChat").takeIf { it > 9 }?.let { it to row.key }
+        }.toMap()
+        val pending = (records.all("invite-pending") + records.all("invite-in"))
+            .map { it.data().optInt("chatmailChat") }.toSet() - legacy.keys
+        val threads = core.nativeThreadIds().filterNot { it in pending }.mapNotNull(core::nativeThread)
+        database.withTransaction {
+            for (chat in threads) cacheNativeThread(chat, legacy[chat.id] ?: nativeThreadKey(chat.id))
+            for (contact in core.contacts()) {
+                val key = "peer-profile:" + nativePeerKey(contact.id)
+                cacheNativeRecord(key, "peer-profile", obj("name" to contact.name), 0L)
+            }
+        }
+        val chatsById = threads.associateBy(NativeThread::id)
+        val cached = records.threadItems().filter { it.data().optInt("nativeMessage") > 9 }
+            .groupBy { it.data().optString("thread") }
+        val recent = threads.flatMapTo(mutableSetOf<Int>()) { chat ->
+            val thread = legacy[chat.id] ?: nativeThreadKey(chat.id)
+            updateNativeHistory(core, chat, thread, 25, cached = cached[thread].orEmpty())
+        }
+        for (id in nativeChangedMessages.toList()) {
+            if (!nativeChangedMessages.remove(id) || id in recent) continue
+            val thread = records.get(nativeMessageKey(id))?.data()?.optString("thread") ?: continue
+            val chatId = records.get(thread)?.data()?.optInt("nativeChat") ?: continue
+            val chat = chatsById[chatId] ?: continue
+            updateNativeHistory(core, chat, thread, 25, messageId = id)
+        }
+    }
+
+    private suspend fun cacheNativeThread(chat: NativeThread, key: String = nativeThreadKey(chat.id)) {
+        val saved = records.get(key)
+        val data = saved?.data() ?: obj()
+        data.put("nativeChat", chat.id).put("contactRequest", chat.request).put("nativeCanSend", chat.canSend)
+        data.put("nativeSelfTalk", chat.selfTalk)
+        if (chat.group) {
+            val path = chat.imagePath
+            if (path == null) {
+                data.remove("nativePhotoPath")
+                data.remove("photo")
+            } else if (path != data.optString("nativePhotoPath")) {
+                try {
+                    val image = storage.chatmailFile(path)
+                    if (image != null && image.length() in 1..NATIVE_ATTACHMENT_FILE_LIMIT) {
+                        data.put("photo", prepareProfilePhoto(context, Uri.fromFile(image)))
+                        data.put("nativePhotoPath", path)
+                    }
+                } catch (failure: Exception) {
+                    AppLog.record(context, "Couldn’t load Chatmail group image", failure)
+                }
+            }
+        }
+        if (key == nativeThreadKey(chat.id)) {
+            data.put("name", chat.name)
+                .put("members", jsonArray(listOf(peer.value) + chat.members.map(::nativePeerKey)))
+                .put("owner", if (chat.canSend) peer.value else "")
+            chat.contactId?.let { data.put("nativeContact", it) }
+        }
+        cacheNativeRecord(key, if (chat.group) "group" else "contact", data, saved?.created ?: 0L)
+        if (chat.archived && records.get("folder:" + key) == null) save("folder:" + key, "folder", obj("name" to "Archive"))
+    }
+
+    private suspend fun cacheNativeRecord(key: String, kind: String, data: JSONObject, time: Long) {
+        val previous = records.get(key)
+        if (previous?.payload != data.toString() || previous?.kind != kind) save(key, kind, data, time)
+    }
+
+    internal fun loadOlderNativeMessages(thread: String) = work {
+        withChatmail { core ->
+            val data = records.get(thread)?.data() ?: return@withChatmail
+            val chat = core.nativeThread(data.optInt("nativeChat")) ?: return@withChatmail
+            val before = data.optInt("nativeHistoryFirst").takeIf { it > 9 } ?: return@withChatmail
+            val cached = records.threadItems().filter { it.data().optString("thread") == thread }
+            updateNativeHistory(core, chat, thread, 100, before, cached = cached)
+        }
+    }
+
+    private suspend fun updateNativeHistory(
+        core: Chatmail, chat: NativeThread, thread: String, limit: Int, before: Int? = null,
+        messageId: Int? = null, cached: List<Record> = emptyList(), resumeAttachment: Boolean = false
+    ): List<Int> {
+        val saved = records.get(thread)?.data()
+        val loaded = saved?.optInt("nativeHistoryFirst") ?: 0
+        val latest = saved?.optInt("nativeHistoryLast")?.takeIf { before == null && it > 9 }
+        val cachedIds = cached.mapTo(mutableSetOf()) { it.data().optInt("nativeMessage") }
+        val page = if (messageId == null) core.nativeHistory(chat.id, limit, before, latest, cachedIds)
+            else NativeHistory(listOfNotNull(core.nativeMessage(chat.id, messageId)), null, null, false)
+        val batch = page.messages
+        val missing = if (messageId == null) cached.removedChatmailMessages(thread, page.existingIds) else emptyList()
+        if (batch.isEmpty() && page.first == null && before == null && missing.isEmpty()) return emptyList()
+        val discardedFiles = mutableListOf<Record>()
+        var newMessage: NativeMessage? = null
+        var replyToSelf: NativeMessage? = null
+        val preferences = records.get("thread-pref:$thread")?.data()
+        val contact = records.get(thread)?.data()
+        val muted = preferences?.optBoolean("muted") == true || contact?.optBoolean("alertMuted") == true
+        val canNotify = preferences?.optBoolean("blocked") != true && contact?.optBoolean("blocked") != true
+        val checkForReplies = chat.group && canNotify && muted && batch.any {
+            it.from != 1 && it.state == 10 && it.quote != null
+        } && core.mentionsNotifyWhenMuted()
+        database.withTransaction {
+            if (messageId == null && (loaded <= 9 || latest == null)) change(thread) {
+                put("nativeHasOlder", page.hasOlder)
+                if (page.first != null) put("nativeHistoryFirst", page.first)
+                else if (!page.hasOlder) remove("nativeHistoryFirst")
+            }
+            if (before == null && latest != page.last && page.last != null) change(thread) {
+                put("nativeHistoryLast", page.last)
+            }
+            val knownReactions = records.all("message-reaction").filter { it.data().optString("thread") == thread }
+                .groupBy { it.data().optString("message") }
+            for (expired in missing) {
+                val current = records.get(expired.key) ?: continue
+                if (current.data().optString("thread") != thread) continue
+                records.remove(expired.key)
+                knownReactions[expired.key].orEmpty().forEach { records.remove(it.key) }
+                if (current.kind.startsWith("file-")) discardedFiles.add(current)
+            }
+            for (message in batch) {
+                val id = nativeMessageKey(message.id)
+                if (records.get("discarded-message:" + id) != null) continue
+                val old = records.get(id)?.data()
+                val outgoingMessage = message.from == 1
+                val peerKey = nativePeerKey(message.from)
+                val author = when {
+                    outgoingMessage -> peer.value
+                    !chat.group && isPeer(thread) -> thread
+                    else -> peerKey
+                }
+                if (!outgoingMessage && author == peerKey && message.senderName.isNotBlank() &&
+                    records.get("peer-profile:$author") == null) {
+                    save("peer-profile:$author", "peer-profile", obj("name" to message.senderName), 0L)
+                }
+                val attachment = message.attachment
+                if (before == null && old == null && message.state == 10) {
+                    newMessage = message
+                    if (checkForReplies && message.from != 1 && message.quote != null) {
+                        val quoted = records.get(nativeMessageKey(message.quote))?.data()
+                        val fromSelf = quoted?.optString("author")?.let { it == peerKey }
+                            ?: runCatching { core.message(message.quote).optInt("fromId") == 1 }.getOrDefault(false)
+                        if (fromSelf) replyToSelf = message
+                    }
+                }
+                val data = old ?: obj()
+                data.put("nativeMessage", message.id).put("thread", thread).put("author", author)
+                    .put("text", message.text).put("caption", message.text)
+                    .put("nativeEdited", message.edited).put("nativePinned", message.pinned)
+                    .put("nativeLocation", message.hasLocation).put("nativeForwarded", message.forwarded)
+                    .put("group", if (chat.group) thread else "")
+                    .put("unread", !data.optBoolean("locallyDeleted") &&
+                        (message.state == 10 || data.optBoolean("locallyUnread")))
+                    .put("replyTo", message.quote?.let(::nativeMessageKey).orEmpty())
+                    .put("quoteText", message.quoteText).put("quoteAuthor", message.quoteAuthor)
+                message.webxdcParent?.let { data.put("webxdcParent", it).put("webxdcHref", message.webxdcHref.orEmpty()) }
+                if (outgoingMessage) {
+                    data.put("targets", 1).put("chatmailSubmitted", message.state == 26)
+                        .put("delivered", if (message.state == 28) 1 else 0)
+                        .put("failed", if (message.state == 24) 1 else 0)
+                }
+                val kind = if (attachment == null) "message" else {
+                    val folder = if (outgoingMessage) outgoing else incoming
+                    val paused = !outgoingMessage && data.optString("state") == "Paused" && !resumeAttachment
+                    val media = attachment.cacheForMessage(File(folder, id), paused) {
+                        availableChatmailFile(attachment)
+                    }
+                    media.keys().forEach { key -> data.put(key, media.get(key)) }
+                    if (outgoingMessage) "file-sent" else "file-received"
+                }
+                cacheNativeRecord(id, kind, data, message.time)
+                val current = mutableSetOf<String>()
+                for ((contact, emojis) in message.reactions) {
+                    val sender = if (contact == 1) peer.value else nativePeerKey(contact)
+                    emojis.forEachIndexed { index, emoji ->
+                        val key = "reaction:$id:$sender:$index"
+                        current.add(key)
+                        cacheNativeRecord(key, "message-reaction",
+                            obj("nativeMessage" to message.id, "thread" to thread, "message" to id,
+                                "id" to emoji, "author" to sender, "text" to emoji), message.time)
+                    }
+                }
+                knownReactions[id].orEmpty().filter { it.key !in current }.forEach { records.remove(it.key) }
+            }
+            if (newMessage != null) {
+                val key = "folder:$thread"
+                val location = records.get(key)?.data()?.optString("name")
+                if (!chat.archived && (location == "Cleared" || location == "Archive" ||
+                        location == "Trash" && !groupBlocked(thread) &&
+                        records.get(thread)?.data()?.optBoolean("blocked") != true)) records.remove(key)
+            }
+        }
+        for (file in discardedFiles) {
+            if (!isId(file.key)) continue
+            val directory = if (file.kind == "file-sent") outgoing else incoming
+            File(directory, file.key).delete()
+            alerts.clear(AlertArea.FILES, file.key)
+        }
+        val alertMessage = if (muted) replyToSelf else newMessage
+        if (alertMessage != null && canNotify) {
+            val area = if (chat.group) AlertArea.GROUPS else AlertArea.CHATS
+            if (visible && visibleThread == thread) alerts.playInChatSound(area)
+            else {
+                val preview = alertMessage.text.take(240).ifBlank { alertMessage.attachment?.name ?: "New message" }
+                val sender = alertMessage.senderName.takeIf { chat.group && it.isNotBlank() }
+                alerts.show(area, thread, chat.name, if (sender == null) preview else "$sender: $preview")
+            }
+        }
+        return batch.map(NativeMessage::id)
     }
 
     private suspend fun tryConsumeChatmail(service: Chatmail, message: JSONObject): Boolean =
@@ -613,8 +1146,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             val chat = data.getInt("chat")
             val transfer = data.getString("transfer")
             try {
-                val message = data.optInt("message").takeIf { it > 0 } ?: service.findSent(chat, transfer)
-                if (message != null) service.cancelPending(message, chat, transfer)
+                val message = data.optInt("message").takeIf { it > 0 } ?: service.findLegacyPacket(chat, transfer)
+                if (message != null) service.cancelLegacyPacket(message, chat, transfer)
                 records.remove(entry.key)
                 retryAfter.remove(entry.key)
             } catch (error: CancellationException) {
@@ -664,7 +1197,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             if (chat <= 0) continue
             val payload = data.getJSONObject("payload")
             val type = payload.optString("type")
-            if (type == TALK_SIGNAL && payload.optLong("expires") <= System.currentTimeMillis()) {
+            // Drop proprietary call packets left in the outbox by earlier builds.
+            if (type == RETIRED_TALK_PACKET) {
                 database.withTransaction { retireSend(record) }
                 continue
             }
@@ -717,9 +1251,6 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                     when (message?.optInt("state")) {
                         24 -> handleResult(record.key, "rejected")
                         26, 28 -> {
-                            if (type == TALK_SIGNAL && payload.optString("action") == "offer") {
-                                talk.inviteSent(payload.optString("call"))
-                            }
                             if (type == "chatmailAck") records.remove(record.key)
                             else if (type == "hello") {
                                 val key = "request:" + to
@@ -739,7 +1270,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 }
                 if (processed >= 6) continue
                 if (transfer in cancellations) continue
-                if (!service.canSend(chat)) {
+                if (!service.canSendLegacyPacket(chat)) {
                     retryAfter[record.key] = now + 5_000L
                     continue
                 }
@@ -747,12 +1278,12 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 val packet = JSONObject(NativeEngine.signWith(account.deviceSecret, body))
                     .put("body", body).put("transfer", transfer).put("to", to).put("grant", account.grant.encoded)
                 val file = if (type == "offer") File(outgoing, payload.getString("id")) else null
-                if (file != null && (!file.isFile || file.length() > CHATMAIL_FILE_LIMIT)) {
+                if (file != null && (!file.isFile || file.length() > NATIVE_ATTACHMENT_FILE_LIMIT)) {
                     handleResult(record.key, "rejected")
                     continue
                 }
-                val message = service.findSent(chat, transfer)
-                    ?: service.send(chat, packet, file, payload.optString("name"))
+                val message = service.findLegacyPacket(chat, transfer)
+                    ?: service.sendLegacyPacket(chat, packet, file, payload.optString("name"))
                 change(record.key) {
                     put("chatmailMessage", message).put("submittedChatmailChat", chat).put("submitted", true)
                 }
@@ -767,7 +1298,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
 
     private fun storeChatmailFile(source: File, id: String, data: JSONObject): Boolean {
         val size = data.optLong("size", -1)
-        if (!source.isFile || size !in 0..CHATMAIL_FILE_LIMIT || source.length() != size) return false
+        if (!source.isFile || size !in 0..NATIVE_ATTACHMENT_FILE_LIMIT || source.length() != size) return false
         val staging = File(partial, "chatmail-" + id)
         try {
             val hash = MessageDigest.getInstance("SHA-256")
@@ -811,7 +1342,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         nextNetworkCheck = now + 350L
         val current = network.select()
         val next = current?.let { EngineRoute(it, network.addresses(it)) }
-        if (next == engineRoute && next == selectedNetwork) return
+        if (next == selectedNetwork && (backgroundOnly || next == engineRoute)) return
         if (selectedNetwork != next) chatmailLock.withLock {
             selectedNetwork = null
             chatmail?.disconnect()
@@ -820,6 +1351,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
         stopEngine()
         selectedNetwork = next ?: return
+        if (backgroundOnly) return
         val account = credentials ?: return
         if (next.addresses.isEmpty()) return
         val result = JSONObject(NativeEngine.start(account.deviceSecret, PORT, jsonArray(next.addresses).toString()))
@@ -870,6 +1402,89 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    internal suspend fun exportChatmailProfile(destination: Uri) = withContext(Dispatchers.IO) {
+        check(backupWorking.compareAndSet(false, true)) { "A backup operation is already running." }
+        var folder: File? = null
+        try {
+            val staging = java.nio.file.Files.createTempDirectory(context.cacheDir.toPath(), "chatmail-export-").toFile()
+            folder = staging
+            withChatmail { it.exportProfileBackup(staging) }
+            val archive = requireNotNull(staging.listFiles()?.singleOrNull { it.isFile && it.extension == "tar" }) {
+                "Chatmail did not create a backup."
+            }
+            checkNotNull(context.contentResolver.openOutputStream(destination, "wt")) {
+                "Couldn’t open the backup destination."
+            }.use { output -> archive.inputStream().use { it.copyTo(output) } }
+            notice.value = "Chatmail backup saved."
+        } finally {
+            folder?.deleteRecursively()
+            backupWorking.value = false
+        }
+        Unit
+    }
+
+    private suspend fun restoreFreshChatmailProfile(restore: suspend (Chatmail) -> Unit) =
+        withContext(Dispatchers.IO) {
+            check(backupWorking.compareAndSet(false, true)) { "A backup operation is already running." }
+            try {
+                recoveryLock.withLock {
+                    chatmailLock.withLock {
+                        check(records.get("profile")?.data()?.optString("name").isNullOrBlank()) {
+                            "Restore a Chatmail profile before setting up this profile."
+                        }
+                        val root = storage.noBackup("chatmail")
+                        val core = chatmail ?: openChatmail(root).also { chatmail = it }
+                        check(!core.isConfigured()) { "This Chatmail profile is already set up." }
+                        restore(core)
+                        val name = core.profileName().trim().take(60).ifBlank { "Chatmail profile" }
+                        save("profile", "profile", obj("name" to name))
+                        nextChatmailConnect = 0L
+                        nextNativeSync = 0L
+                    }
+                }
+                notice.value = "Chatmail profile restored."
+            } finally {
+                backupWorking.value = false
+            }
+        }
+
+    internal fun importChatmailProfile(source: Uri) = work {
+        restoreFreshChatmailProfile { core ->
+            val directory = java.nio.file.Files.createTempDirectory(context.cacheDir.toPath(), "chatmail-import-").toFile()
+            try {
+                val staged = File(directory, "chatmail-backup.tar")
+                checkNotNull(context.contentResolver.openInputStream(source)) { "Couldn’t open the backup." }
+                    .use { input -> staged.outputStream().use { output -> input.copyTo(output) } }
+                core.importProfileBackup(staged)
+            } finally {
+                directory.deleteRecursively()
+            }
+        }
+    }
+
+    internal suspend fun receiveChatmailProfile(code: String) {
+        require(isProfileTransferQr(code)) { "Scan an Add Second Device QR code." }
+        awaitInviteNetwork()
+        restoreFreshChatmailProfile { core ->
+            runProfileTransfer(core, transfer = { core.receiveProfileTransfer(code.trim()) })
+        }
+    }
+
+    internal suspend fun shareChatmailProfile(onQr: suspend (String) -> Unit) {
+        check(backupWorking.compareAndSet(false, true)) { "A backup operation is already running." }
+        try {
+            withChatmail(requireNetwork = true) { core ->
+                check(talk.state.value?.phase.let { it == null || it == TalkPhase.Finished }) {
+                    "End your call before starting a profile transfer."
+                }
+                runProfileTransfer(core, transfer = core::provideProfileTransfer,
+                    untilReady = { onQr(core.profileTransferQr()) })
+            }
+        } finally {
+            backupWorking.value = false
+        }
+    }
+
     internal fun prepareBackupPicker(password: CharArray) {
         pendingBackupPassword?.fill('\u0000')
         pendingBackupPassword = password
@@ -891,7 +1506,13 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val media = mutableListOf<BackupMedia>()
         val saved = records.recoveryRecords().mapNotNull {
             val data = backupRecordData(it.data())
-            if (data.optBoolean("locallyDeleted")) return@mapNotNull null
+            if (data.optBoolean("locallyDeleted") || data.has("nativeMessage") ||
+                it.key.startsWith("peer-profile:chatmail-peer:")) return@mapNotNull null
+            if (data.has("nativeChat")) {
+                if (it.kind != "contact" || data.optInt("chatmailChat") <= 9) return@mapNotNull null
+                listOf("nativeChat", "contactRequest", "nativeCanSend", "nativeHistoryFirst",
+                    "nativeHistoryLast", "nativeHasOlder").forEach { field -> data.remove(field) }
+            }
             val attachment = backupMedia(it.key, it.kind, data)
             if (attachment != null && attachment.file.isFile && attachment.file.length() == attachment.size &&
                 (it.kind == "file-sent" || data.optString("state") == "Complete")) {
@@ -920,7 +1541,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 plain.fill(0)
             }
             val protected = account.protectRoot(root, password)
-            IdentityVault(context).save(protected.encode())
+            IdentityVault(context, profileId).save(protected.encode())
             credentials = protected
             notice.value = "Encrypted backup saved"
         } finally {
@@ -952,7 +1573,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                     bundle.remove("secret")
                     bundle.remove("mediaKey")
                     bundle.put("credentials", replacement.encode())
-                    IdentityVault(context).stageRecovery(bundle.toString())
+                    IdentityVault(context, profileId).stageRecovery(bundle.toString())
                     staged = true
                     recoveryQueued.set(true)
                     notice.value = "Restoring backup…"
@@ -1009,7 +1630,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             else -> return null
         }
         val size = value.optLong("size", -1)
-        if (!isId(id) || size !in 0..CHATMAIL_FILE_LIMIT) return null
+        if (!isId(id) || size !in 0..NATIVE_ATTACHMENT_FILE_LIMIT) return null
         return BackupMedia(id, size, directory)
     }
 
@@ -1063,9 +1684,6 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val replacement = DeviceAccount.read(bundle.getString("credentials"))
         check(replacement.grant.account == bundle.getString("peer")) { "Invalid saved backup data" }
         val rows = recoveryRows(bundle)
-        check(File(context.noBackupFilesDir, "chatmail").deleteRecursively()) {
-            "Couldn’t reset the previous Chatmail profile"
-        }
         for (item in backedUpMedia(rows)) {
             val staged = File(backupStaging, item.id)
             if (staged.isFile) {
@@ -1092,10 +1710,35 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    internal fun checkCanSwitchProfiles() {
+        check(talk.state.value?.phase.let { it == null || it == TalkPhase.Finished }) {
+            "End the call before switching profiles."
+        }
+        check(!backupWorking.value && !recoveryQueued.get() && pendingBackupPassword == null) {
+            "Finish the backup or transfer before switching profiles."
+        }
+        check(!draftSendState.value) { "Wait for the message to finish sending before switching profiles." }
+    }
+
+    internal suspend fun retireForProfileSwitch() {
+        retiring = true
+        incomingCoreEvents.cancel()
+        setForeground(false)
+        val scopeJob = checkNotNull(viewModelScope.coroutineContext[Job])
+        scopeJob.cancel()
+        scopeJob.join()
+        withContext(Dispatchers.IO) {
+            closeChatmail()
+            database.close()
+        }
+    }
+
     internal fun setForeground(foreground: Boolean) {
         syncDemand.update { it.copy(foreground = foreground) }
-        if (!foreground) talk.onAppHidden()
-        else refreshForegroundRinging()
+        if (!foreground) {
+            talk.onAppHidden()
+            talk.incomingRoute(profileId)?.let { announceTalkCall(it.token, it.expiresAt) }
+        } else refreshForegroundRinging()
     }
 
     private fun refreshForegroundRinging() {
@@ -1107,10 +1750,19 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         } else AppAlertMute.deliver(context, talk::ring)
     }
 
+    internal suspend fun alertPreferences() = withChatmail { it.alertPreferences() }
+    internal suspend fun setMentionAlerts(enabled: Boolean) = withChatmail { it.setMentionAlerts(enabled) }
+    internal suspend fun setCallAlerts(enabled: Boolean) = withChatmail { it.setCallAlerts(enabled) }
+
     internal fun setAppNotificationsMuted(muted: Boolean) {
         AppAlertMute.set(context, muted)
         notificationsMuted.value = muted
         refreshForegroundRinging()
+    }
+
+    internal fun enableBackgroundSync() {
+        check(backgroundOnly)
+        syncDemand.value = SyncDemand(jobs = 1)
     }
 
     internal suspend fun <T> withActiveSync(action: suspend () -> T): T {
@@ -1121,7 +1773,10 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             syncDemand.update { it.copy(jobs = it.jobs - 1) }
         }
     }
-    internal fun setVisibleThread(thread: String?) { visibleThread = thread }
+    internal fun setVisibleThread(thread: String?) {
+        if (visibleThread != thread) nextNativeSync = 0L
+        visibleThread = thread
+    }
 
     fun clearNotice() { notice.value = "" }
 
@@ -1165,106 +1820,18 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         return advertisedRoutes(addresses, id, limit)
     }
 
-    internal fun clearCreatedInvite() {
-        val current = inviteCreationState.value
-        if (!current.busy) inviteCreationState.compareAndSet(current, InviteCreationState())
-    }
-
-    internal fun createInternetInvite(reuse: Boolean = true) {
-        val current = inviteCreationState.value
-        if (current.busy || !inviteCreationState.compareAndSet(current, InviteCreationState(busy = true))) return
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                if (reuse) {
-                    val now = System.currentTimeMillis()
-                    val saved = records.all("invite-out").lastOrNull { record ->
-                        val data = record.data()
-                        data.optBoolean("autoAccept") && data.optBoolean("chatmail") &&
-                            data.optLong("expires") > now && data.optString("code").isNotBlank()
-                    }
-                    if (saved != null) {
-                        inviteCreationState.value = InviteCreationState(invite = OutgoingInvite(saved.key, saved.data().getString("code")))
-                        return@launch
-                    }
-                }
-                awaitInviteAccount()
-                awaitInviteNetwork()
-                val created = recoveryLock.withLock {
-                    check(!recoveryQueued.get()) { "P2P is restoring your identity. Try again in a moment." }
-                    val account = checkNotNull(credentials) { "P2P is still starting. Try again in a moment." }
-                    val name = requireChatmailName()
-                    val qr = withTimeoutOrNull(12_000L) {
-                        chatmailLock.withLock { connectedChatmail(name).invite() }
-                    } ?: error("Chatmail is still connecting. Try again in a moment.")
-                    check(isChatmailInviteLink(qr)) { "Chatmail returned an invalid contact invite." }
-                    val token = randomToken()
-                    val expires = System.currentTimeMillis() + INVITE_WINDOW
-                    val key = "invite:" + token
-                    val body = obj("v" to 3, "peer" to account.grant.account, "grant" to account.grant.encoded,
-                        "token" to token, "expires" to expires, "name" to name, "chatmail" to qr).toString()
-                    val signed = JSONObject(NativeEngine.signWith(account.deviceSecret, body)).put("payload", body)
-                    val code = chatmailInviteCode(signed.toString())
-                    save(key, "invite-out", obj("expires" to expires, "chatmail" to true, "code" to code,
-                        "autoAccept" to true))
-                    OutgoingInvite(key, code)
-                }
-                inviteCreationState.value = InviteCreationState(invite = created)
-            } catch (error: CancellationException) {
-                inviteCreationState.value = InviteCreationState()
-                throw error
-            } catch (error: Exception) {
-                inviteCreationState.value = InviteCreationState(error = error.message ?: "Couldn’t create the invite. Try again.")
-            } catch (_: LinkageError) {
-                inviteCreationState.value = InviteCreationState(error = "Chatmail couldn’t start on this device.")
-            }
-        }
-    }
-
-    internal fun createNearbyInvite(show: (OutgoingInvite) -> Unit) = work {
-        val account = credentials ?: error("P2P is starting. Try again in a moment.")
-        val token = randomToken()
-        val now = System.currentTimeMillis()
-        val expiry = now + NEARBY_WINDOW
-        val key = "invite:" + token
-        val seeds = org.json.JSONArray()
-        val routes = emptyList<String>()
-        val name = ownName()
-        val invite = obj("v" to 2, "seeds" to seeds, "peer" to account.grant.account,
-            "grant" to account.grant.encoded, "token" to token, "expires" to expiry,
-            "name" to name, "routes" to jsonArray(routes))
-        val payload = invite.toString()
-        val signed = JSONObject(NativeEngine.signWith(account.deviceSecret, payload)).put("payload", payload)
-        val code = "p2p1:" + encode(signed.toString().toByteArray(Charsets.UTF_8))
-        database.withTransaction {
-            save(key, "invite-out", obj("expires" to expiry, "nearby" to true))
-        }
-        viewModelScope.launch { show(OutgoingInvite(key, code)) }
-    }
-
-    internal fun cancelInvite(key: String, keepPending: Boolean = false) = work {
-        val closed = database.withTransaction {
-            val offer = records.get(key)?.takeIf { it.kind == "invite-out" } ?: return@withTransaction null
-            val token = offer.key.substringAfter("invite:")
-            val requests = requestsForInvite(token)
-            if (keepPending && requests.isNotEmpty()) return@withTransaction null
-            closeInvite(token, requests, notifyClosed = true)
-        } ?: return@work
-        clearInviteAlerts(closed)
-        if (!keepPending) notice.value = "Invitation canceled"
-    }
-
     private suspend fun requestsForInvite(token: String) =
         records.all("invite-in").filter { it.data().optString("token") == token }
 
     private suspend fun closeInvite(
-        token: String, requests: List<Record>, acceptedPeer: String? = null, notifyClosed: Boolean = false
+        token: String, requests: List<Record>, acceptedPeer: String? = null
     ): List<Record> {
         records.remove("invite:" + token)
         for (request in requests) {
             val data = request.data()
             val remote = data.getString("peer")
             val chat = data.optInt("chatmailChat")
-            if (notifyClosed && chat > 0 && remote != acceptedPeer) {
+            if (chat > 0 && remote != acceptedPeer) {
                 queue(remote, obj("type" to "inviteDeclined", "id" to newId(), "token" to token), chat)
             }
             records.remove(request.key)
@@ -1302,14 +1869,17 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         if (!current.busy) inviteImportState.compareAndSet(current, InviteImportState())
     }
 
-    private fun submitInvite(read: suspend () -> String, nearby: NearbyContact? = null) {
+    private fun submitInvite(read: suspend () -> String, channelOnly: Boolean = false) {
         val previous = inviteImportState.value
         if (previous.busy || !inviteImportState.compareAndSet(previous, InviteImportState(busy = true))) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val code = read()
-                inviteImportState.value = if (nearby == null) importChatmailInvite(code)
-                    else InviteImportState(message = importContactInvite(code, nearby))
+                inviteImportState.value = when {
+                    isSecureJoinInvite(code) -> importSecureJoinInvite(code.trim(), channelOnly)
+                    channelOnly -> error("This isn’t a channel invite.")
+                    else -> importChatmailInvite(code)
+                }
             } catch (error: CancellationException) {
                 inviteImportState.value = InviteImportState()
                 throw error
@@ -1323,113 +1893,20 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun importInviteImage(uri: Uri) = submitInvite(read = {
+    fun importInviteImage(uri: Uri, channelOnly: Boolean = false) = submitInvite(channelOnly = channelOnly, read = {
         val text = runCatching { InviteImage.read(context, uri) }.getOrElse {
             error("Couldn’t read the QR code. Try a close-up image with the full code visible, or paste the invite.")
         }
-        require(InviteCode.hasPrefix(text.trim())) { "This QR code isn’t a P2P contact invite." }
+        require(isSupportedInviteCode(text)) { "This QR code isn’t a supported invite." }
         text
     })
 
-    fun importInvite(text: String) = submitInvite(read = { text })
+    fun importInvite(text: String, channelOnly: Boolean = false) = submitInvite(read = { text }, channelOnly = channelOnly)
 
-    fun importScannedInvite(text: String) = submitInvite(read = {
-        require(InviteCode.hasPrefix(text.trim())) { "This QR code isn’t a P2P contact invite." }
+    fun importScannedInvite(text: String, channelOnly: Boolean = false) = submitInvite(channelOnly = channelOnly, read = {
+        require(isSupportedInviteCode(text)) { "This QR code isn’t a supported invite." }
         text
     })
-
-    internal fun importNearbyInvite(candidate: NearbyContact) = submitInvite(read = { candidate.code }, nearby = candidate)
-
-    private fun verifyInvite(text: String): Pair<JSONObject, DeviceGrant> {
-        val bytes = InviteCode.signedBytes(text)
-        val signed: JSONObject
-        val payload: String
-        val invite: JSONObject
-        try {
-            signed = JSONObject(String(bytes, Charsets.UTF_8))
-            payload = signed.getString("payload")
-            invite = JSONObject(payload)
-        } catch (_: org.json.JSONException) {
-            throw IllegalArgumentException("The invite code is incomplete or damaged. Copy the full code again.")
-        }
-        val id = invite.optString("peer")
-        check(credentials != null) { "P2P is still starting. Try again in a moment." }
-        require(id != peer.value) { "This is your own invite. Use the invite from the other device." }
-        val grant = devices.checked(invite.optString("grant")) ?: error("Invalid contact credential")
-        require(grant.account == id && NativeEngine.verify(payload, grant.device, signed.optString("public"), signed.optString("signature"))) {
-            "This invitation could not be verified"
-        }
-        val token = invite.optString("token")
-        require(invite.optInt("v") == 2 && isPeer(id) && token.matches(Regex("[A-Za-z0-9_-]{32}"))) {
-            "Invalid contact invite"
-        }
-        require(invite.optLong("expires") > System.currentTimeMillis()) { "This invite expired. Ask for a fresh invite." }
-        return invite to grant
-    }
-
-    internal fun nearbyInviteName(code: String): String? = runCatching {
-        val (invite, grant) = verifyInvite(code)
-        if (items.value.orEmpty().any { it.key == grant.account && it.kind == "contact" }) null
-        else invite.optString("name", "New contact").take(60)
-    }.getOrNull()
-
-    private suspend fun importContactInvite(text: String, nearby: NearbyContact): String {
-        val (invite, grant) = verifyInvite(text)
-        val id = grant.account
-        val token = invite.getString("token")
-        require(devices.accept(grant)) { "This invitation is from a replaced device. Ask for a fresh invite." }
-        if (records.get(id)?.kind == "contact") {
-            return "This contact is already added."
-        }
-        val addresses = nearby.addresses.mapNotNull { nearbyRoute(it, nearby.port, grant.device) }
-        require(addresses.isNotEmpty()) { "This device has no reachable local address" }
-        val name = invite.optString("name", "New contact").take(60)
-        val expires = invite.optLong("expires")
-        val seeds = invite.optJSONArray("seeds")
-        val skipped = outboxLock.withLock {
-            database.withTransaction {
-                if (records.get(id)?.kind == "contact") return@withTransaction "This contact is already added."
-                val incoming = records.get("request:" + id)?.takeIf { it.kind == "invite-in" }?.data()
-                if (incoming != null && (records.get("invite:" + incoming.optString("token"))
-                        ?.data()?.optLong("expires") ?: 0) > System.currentTimeMillis()) {
-                    return@withTransaction "This person already sent you a request. Accept it in Contacts."
-                }
-                val queuedInvites = records.all("outbox").filter { record ->
-                    val data = record.data()
-                    data.optString("to") == id && data.optJSONObject("payload")?.optString("type") == "hello"
-                }
-                val requestKey = "request:" + id
-                val previous = records.get(requestKey)?.takeIf { it.kind == "invite-pending" }?.data()
-                if (previous != null && previous.optString("token") == token &&
-                    isActiveInviteRequest(previous, System.currentTimeMillis()) &&
-                    queuedInvites.any { it.data().optJSONObject("payload")?.optString("token") == token }) {
-                    val combined = (addresses + previous.strings("routes")).distinct().take(12)
-                    if (combined != previous.strings("routes")) {
-                        change(requestKey) { put("routes", jsonArray(combined)) }
-                    }
-                    return@withTransaction "This contact request is already queued."
-                }
-                queuedInvites.forEach { record ->
-                    pending.remove(record.key)
-                    retryAfter.remove(record.key)
-                    records.remove(record.key)
-                }
-                save(requestKey, "invite-pending", obj("peer" to id, "token" to token, "name" to name,
-                    "expires" to expires, "routes" to jsonArray(addresses), "state" to INVITE_CONNECTING,
-                    "hasDiscoveryPeers" to ((seeds?.length() ?: 0) > 0)))
-                queue(id, obj("type" to "hello", "id" to newId(), "token" to token, "name" to ownName(),
-                    "expires" to expires, "routes" to jsonArray(localAddresses())))
-                null
-            }
-        }
-        if (skipped != null) return skipped
-        if (seeds != null) repeat(minOf(seeds.length(), 3)) { index ->
-            val seed = seeds.optJSONObject(index) ?: return@repeat
-            offerSeed(seed)
-        }
-        route(id, addresses)
-        return "Contact request queued. Keep P2P open on both devices and accept the request on the other device."
-    }
 
     fun acceptInvite(key: String) = work {
         val (request, closed) = database.withTransaction {
@@ -1466,7 +1943,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             }
         } ?: contact)
         val requestToken = current.getString("token")
-        val closed = closeInvite(requestToken, requestsForInvite(requestToken), acceptedPeer = id, notifyClosed = true)
+        val closed = closeInvite(requestToken, requestsForInvite(requestToken), acceptedPeer = id)
         queue(id, obj("type" to "paired", "id" to newId(), "name" to ownName(),
             "token" to requestToken, "approvedAt" to approvedAt), current.optInt("chatmailChat"))
         return closed
@@ -1476,7 +1953,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val closed = database.withTransaction {
             val request = records.get(key)?.takeIf { it.kind == "invite-in" }?.data() ?: return@withTransaction null
             val token = request.getString("token")
-            closeInvite(token, requestsForInvite(token), notifyClosed = true)
+            closeInvite(token, requestsForInvite(token))
         } ?: return@work
         clearInviteAlerts(closed)
     }
@@ -1486,6 +1963,12 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     fun setName(name: String, saved: () -> Unit = {}) = work {
         require(name.trim().isNotEmpty()) { "Enter a display name" }
         updateProfile { put("name", name.trim().take(60)) }
+        withContext(Dispatchers.Main) { saved() }
+    }
+
+    fun setBio(bio: String, saved: () -> Unit = {}) = work {
+        require(bio.length <= 500) { "Enter a bio of up to 500 characters." }
+        updateProfile { put("bio", bio.trim()) }
         withContext(Dispatchers.Main) { saved() }
     }
 
@@ -1501,7 +1984,8 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         save("profile", "profile", current.put("revision", revision))
         val packet = obj("type" to "profileUpdate", "id" to newId())
         includeProfile(packet)
-        records.all("contact").filterNot { it.data().optBoolean("blocked") }.forEach { queue(it.key, packet) }
+        records.all("contact").filterNot { it.data().let { data -> data.has("nativeContact") || data.optBoolean("blocked") } }
+            .forEach { queue(it.key, packet) }
     }
 
     private suspend fun includeProfile(payload: JSONObject) {
@@ -1608,21 +2092,6 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun createGroup(name: String, members: Set<String>, created: (String) -> Unit) = work {
-        val title = name.trim().take(80)
-        require(title.isNotEmpty() && members.isNotEmpty()) { "Add a group name and at least one contact" }
-        val eligible = members.filter { records.get(it)?.kind == "contact" }
-        require(eligible.isNotEmpty())
-        val id = newId()
-        val content = obj("type" to "group", "id" to id, "name" to title, "owner" to peer.value,
-            "members" to jsonArray(listOf(peer.value) + eligible), "revision" to 1, "secret" to randomToken())
-        database.withTransaction {
-            save(id, "group", content)
-            queueGroup(eligible, content)
-        }
-        viewModelScope.launch { created(id) }
-    }
-
     fun updateGroup(id: String, name: String, members: Set<String>) = work {
         val title = name.trim().take(80)
         require(title.isNotEmpty()) { "Enter a group name" }
@@ -1656,11 +2125,23 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setFolder(thread: String, folder: String) = work {
+    fun setFolder(thread: String, folder: String) = work { moveConversation(thread, folder) }
+
+    private suspend fun moveConversation(thread: String, folder: String) {
         if (folder != "Trash" && (records.get(thread)?.data()?.optBoolean("blocked") == true || groupBlocked(thread))) {
             notice.value = "Unblock this conversation before moving it"
-            return@work
+            return
         }
+        val native = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+        if (native > 9 && (folder == "Inbox" || folder == "Archive")) {
+            withChatmail { core ->
+                core.nativeArchive(native, folder == "Archive")
+                saveLocalFolder(thread, folder)
+            }
+        } else saveLocalFolder(thread, folder)
+    }
+
+    private suspend fun saveLocalFolder(thread: String, folder: String) {
         if (folder == "Inbox") records.remove("folder:" + thread)
         else save("folder:" + thread, "folder", obj("name" to folder))
     }
@@ -1689,9 +2170,18 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         }.toSet()
 
     fun restoreTrash(groups: Boolean) = work {
-        database.withTransaction {
-            trashThreads(groups).forEach { records.remove("folder:" + it) }
+        var failed = false
+        for (thread in trashThreads(groups)) {
+            try {
+                moveConversation(thread, "Inbox")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                failed = true
+                AppLog.record(context, "Chatmail conversation restore failed", error)
+            }
         }
+        if (failed) notice.value = "Some conversations couldn’t be restored. Try again."
     }
 
     fun emptyTrash(groups: Boolean) = work {
@@ -1754,17 +2244,26 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
 
     fun markRead(thread: String) = work {
         if (!visible || visibleThread != thread) return@work
+        val unread = records.threadItems().unreadThreadItems(thread)
+        val nativeIds = unread.mapNotNull { it.data().optInt("nativeMessage").takeIf { id -> id > 9 } }
+        if (nativeIds.isNotEmpty()) withChatmail { core ->
+            if (visible && visibleThread == thread) core.nativeRead(nativeIds)
+        }
         val attachments = database.withTransaction {
             if (!visible || visibleThread != thread) return@withTransaction emptyList()
-            val unread = (records.all("message") + records.all("file-received")).filter {
-                val value = it.data()
-                value.optString("thread") == thread && value.optBoolean("unread") && !value.optBoolean("voicemail")
+            unread.mapNotNull { item ->
+                val current = records.get(item.key) ?: return@mapNotNull null
+                if (current != item) return@mapNotNull null
+                val data = current.data().put("unread", false)
+                data.remove("locallyUnread")
+                save(current.key, current.kind, data, current.created)
+                current.key.takeIf { current.kind == "file-received" }
             }
-            unread.forEach { record -> change(record.key) { put("unread", false) } }
-            unread.filter { it.kind == "file-received" }.map(Record::key)
         }
         attachments.forEach { alerts.clear(AlertArea.FILES, it) }
-        if (visible && visibleThread == thread) clearThreadAlerts(thread)
+        if (visible && visibleThread == thread && records.threadItems().unreadThreadItems(thread).isEmpty()) {
+            clearThreadAlerts(thread)
+        }
     }
 
     fun markUnread(id: String) = work {
@@ -1773,6 +2272,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             val data = item.data()
             if (data.optBoolean("locallyDeleted")) return@withTransaction
             if (item.isIncomingThreadItem(peer.value) || (item.kind == "post" && data.optString("author") != peer.value)) {
+                if (data.has("nativeMessage")) data.put("locallyUnread", true)
                 save(id, item.kind, data.put("unread", true), item.created)
             }
         }
@@ -1780,6 +2280,22 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
 
     fun reactMessage(id: String, emoji: String) = work {
         if (!isPickerEmoji(context, emoji)) return@work
+        val record = records.get(id)?.data()
+        val native = record?.optInt("nativeMessage") ?: 0
+        if (native > 9) {
+            val thread = requireNotNull(record).getString("thread")
+            val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+            withChatmail { core ->
+                val conversation = records.get(thread)?.data()
+                check(!groupBlocked(thread) && conversation?.optBoolean("blocked") != true) { "This conversation is blocked." }
+                check(core.nativeThread(chat)?.let { it.canSend && !it.request } == true) {
+                    "This encrypted conversation cannot send reactions yet."
+                }
+                core.nativeReact(native, emoji)
+                refreshAfterNativeSend(core, chat, thread, native)
+            }
+            return@work
+        }
         database.withTransaction {
             val target = records.get(id)?.takeIf(Record::isThreadMessage)?.data() ?: return@withTransaction
             val thread = target.optString("thread")
@@ -1794,6 +2310,171 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             save(key, "message-reaction", reaction)
             targets.forEach { queue(it, reaction) }
         }
+    }
+
+    private suspend fun writableNativeChat(core: Chatmail, thread: String): NativeThread {
+        val record = records.get(thread)?.data()
+        check(record?.optBoolean("blocked") != true && !groupBlocked(thread) &&
+            records.get("folder:$thread")?.data()?.optString("name") != "Trash") {
+            "This conversation is unavailable."
+        }
+        return requireNotNull(core.nativeThread(record?.optInt("nativeChat") ?: 0)
+            ?.takeIf { it.canSend && !it.request }) { "This conversation cannot send yet." }
+    }
+
+    private suspend fun changeNativeMessage(
+        key: String, own: Boolean = false, refreshSingle: Boolean = true, change: (Chatmail, NativeMessage) -> Unit
+    ) = withChatmail { core ->
+        val data = requireNotNull(records.get(key)?.data()) { "This message is unavailable." }
+        val thread = data.optString("thread")
+        val chat = writableNativeChat(core, thread)
+        val message = requireNotNull(core.nativeMessage(chat.id, data.optInt("nativeMessage"))
+            ?.takeIf { it.webxdcParent == null && (!own || it.from == 1) }) { "This message is unavailable." }
+        change(core, message)
+        if (refreshSingle) refreshAfterNativeSend(core, chat.id, thread, message.id)
+        else updateNativeHistory(core, chat, thread, 25, cached = records.threadItems().filter {
+            it.data().optString("thread") == thread
+        })
+        nextNativeSync = 0L
+    }
+
+    internal suspend fun chatmailRelays() = withChatmail { it.relayAddresses() }
+
+    internal suspend fun removeChatmailRelay(address: String) = withChatmail { it.removeRelay(address) }
+
+    internal suspend fun nativeEncryptionInfo(thread: String): String = withChatmail { core ->
+        val chat = records.get(thread)?.data()?.optInt("nativeChat")?.takeIf { it > 9 }
+        core.contactEncryptionInfo(requireNotNull(chat) { "This encrypted contact is unavailable." })
+    }
+
+    internal suspend fun outgoingMediaQuality() = withChatmail { it.outgoingMediaQuality() }
+
+    internal suspend fun setOutgoingMediaQuality(quality: OutgoingMediaQuality) =
+        withChatmail { it.setOutgoingMediaQuality(quality) }
+
+    private suspend fun mediaPolicy(attachments: List<AttachmentDraft>, legacy: Boolean = false): OutgoingMediaPolicy {
+        if (attachments.none { it.mime.startsWith("video/") && needsMediaPreparation(it) }) return OutgoingMediaPolicy()
+        return try {
+            withChatmail { it.outgoingMediaPolicy() }
+        } catch (failure: IllegalStateException) {
+            if (!legacy || failure is CancellationException) throw failure
+            OutgoingMediaPolicy()
+        }
+    }
+
+    internal suspend fun chatmailReadReceipts(): Boolean = withChatmail { it.readReceiptsEnabled() }
+
+    internal suspend fun setChatmailReadReceipts(enabled: Boolean) = withChatmail { it.setReadReceipts(enabled) }
+
+    private suspend fun existingNativeMessage(core: Chatmail, key: String): NativeMessage {
+        val row = requireNotNull(records.get(key)?.data()?.takeUnless { it.optBoolean("locallyDeleted") }) {
+            "This message is unavailable."
+        }
+        val chat = records.get(row.optString("thread"))?.data()?.optInt("nativeChat") ?: 0
+        return requireNotNull(chat.takeIf { it > 9 }?.let { core.nativeMessage(it, row.optInt("nativeMessage")) }
+            ?.takeIf { it.webxdcParent == null }) { "This message is unavailable." }
+    }
+
+    internal suspend fun nativeMessageDetails(key: String): NativeMessageDetails = withChatmail { core ->
+        core.messageDetails(existingNativeMessage(core, key))
+    }
+
+    internal suspend fun forwardNativeMessage(key: String, target: String) = withChatmail { core ->
+        val destination = writableNativeChat(core, target)
+        val message = existingNativeMessage(core, key)
+        core.forwardMessage(message.id, destination.id)
+        refreshAfterNativeSend(core, destination.id, target)
+        notice.value = "Message forwarded."
+    }
+
+    internal suspend fun chatmailCardContacts(): List<ChatmailContact> = withChatmail { core ->
+        core.contacts().sortedBy { it.name.lowercase() }
+    }
+
+    internal suspend fun chatmailContactCard(id: Int): AttachmentDraft = withChatmail { core ->
+        val card = core.makeContactCard(id)
+        val directory = File(context.cacheDir, "captures").apply { mkdirs() }
+        val file = File.createTempFile("chatmail-contact-", ".vcf", directory)
+        try {
+            file.writeText(card)
+            AttachmentDraft(Uri.fromFile(file), "Contact card.vcf", "text/x-vcard", false, temporary = true)
+        } catch (error: Exception) {
+            file.delete()
+            throw error
+        }
+    }
+
+    internal suspend fun importChatmailCard(key: String) = withChatmail { core ->
+        val message = existingNativeMessage(core, key)
+        val attachment = requireNotNull(message.attachment?.takeIf { it.viewType == "Vcard" }) {
+            "This message does not have a Chatmail contact card."
+        }
+        val file = requireNotNull(availableChatmailFile(attachment)) { "Download the contact card first." }
+        check(core.importContactCard(file).any { it > 9 }) { "The card does not contain a Chatmail contact." }
+        notice.value = "Contact added to Chatmail."
+    }
+
+    internal suspend fun editNativeMessage(key: String, draft: String) {
+        val text = draft.trim()
+        require(text.isNotEmpty() && text.length <= INTEROP_TEXT_LIMIT) { "Enter up to $INTEROP_TEXT_LIMIT characters." }
+        changeNativeMessage(key, own = true) { core, message -> core.editMessage(message.id, text) }
+    }
+
+    internal suspend fun deleteNativeMessageForEveryone(key: String) =
+        changeNativeMessage(key, own = true, refreshSingle = false) { core, message ->
+            core.deleteMessageForEveryone(message.id)
+        }
+
+    internal fun toggleNativeMessagePin(key: String) = work {
+        changeNativeMessage(key) { core, message -> core.setMessagePinned(message.id, !message.pinned) }
+    }
+
+    internal fun saveNativeMessage(key: String) = work {
+        changeNativeMessage(key) { core, message -> core.saveMessage(message.id) }
+        notice.value = "Added to Saved Messages."
+    }
+
+    internal suspend fun savedMessagesThread(): String = withChatmail { core ->
+        val chat = requireNotNull(core.nativeThread(core.savedMessagesChat())?.takeIf { it.selfTalk })
+        cacheNativeThread(chat)
+        refreshAfterNativeSend(core, chat.id, nativeThreadKey(chat.id))
+        nativeThreadKey(chat.id)
+    }
+
+    internal suspend fun pinnedNativeMessages(thread: String): List<NativeMessage> = withChatmail { core ->
+        val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+        check(core.nativeThread(chat) != null) { "This conversation is unavailable." }
+        core.pinnedMessages(chat)
+    }
+
+    internal suspend fun nativeDisappearingTimer(thread: String): Int = withChatmail { core ->
+        val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+        check(core.nativeThread(chat) != null) { "This conversation is unavailable." }
+        core.disappearingTimer(chat)
+    }
+
+    internal suspend fun setNativeDisappearingTimer(thread: String, seconds: Int) = withChatmail { core ->
+        val chat = writableNativeChat(core, thread)
+        core.setDisappearingTimer(chat.id, seconds)
+    }
+
+    internal suspend fun nativeMessageLocation(key: String): Pair<Double, Double> = withChatmail { core ->
+        val row = requireNotNull(records.get(key)?.data()) { "This message is unavailable." }
+        val thread = row.optString("thread")
+        val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+        val id = row.optInt("nativeMessage")
+        val message = core.message(id)
+        require(id > 9 && chat > 9 && message.optInt("chatId") == chat &&
+            isEncryptedChatmailMessage(message, chat) && message.optBoolean("hasLocation")) {
+            "This message has no shared location."
+        }
+        requireNotNull(core.messageLocation(chat, id, message.getLong("timestamp"))) { "This location is unavailable." }
+    }
+
+    internal suspend fun reactToChannelPost(id: Int, emoji: String) = withChatmail { core ->
+        require(emoji.isEmpty() || isPickerEmoji(context, emoji)) { "Choose an emoji." }
+        check(core.channelPost(id) != null) { "This post is unavailable." }
+        core.nativeReact(id, emoji)
     }
 
     private suspend fun recipients(thread: String): List<String> {
@@ -1835,11 +2516,20 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun commitDraft(thread: String, text: String, replyTo: String?, attachments: List<AttachmentDraft>, voicemail: Boolean = false) {
         require(text.trim().length <= MAX_MESSAGE_LENGTH) { "This message is too long. Split it into shorter messages." }
+        val record = records.get(thread)
+        val native = record?.data()?.optInt("nativeChat") ?: 0
+        if (native > 9) {
+            check(record?.data()?.optBoolean("blocked") != true && !groupBlocked(thread)) { "This conversation is blocked." }
+            sendChatmailDraft(native, thread, text.trim(), replyTo, attachments, voicemail)
+            deleteTemporaryDrafts(attachments)
+            return
+        }
         require(recipients(thread).isNotEmpty()) { "There is no active recipient" }
-        val group = if (records.get(thread)?.kind == "group") thread else ""
+        val group = if (record?.kind == "group") thread else ""
         val staged = mutableListOf<JSONObject>()
         try {
-            for (item in attachments) staged.add(stageFile(item.uri, thread, group, item.asFile, draft = item))
+            val policy = mediaPolicy(attachments, legacy = true)
+            for (item in attachments) staged.add(stageFile(item, thread, group, policy = policy))
             database.withTransaction {
                 val targets = recipients(thread)
                 require(targets.isNotEmpty()) { "There is no active recipient" }
@@ -1856,6 +2546,113 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             staged.forEach { File(outgoing, it.getString("id")).delete() }
             throw error
         }
+        deleteTemporaryDrafts(attachments)
+    }
+
+    internal suspend fun openWebxdc(thread: String, id: Int): WebxdcInfo = withChatmail { core ->
+        val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+        val message = core.message(id)
+        require(chat > 9 && message.optInt("chatId") == chat && message.optString("viewType") == "Webxdc") {
+            "This app is no longer in the conversation."
+        }
+        check(message.optString("downloadState") == "Done") { "Download the app before opening it." }
+        WebxdcInfo.from(core.webxdcInfo(id))
+    }
+
+    internal suspend fun prepareWebxdcShortcut(shortcut: WebxdcShortcut): Pair<Record, File> =
+        withContext(Dispatchers.IO) {
+            check(shortcut.profile == profileId)
+            val key = nativeMessageKey(shortcut.id)
+            suspend fun readApp() = checkNotNull(records.get(key)?.takeIf {
+                it.webxdcMessageId(shortcut.thread) == shortcut.id
+            }) { "This shared app is no longer available." }
+            readApp()
+            val local = downloadForExport(key)
+            val record = readApp()
+            check(galleryFile(record) == local) {
+                "This shared app is no longer available."
+            }
+            record to local
+        }
+
+    internal suspend fun webxdcUpdates(id: Int, after: Int): String = withChatmail { it.webxdcUpdates(id, after) }
+
+    internal suspend fun webxdcWrite(thread: String, id: Int, write: (Chatmail) -> Unit) = withChatmail { core ->
+        val record = records.get(thread)?.data()
+        val chat = record?.optInt("nativeChat") ?: 0
+        check(chat > 9 && record?.optBoolean("blocked") != true && !groupBlocked(thread) &&
+            core.nativeThread(chat)?.let { it.canSend && !it.request } == true &&
+            core.message(id).let { it.optInt("chatId") == chat && it.optString("viewType") == "Webxdc" }) {
+            "This conversation cannot send app updates."
+        }
+        write(core)
+    }
+
+    internal fun leaveWebxdc(id: Int) = work { withChatmail { it.webxdcLeave(id) } }
+
+    private suspend fun sendChatmailDraft(
+        chat: Int, thread: String, text: String, replyTo: String?, attachments: List<AttachmentDraft>,
+        voicemail: Boolean = false, channelPost: Boolean = false
+    ) {
+        val quote = replyTo?.let { key ->
+            records.get(key)?.data()?.takeIf { it.optString("thread") == thread }?.optInt("nativeMessage")?.takeIf { it > 9 }
+        }
+        val submission = UUID.nameUUIDFromBytes(obj("thread" to thread, "text" to text, "quote" to quote,
+            "files" to JSONArray(attachments.map(AttachmentDraft::toString))).toString().toByteArray())
+        val checkpoint = "native-draft:$submission"
+        val start = if (attachments.isEmpty()) 0 else records.get(checkpoint)?.data()?.optInt("next") ?: 0
+        val staged = mutableListOf<JSONObject>()
+        try {
+            val pending = attachments.drop(start)
+            val policy = mediaPolicy(pending)
+            for (item in pending) staged.add(stageFile(item, thread, "", policy = policy))
+            val ready = staged.map { offer ->
+                val file = File(outgoing, offer.getString("id"))
+                val name = offer.getString("name")
+                val viewType = chatmailAttachmentViewType(offer.getString("mime"), offer.optBoolean("listed"), voicemail, name)
+                if (viewType == "Webxdc") {
+                    require(!channelPost) { "Share apps in a chat or group." }
+                    inspectWebxdc(file)
+                }
+                Triple(file, name, viewType)
+            }
+            withChatmail { core ->
+                val channel = if (channelPost) requireNotNull(core.channel(chat)) { "Channel unavailable." } else null
+                if (attachments.isEmpty()) {
+                    if (channel != null) core.postToChannel(channel, text) else core.nativeSend(chat, text, quote)
+                }
+                for ((offset, attachment) in ready.withIndex()) {
+                    val index = start + offset
+                    val caption = text.takeIf { index == 0 }.orEmpty()
+                    val (file, name, viewType) = attachment
+                    if (channel != null) core.postToChannel(channel, caption, file, name, viewType)
+                    else core.nativeSend(chat, caption, quote.takeIf { index == 0 }, file, name, viewType)
+                    save(checkpoint, "native-draft", obj("next" to index + 1))
+                }
+                if (attachments.isNotEmpty()) records.remove(checkpoint)
+                if (channel == null) refreshAfterNativeSend(core, chat, thread)
+            }
+        } finally {
+            staged.forEach { File(outgoing, it.getString("id")).delete() }
+            if (!channelPost) nextNativeSync = 0L
+        }
+        if (!channelPost && records.get("folder:$thread")?.data()?.optString("name") == "Cleared") {
+            records.remove("folder:$thread")
+        }
+    }
+
+    private suspend fun refreshAfterNativeSend(core: Chatmail, chat: Int, thread: String, message: Int? = null) {
+        nextNativeSync = 0L
+        try {
+            core.nativeThread(chat)?.let { updateNativeHistory(core, it, thread, 25, messageId = message) }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            AppLog.record(context, "Chatmail local message refresh failed", error)
+        }
+    }
+
+    private fun deleteTemporaryDrafts(attachments: List<AttachmentDraft>) {
         attachments.filter { it.temporary && it.uri.scheme == "file" }.forEach { item ->
             item.uri.path?.let { name ->
                 val file = File(name)
@@ -1868,18 +2665,20 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         if (value.finished) submission.compareAndSet(value, null)
     }
 
-    private fun submitSheet(request: SheetSubmission, action: suspend () -> Unit): Job? {
+    private fun submitSheet(request: SheetSubmission, action: suspend () -> String?): Job? {
         val previous = submission.value
         if (previous?.finished == false || !submission.compareAndSet(previous, request)) return null
         return work {
             try {
-                action()
-                submission.value = request.copy(finished = true)
+                val recipient = action()
+                submission.value = request.copy(finished = true, recipient = recipient ?: request.recipient)
             } catch (error: CancellationException) {
                 submission.compareAndSet(request, null)
                 throw error
             } catch (error: Exception) {
                 submission.value = request.copy(finished = true, error = error.message ?: "Couldn’t complete that action")
+            } catch (_: LinkageError) {
+                submission.value = request.copy(finished = true, error = "Chatmail couldn’t start on this device.")
             }
         }
     }
@@ -1890,7 +2689,9 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val id = newId()
         val attachments = mutableListOf<JSONObject>()
         try {
-            for (uri in media.distinct()) attachments.add(stageFile(uri, "", "", false, id))
+            val drafts = media.distinct().map { describeAttachment(context, it, false) }
+            val policy = mediaPolicy(drafts, legacy = true)
+            for (draft in drafts) attachments.add(stageFile(draft, "", "", id, policy))
             val data = obj("type" to "post", "id" to id, "text" to value.take(12_000),
                 "author" to peer.value, "at" to System.currentTimeMillis(), "media" to attachments.size)
             database.withTransaction {
@@ -1906,6 +2707,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             attachments.forEach { File(outgoing, it.getString("id")).delete() }
             throw error
         }
+        null
     }
 
     fun socialAction(post: String, value: String, reaction: Boolean) = work {
@@ -1949,33 +2751,46 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun stageFile(
-        uri: Uri, thread: String, group: String, asFile: Boolean, post: String = "", draft: AttachmentDraft? = null
+        attachment: AttachmentDraft, thread: String, group: String, post: String = "", policy: OutgoingMediaPolicy
     ): JSONObject {
+        val operation = currentCoroutineContext()
+        operation.ensureActive()
         val id = newId()
-        val attachment = draft ?: describeAttachment(context, uri, asFile)
         var name = attachment.label
         var mime = attachment.mime
         val source = File(outgoing, id)
         try {
             val originalHash = MessageDigest.getInstance("SHA-256")
-            context.contentResolver.openInputStream(uri)?.use { input ->
+            context.contentResolver.openInputStream(attachment.uri)?.use { input ->
                 source.outputStream().buffered().use { output ->
-                    java.security.DigestInputStream(input, originalHash).copyTo(output, 128 * 1024)
+                    java.security.DigestInputStream(input, originalHash).copyBoundedTo(
+                        output, NATIVE_ATTACHMENT_FILE_LIMIT, "This attachment is too large.",
+                        bufferSize = 128 * 1024, checkActive = operation::ensureActive
+                    )
                 }
             } ?: error("Couldn’t open " + name)
-            val compressed = AttachmentCompressor(context).compress(source, attachment)
+            val compressed = AttachmentCompressor(context).compress(source, attachment, policy)
             val hash = if (compressed == null) {
                 if (attachment.range != null) error("Couldn’t prepare the selected trim. Your draft is still available.")
                 originalHash.digest().hex()
             } else {
                 try {
-                    if (!compressed.file.renameTo(source)) compressed.file.copyTo(source, overwrite = true)
+                    operation.ensureActive()
+                    if (!compressed.file.renameTo(source)) {
+                        compressed.file.inputStream().use { input ->
+                            source.outputStream().use { output ->
+                                input.copyBoundedTo(output, NATIVE_ATTACHMENT_FILE_LIMIT, "This attachment is too large.",
+                                    bufferSize = 128 * 1024, checkActive = operation::ensureActive)
+                            }
+                        }
+                    }
                     name = name.substringBeforeLast('.', name) + "." + compressed.extension
                     mime = compressed.mime
                     val finalHash = MessageDigest.getInstance("SHA-256")
                     source.inputStream().buffered().use { input ->
                         val buffer = ByteArray(128 * 1024)
                         while (true) {
+                            operation.ensureActive()
                             val count = input.read(buffer)
                             if (count < 0) break
                             finalHash.update(buffer, 0, count)
@@ -1986,21 +2801,21 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                     compressed.file.delete()
                 }
             }
-            require(source.length() <= CHATMAIL_FILE_LIMIT) {
-                "$name is over the 20 MB file limit. Choose a smaller file or trim the video."
-            }
+            operation.ensureActive()
+            require(source.length() <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment is too large." }
             return obj("type" to "offer", "id" to id, "name" to name, "mime" to mime,
                 "size" to source.length(), "digest" to hash, "thread" to thread,
-                "group" to group, "post" to post, "author" to peer.value, "listed" to asFile, "state" to "Offer queued")
+                "group" to group, "post" to post, "author" to peer.value, "listed" to attachment.asFile, "state" to "Offer queued")
         } catch (error: Throwable) {
             source.delete()
             throw error
         }
     }
 
-    internal fun sendFiles(thread: String, uris: List<Uri>) = submitSheet(SheetSubmission("send", thread)) {
-        require(uris.isNotEmpty()) { "Choose a file to share." }
-        commitDraft(thread, "", null, uris.distinct().map { describeAttachment(context, it, true) })
+    internal fun sendFiles(thread: String, uris: List<Uri>, text: String = "") = submitSheet(SheetSubmission("send", thread)) {
+        require(uris.isNotEmpty() || text.isNotBlank()) { "Choose something to share." }
+        commitDraft(thread, text, null, uris.distinct().map { describeAttachment(context, it, asFile = false) })
+        thread
     }
 
     private suspend fun mayDownload(to: String, offer: JSONObject): Boolean {
@@ -2017,16 +2832,22 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         request.attachment?.let { withContext(Dispatchers.IO) { downloadForExport(it) } }
     }
 
-    internal suspend fun saveMedia(request: MediaDownload, destination: Uri?) = withContext(Dispatchers.IO) {
-        val input = when {
-            request.attachment != null -> downloadForExport(request.attachment).inputStream()
-            request.profilePhoto != null -> checkNotNull(checkedPhoto(request.profilePhoto)) {
-                "This profile photo is no longer available."
-            }.inputStream()
-            request.thumbnail != null -> fetchYoutubeThumbnail(request.thumbnail).inputStream()
-            else -> error("This file is no longer available.")
+    internal suspend fun saveMedia(request: MediaDownload, newDocument: Uri?) = withContext(Dispatchers.IO) {
+        writeMediaDownload(context.contentResolver, request, newDocument) {
+            when {
+                request.attachment != null -> downloadForExport(request.attachment).inputStream()
+                request.channelMessage != null -> withChatmail { core ->
+                    requireNotNull(channelAttachment(core, request.channelMessage).localFile) {
+                        "This attachment is unavailable. Download it from the channel first."
+                    }.inputStream()
+                }
+                request.profilePhoto != null -> checkNotNull(checkedPhoto(request.profilePhoto)) {
+                    "This profile photo is no longer available."
+                }.inputStream()
+                request.thumbnail != null -> fetchYoutubeThumbnail(request.thumbnail).inputStream()
+                else -> error("This file is no longer available.")
+            }
         }
-        input.use { writeMediaDownload(context.contentResolver, request, destination, it) }
     }
 
     private suspend fun downloadForExport(id: String): File {
@@ -2127,11 +2948,11 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
     fun deleteReceivedCopy(id: String) = work {
         if (!isId(id)) return@work
         downloadLock.withLock {
-            val record = records.get(id)?.takeIf { it.kind == "file-received" } ?: return@withLock
-            if (record.data().optString("state") != "Complete") return@withLock
-            val file = File(incoming, id)
-            check(!file.exists() || file.delete()) { "P2P couldn’t delete the local copy." }
             database.withTransaction {
+                val record = records.get(id)?.takeIf { it.kind == "file-received" } ?: return@withTransaction
+                if (record.data().optString("state") != "Complete") return@withTransaction
+                val file = File(incoming, id)
+                check(!file.exists() || file.delete()) { "Relay Lab couldn’t delete the local copy." }
                 clearQueuedDownloads(id)
                 change(id) { put("state", "Paused"); put("offset", 0L); put("listed", false) }
             }
@@ -2150,7 +2971,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 record.key
             }
         }
-        migrated.forEach { TransferJob.cancelLegacyConstraint(context, it) }
+        migrated.forEach { TransferJob.cancelLegacyConstraint(context, it, profileId) }
     }
 
     fun requestDownload(id: String) = work { startDownload(id) }
@@ -2159,9 +2980,27 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         val snapshot = records.get(id)?.takeIf { it.kind == "file-received" }?.data() ?: return
         if (snapshot.optString("state") == "Withdrawn" ||
             (snapshot.optString("state") == "Complete" && File(incoming, id).isFile)) return
+        val native = snapshot.optInt("nativeMessage")
+        if (native > 9) {
+            withChatmail { core ->
+                val thread = snapshot.optString("thread")
+                val chatId = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+                check(chatId > 9) { "This conversation is unavailable." }
+                val chat = checkNotNull(core.nativeThread(chatId)) { "This conversation is unavailable." }
+                val attachment = checkNotNull(core.nativeMessage(chatId, native)?.attachment) {
+                    "This attachment is unavailable."
+                }
+                require(attachment.size <= NATIVE_ATTACHMENT_FILE_LIMIT) { "This attachment exceeds the 1 GiB limit." }
+                if (attachment.canRequestDownload) core.download(native)
+                // A previous failure in Room must not end a newly started retry.
+                updateNativeHistory(core, chat, thread, 25, messageId = native, resumeAttachment = true)
+                nextNativeSync = 0L
+            }
+            return
+        }
         val chatmailMessage = snapshot.optInt("chatmailAttachment")
         val retainedFile = if (chatmailMessage > 9) chatmailLock.withLock {
-            val service = chatmail ?: Chatmail(File(context.noBackupFilesDir, "chatmail")).also { chatmail = it }
+            val service = chatmail ?: openChatmail(storage.noBackup("chatmail")).also { chatmail = it }
             val cachedPath = service.message(chatmailMessage).optString("file")
             if (cachedPath.isBlank() || cachedPath == "null") null else File(cachedPath).takeIf(File::isFile)
         } else null
@@ -2187,7 +3026,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
                 queueDownload(id, data, offset)
                 save(id, record.kind, data, record.created)
             }
-            if (android.os.Build.VERSION.SDK_INT >= 34) TransferJob.schedule(context, id, remaining)
+            if (android.os.Build.VERSION.SDK_INT >= 34) TransferJob.schedule(context, id, remaining, profileId)
         }
     }
 
@@ -2480,7 +3319,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             }
             val payload = if (record.kind == "stream") makeChunk(record) ?: continue else data.getJSONObject("payload")
             val expires = payload.optLong("expires")
-            if (payload.optString("type") == TALK_SIGNAL && expires <= System.currentTimeMillis()) {
+            if (payload.optString("type") == RETIRED_TALK_PACKET) {
                 handleResult(record.key, "rejected")
                 continue
             }
@@ -2608,11 +3447,6 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
-        if (status in setOf("ok", "complete") && queued?.optString("type") == TALK_SIGNAL &&
-            queued.optString("action") == "offer"
-        ) {
-            talk.inviteSent(queued.optString("call"))
-        }
         if (status != "ok" && status != "complete") {
             database.withTransaction {
                 val payload = record.data().optJSONObject("payload")
@@ -2717,23 +3551,7 @@ class P2pModel(application: Application) : AndroidViewModel(application) {
         if (type in setOf("message", "offer", "messageReaction") && records.get(seen) != null) return "ok"
         val contact = records.get(sender)?.takeIf { it.kind == "contact" }?.data()
         if (contact?.optBoolean("blocked") == true) return "rejected"
-        if (type == TALK_SIGNAL) {
-            if (contact == null) return "rejected"
-            val now = System.currentTimeMillis()
-            val signal = TalkSignal.read(data, now, allowMissedOffer = true) ?: return "rejected"
-            val key = if (signal.action == "offer") "talk-offer:$sender:${signal.call}" else seen
-            val fresh = database.withTransaction {
-                if (records.get(seen) != null || records.get(key) != null) return@withTransaction false
-                val retainUntil = signal.expires + if (signal.action == "offer") MISSED_CALL_WINDOW else 0L
-                save(key, "talk-receipt", obj("expires" to retainUntil))
-                true
-            }
-            if (fresh) {
-                if (signal.expires > System.currentTimeMillis()) talk.receive(sender, signal)
-                else if (signal.action == "offer") announceMissedCall(sender)
-            }
-            return "ok"
-        }
+        if (type == RETIRED_TALK_PACKET) return "rejected"
         val group = data.optString("group")
         val post = data.optString("post")
         if (isId(group) && type !in setOf("group", "deviceUpdate", "offerCancel") && groupBlocked(group)) return "rejected"

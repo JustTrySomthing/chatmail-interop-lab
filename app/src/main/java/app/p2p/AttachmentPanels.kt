@@ -6,11 +6,19 @@ import android.media.MediaRecorder
 import android.os.SystemClock
 import android.widget.VideoView
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LifecycleStartEffect
 import java.io.File
@@ -19,8 +27,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 @Composable
-internal fun AudioCapturePanel(limitSeconds: Int? = null, recorded: (File) -> Unit) {
+internal fun AudioCapturePanel(model: P2pModel, limitSeconds: Int? = null, recorded: (File) -> Unit) {
     val context = LocalContext.current
+    val quality by produceState<OutgoingMediaQuality?>(null, model) {
+        value = runCatching { model.outgoingMediaQuality() }.getOrDefault(OutgoingMediaQuality.Balanced)
+    }
     var current by remember { mutableStateOf<Pair<MediaRecorder, File>?>(null) }
     var started by remember { mutableLongStateOf(0L) }
     var elapsed by remember { mutableLongStateOf(0L) }
@@ -60,7 +71,7 @@ internal fun AudioCapturePanel(limitSeconds: Int? = null, recorded: (File) -> Un
     } else {
         Text(if (limitSeconds == null) "Record an audio attachment for your draft."
             else "Record up to one minute.")
-        Button(onClick = {
+        Button(enabled = quality != null, onClick = {
             val directory = File(context.cacheDir, "captures").apply { mkdirs() }
             val output = runCatching { File.createTempFile("p2p-audio-", ".m4a", directory) }.getOrElse {
                 error = "Couldn’t create an audio attachment."
@@ -76,7 +87,8 @@ internal fun AudioCapturePanel(limitSeconds: Int? = null, recorded: (File) -> Un
                 recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 recorder.setAudioChannels(1)
-                recorder.setAudioEncodingBitRate(64_000)
+                recorder.setAudioSamplingRate(44_100)
+                recorder.setAudioEncodingBitRate(checkNotNull(quality).voiceBitrate)
                 recorder.setOutputFile(output.absolutePath)
                 if (limitSeconds != null) {
                     recorder.setMaxDuration(limitSeconds * 1_000)
@@ -218,6 +230,39 @@ internal fun VCardPreview(file: File) {
             Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text("Contact card", style = MaterialTheme.typography.labelLarge)
                 fields.forEach { Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 2) }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun AttachmentDraftList(
+    attachments: List<AttachmentDraft>, preparing: Boolean, removeAttachment: (Int) -> Unit,
+    trimAttachment: (Int) -> Unit, maxHeight: Dp = 140.dp
+) {
+    if (attachments.isNotEmpty()) {
+        val colors = MaterialTheme.colorScheme
+        Surface(color = colors.surface) {
+            Column(Modifier.fillMaxWidth().heightIn(max = maxHeight)
+                .padding(horizontal = 12.dp)) {
+                LazyColumn {
+                    items(attachments.size) { index ->
+                        val item = attachments[index]
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.AttachFile, null, Modifier.size(17.dp), tint = readableAccent(colors.surface, colors.onSurface))
+                            Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
+                                Text(item.label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                                Text(when {
+                                    item.range != null -> "Trim selected"
+                                    item.asFile -> "Original file"
+                                    else -> "Attachment"
+                                }, fontSize = 11.sp, color = colors.onSurfaceVariant)
+                            }
+                            if (item.canTrim) P2pTextButton(onClick = { trimAttachment(index) }, enabled = !preparing) { Text("Trim") }
+                            IconButton(onClick = { removeAttachment(index) }, enabled = !preparing) { Icon(Icons.Outlined.Close, "Remove attachment") }
+                        }
+                    }
+                }
             }
         }
     }

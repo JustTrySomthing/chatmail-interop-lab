@@ -45,9 +45,30 @@ class ConversationToolsTest {
     }
 
     @Test
-    fun appliesQualityFloorsAndPreservesContactCardLines() {
-        assertTrue(ratesForMedia(8_000, true).video > ratesForMedia(180_000, true).video)
-        assertEquals(48_000, ratesForMedia(600_000, false).audio)
+    fun upgradesHttpLinksOnOpenAndRejectsCleartextNavigations() {
+        val secure = "https://example.com/a%2Fb?q=one%20two#part"
+        val legacy = "http://example.com:80/a%2Fb?q=one%20two#part"
+        assertEquals(secure, inAppBrowserUrl(secure))
+        assertEquals(secure, inAppBrowserUrl(legacy, upgradeHttp = true))
+        assertEquals("https://example.com:8443", inAppBrowserUrl("http://example.com:8443", upgradeHttp = true))
+        assertNull(inAppBrowserUrl(legacy))
+        assertNull(inAppBrowserUrl("http://user@example.com", upgradeHttp = true))
+        assertNull(inAppBrowserUrl("http://127.0.0.1", upgradeHttp = true))
+        assertNull(inAppBrowserUrl("file:///data/private", upgradeHttp = true))
+    }
+
+    @Test
+    fun formatsInlineStylesWithoutChangingUnformattedText() {
+        val text = formatMessageMarkdown("**bold** *italic* ~~strike~~ sample_name")
+        assertEquals("bold italic strike sample_name", text.text)
+        assertEquals(3, text.spanStyles.size)
+        assertEquals("sample_name", formatMessageMarkdown("sample_name").text)
+    }
+
+    @Test
+    fun mapsCoreMediaQualityAndPreservesContactCardLines() {
+        assertEquals(32_000, OutgoingMediaQuality.fromCore(null).voiceBitrate)
+        assertEquals(24_000, OutgoingMediaQuality.fromCore("1").voiceBitrate)
         assertEquals("A\\, B\\nC", escapeVCard("A, B\nC"))
     }
 }

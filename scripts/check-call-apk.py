@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the packaged DEX, not debug classes: JNI_OnLoad needs these exact names."""
+"""Verify the bundled WebRTC library and Java bootstrap in a Relay Lab APK."""
 import struct
 import sys
 import zipfile
@@ -49,8 +49,8 @@ def classes(data):
         yield name, names
 
 required = {
-    'Lorg/jni_zero/JniInit;': {'init', 'crashIfMultiplexingMisaligned'},
-    'Lorg/jni_zero/JniUtil;': {'arrayToMap', 'mapToArray'},
+    'Lorg/webrtc/NativeLibrary;': {'initialize'},
+    'Lorg/webrtc/NativeLibraryLoader;': {'load'},
     'Lorg/webrtc/PeerConnectionFactory;': {'initialize'},
 }
 with zipfile.ZipFile(sys.argv[1]) as apk:
@@ -60,4 +60,4 @@ with zipfile.ZipFile(sys.argv[1]) as apk:
         assert name in found, f'Missing native bootstrap class: {name}'
         assert methods <= found[name], f'Missing native bootstrap methods: {name}: {methods - found[name]}'
     assert 'lib/arm64-v8a/libjingle_peerconnection_so.so' in apk.namelist()
-print('PASS: release APK contains native WebRTC bootstrap classes and methods')
+print('PASS: APK contains the WebRTC native library and Java bootstrap')

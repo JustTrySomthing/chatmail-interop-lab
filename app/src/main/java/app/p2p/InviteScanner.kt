@@ -36,7 +36,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun InviteScanner(
-    importResult: InviteImportState, close: () -> Unit, pickImage: () -> Unit, scanned: (String) -> Unit
+    importResult: InviteImportState, close: () -> Unit, pickImage: () -> Unit,
+    transferProfile: Boolean = false, scanned: (String) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
@@ -73,7 +74,8 @@ internal fun InviteScanner(
                     if (active.get() && now - lastScan >= 180L) {
                         lastScan = now
                         val value = runCatching { readCameraQr(frame) }.getOrNull()
-                        if (value != null && !InviteCode.hasPrefix(value.trim())) {
+                        val supported = value != null && if (transferProfile) isProfileTransferQr(value) else isSupportedInviteCode(value)
+                        if (value != null && !supported) {
                             main.execute { if (!disposed.get() && active.get()) wrongCode = true }
                         } else if (value != null && active.compareAndSet(true, false)) {
                             main.execute {
@@ -101,15 +103,20 @@ internal fun InviteScanner(
         }
     }
 
-    Dialog(onDismissRequest = close) {
+    Dialog(onDismissRequest = close, properties = androidx.compose.ui.window.DialogProperties(
+        securePolicy = if (transferProfile) androidx.compose.ui.window.SecureFlagPolicy.SecureOn
+            else androidx.compose.ui.window.SecureFlagPolicy.Inherit
+    )) {
         Surface(shape = P2pDialogShape) {
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Scan invite QR", style = MaterialTheme.typography.titleLarge)
+                val qrLabel = if (transferProfile) "device transfer QR" else "invite QR"
+                Text("Scan $qrLabel", style = MaterialTheme.typography.titleLarge)
                 if (error || camera == null) {
-                    Text("The camera couldn’t start. You can paste an invite or read a QR from an image.")
+                    Text(if (transferProfile) "The camera couldn’t start. You can read a QR from an image."
+                        else "The camera couldn’t start. You can paste an invite or read a QR from an image.")
                 } else if (detected) {
                     Text("QR code detected", style = MaterialTheme.typography.titleMedium)
-                    val message = importResult.message ?: "Checking the invite…"
+                    val message = importResult.message ?: if (transferProfile) "Receiving profile…" else "Checking the invite…"
                     Text(message, Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                         color = if (importResult.failed) MaterialTheme.colorScheme.error else LocalContentColor.current)
                     if (importResult.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -129,7 +136,11 @@ internal fun InviteScanner(
                         Box(Modifier.sizeIn(maxWidth = previewHeight * 0.82f).fillMaxWidth(0.76f).aspectRatio(1f)
                             .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp)))
                     }
-                    Text(if (wrongCode) "That QR code isn’t a P2P invite." else "Looking for a P2P invite…")
+                    Text(if (transferProfile) {
+                        if (wrongCode) "This isn’t a device transfer QR." else "Looking for a device transfer QR…"
+                    } else {
+                        if (wrongCode) "That QR code isn’t a supported invite." else "Looking for a supported invite…"
+                    })
                     Text("Open the large QR on the other phone. Fit the whole code in the frame and tap to focus.")
                     TextButton(onClick = {
                         val target = !torch
@@ -139,7 +150,9 @@ internal fun InviteScanner(
                 if (!detected || importResult.failed) TextButton(onClick = pickImage) { Text("Read QR from image") }
                 FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     if (detected && importResult.failed) TextButton(onClick = { wrongCode = false; detected = false }) { Text("Scan again") }
-                    TextButton(onClick = close) { Text(if (detected) "Back to accept invite" else "Close") }
+                    TextButton(onClick = close) {
+                        Text(if (detected && !transferProfile) "Back to accept invite" else "Close")
+                    }
                 }
             }
         }

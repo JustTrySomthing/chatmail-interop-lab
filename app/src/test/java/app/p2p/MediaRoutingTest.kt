@@ -1,14 +1,22 @@
 package app.p2p
 
-import android.net.nsd.NsdServiceInfo
-
+import android.content.ContentProvider
+import android.content.ContentValues
+import android.content.pm.ProviderInfo
+import android.net.Uri
+import android.os.Bundle
+import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract
+import java.io.IOException
+import java.io.InputStream
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import java.net.InetAddress
-import kotlin.random.Random
+import org.robolectric.shadows.ShadowContentResolver
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -35,8 +43,27 @@ class MediaRoutingTest {
         assertEquals(MediaKind.Video, mediaKind("application/ogg", "Video.ogv"))
         assertEquals(MediaKind.Audio, mediaKind("application/mp4", "Recording.m4a"))
         assertNull(mediaKind("application/pdf", "Document.mp4"))
-        assertNull(mediaKind("image/svg+xml", "Logo.svg"))
+        assertEquals(MediaKind.Svg, mediaKind("image/svg+xml", "Logo.svg"))
+        assertEquals(MediaKind.Tgs, mediaKind("application/octet-stream", "Sticker.tgs"))
+        assertEquals("Sticker", chatmailAttachmentViewType("application/x-tgsticker", false))
         assertNull(mediaKind("application/vnd.android.package-archive", "App.apk"))
+    }
+
+    @Test
+    fun readsBoundedTelegramStickerAnimations() {
+        val file = java.io.File.createTempFile("relay-sticker", ".tgs")
+        try {
+            val json = """{"v":"5.7.4","fr":60,"ip":0,"op":60,"w":512,"h":512,"layers":[]}"""
+            java.util.zip.GZIPOutputStream(file.outputStream()).use { it.write(json.toByteArray()) }
+            val sticker = decodeAnimatedSticker(file)
+            assertEquals(60f, sticker.frameRate, 0.01f)
+            assertEquals("application/x-tgsticker", MediaDownload("Sticker.tgs", "application/octet-stream").contentType)
+            assertEquals("Download image", MediaDownload("Vector.svg", "image/svg+xml").title)
+            file.writeText(json)
+            assertThrows(java.util.zip.ZipException::class.java) { decodeAnimatedSticker(file) }
+        } finally {
+            file.delete()
+        }
     }
 
     @Test
@@ -52,14 +79,14 @@ class MediaRoutingTest {
     }
 
     @Test
-    fun writesOriginalMediaBytesToTheChosenLocation() = kotlinx.coroutines.runBlocking {
-        val context = org.robolectric.RuntimeEnvironment.getApplication()
+    fun writesOriginalMediaBytesToTheChosenLocation() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
         val destination = java.io.File.createTempFile("p2p-media", ".mp4", context.cacheDir)
         try {
             destination.writeBytes(ByteArray(64))
             val original = byteArrayOf(1, 2, 3, 4, 5)
             writeMediaDownload(context.contentResolver, MediaDownload("Clip.mp4", "video/mp4"),
-                android.net.Uri.fromFile(destination), original.inputStream())
+                Uri.fromFile(destination)) { original.inputStream() }
             assertArrayEquals(original, destination.readBytes())
         } finally {
             destination.delete()
@@ -67,11 +94,73 @@ class MediaRoutingTest {
     }
 
     @Test
+    fun failedSaveDiscardsTheNewDocumentEvenWhenTheSourceCannotBeOpened() = runBlocking {
+        val context = RuntimeEnvironment.getApplication()
+        val authority = "app.p2p.test.media-documents"
+        val uri = DocumentsContract.buildDocumentUri(authority, "new-video")
+        val file = java.io.File.createTempFile("relay-export", ".mp4", context.cacheDir)
+        val provider = object : ContentProvider() {
+            override fun onCreate() = true
+            override fun query(uri: Uri, projection: Array<out String>?, selection: String?,
+                selectionArgs: Array<out String>?, sortOrder: String?) = error("Unexpected query")
+            override fun getType(uri: Uri) = "video/mp4"
+            override fun insert(uri: Uri, values: ContentValues?) = error("Unexpected insert")
+            override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = error("Unexpected delete")
+            override fun update(uri: Uri, values: ContentValues?, selection: String?,
+                selectionArgs: Array<out String>?) = error("Unexpected update")
+            override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor =
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_TRUNCATE)
+
+            override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+                check(method == "android:deleteDocument")
+                check(extras?.getParcelable("uri", Uri::class.java) == uri)
+                check(file.delete())
+                return Bundle()
+            }
+        }
+        provider.attachInfo(context, ProviderInfo().apply {
+            this.authority = authority
+            exported = true
+        })
+        ShadowContentResolver.registerProviderInternal(authority, provider)
+        try {
+            val request = MediaDownload("Clip.mp4", "video/mp4")
+            val openFailure = IOException("Source lost before opening")
+            val failedOpen = runCatching {
+                writeMediaDownload(context.contentResolver, request, uri) { throw openFailure }
+            }
+            assertSame(openFailure, failedOpen.exceptionOrNull())
+            assertFalse(file.exists())
+
+            assertTrue(file.createNewFile())
+            val readFailure = IOException("Source lost mid-copy")
+            val source = object : InputStream() {
+                private var readOnce = false
+                override fun read() = error("Expected buffered read")
+                override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                    if (readOnce) throw readFailure
+                    readOnce = true
+                    buffer[offset] = 42
+                    return 1
+                }
+            }
+            val failedCopy = runCatching {
+                writeMediaDownload(context.contentResolver, request, uri) { source }
+            }
+            assertSame(readFailure, failedCopy.exceptionOrNull())
+            assertFalse(file.exists())
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun automaticallyFetchesInlineMediaButLeavesOriginalFilesForManualDownload() {
-        val attachment = obj("mime" to "video/mp4", "name" to "Clip.mp4", "size" to CHATMAIL_FILE_LIMIT)
+        val attachment = obj("mime" to "video/mp4", "name" to "Clip.mp4", "size" to NATIVE_ATTACHMENT_FILE_LIMIT)
         assertTrue(shouldFetchInlineMedia(attachment))
+        assertTrue(shouldFetchInlineMedia(attachment.put("size", 21_000_000L)))
         assertFalse(shouldFetchInlineMedia(attachment.put("listed", true)))
-        assertFalse(shouldFetchInlineMedia(attachment.put("listed", false).put("size", CHATMAIL_FILE_LIMIT + 1)))
+        assertFalse(shouldFetchInlineMedia(attachment.put("listed", false).put("size", NATIVE_ATTACHMENT_FILE_LIMIT + 1)))
         assertFalse(shouldFetchInlineMedia(obj("mime" to "application/pdf", "size" to 400)))
     }
 
@@ -81,43 +170,6 @@ class MediaRoutingTest {
             youtubeEmbedUrl("dQw4w9WgXcQ"))
         assertNull(youtubeEmbedUrl("example.com"))
         assertNull(youtubeEmbedUrl("\"><script>"))
-    }
-
-    @Test
-    fun reconstructsNearbyInvitesAndRejectsMissingPartsAndUnusableAddresses() {
-        val code = "p2p1:" + encode(Random(19).nextBytes(750))
-        val attributes = nearbyTxt(code).mapValues { it.value.toByteArray(Charsets.US_ASCII) }
-        assertTrue(attributes.values.all { it.size <= 180 })
-        assertTrue(attributes.entries.sumOf { (key, value) -> key.length + value.size + 2 } < 1300)
-        assertEquals(code, nearbyCode(attributes))
-        assertNull(nearbyCode(attributes - "i1"))
-        assertNull(nearbyCode(attributes + ("i0" to "x".repeat(180).toByteArray())))
-        assertNull(nearbyCode(attributes + ("n" to "100".toByteArray())))
-        assertEquals("/ip4/192.168.0.10/tcp/41736/p2p/verifiedPeer",
-            nearbyRoute(InetAddress.getByName("192.168.0.10"), PORT, "verifiedPeer"))
-        assertNull(nearbyRoute(InetAddress.getByName("127.0.0.1"), PORT, "verifiedPeer"))
-        assertNull(nearbyRoute(InetAddress.getByName("fe80::1"), PORT, "verifiedPeer"))
-    }
-
-    @Test
-    fun fitsAFullSignedNearbyInviteInAndroidsTxtRecord() {
-        val random = Random(37)
-        val owner = "12D3KooW" + encode(random.nextBytes(33))
-        val device = "12D3KooW" + encode(random.nextBytes(33))
-        fun envelope(key: String, value: String) = obj(
-            "public" to random.nextBytes(36).hex(), "signature" to random.nextBytes(64).hex(), key to value
-        )
-        val grant = envelope("body", obj("purpose" to "p2p-device-v1", "account" to owner,
-            "device" to device, "revision" to 1_777_777_777_000L).toString())
-        val name = CharArray(60) { random.nextInt(0x4e00, 0x9fff).toChar() }.concatToString()
-        val body = obj("v" to 2, "peer" to owner, "grant" to grant.toString(),
-            "token" to encode(random.nextBytes(24)), "expires" to 1_777_777_777_000L, "name" to name,
-            "seeds" to jsonArray(emptyList()), "routes" to jsonArray(emptyList()))
-        val code = "p2p1:" + encode(envelope("payload", body.toString()).toString().toByteArray())
-        assertTrue(code.length > 1300)
-        val service = NsdServiceInfo()
-        nearbyTxt(code).forEach(service::setAttribute)
-        assertEquals(code, nearbyCode(service.attributes))
     }
 
     @Test

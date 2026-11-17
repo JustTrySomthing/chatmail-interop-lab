@@ -29,10 +29,10 @@ class NativeCrashTraceTest {
     @Test fun malformedBinaryNeverLeaksToCopiedLog() {
         assertTrue(nativeCrashTrace(byteArrayOf(0x82.toByte(), 0x7f, 0xff.toByte())).contains("binary data omitted"))
     }
-    @Test fun nativeBootstrapClassesAndMethodsAreAvailable() {
-        val type = Class.forName("org.jni_zero.JniInit")
-        assertNotNull(type.getDeclaredMethod("init"))
-        assertNotNull(type.getDeclaredMethod("crashIfMultiplexingMisaligned", Long::class.javaPrimitiveType, Long::class.javaPrimitiveType))
-        assertNotNull(Class.forName("org.jni_zero.JniUtil").getDeclaredMethod("arrayToMap", Array<Any>::class.java))
+    @Test fun upstreamWebRtcBootstrapClassesAndMethodsAreAvailable() {
+        val factory = org.webrtc.PeerConnectionFactory::class.java
+        assertNotNull(factory.getDeclaredMethod("initialize", org.webrtc.PeerConnectionFactory.InitializationOptions::class.java))
+        val nativeLibrary = Class.forName("org.webrtc.NativeLibrary", false, factory.classLoader)
+        assertNotNull(nativeLibrary.getDeclaredMethod("initialize", org.webrtc.NativeLibraryLoader::class.java, String::class.java))
     }
 }

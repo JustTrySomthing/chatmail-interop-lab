@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 
 internal val P2pDialogShape = RoundedCornerShape(20.dp)
 
@@ -48,7 +49,8 @@ internal fun P2pAlertDialog(
     text: @Composable () -> Unit,
     confirmButton: @Composable () -> Unit,
     dismissButton: (@Composable () -> Unit)? = null,
-    icon: (@Composable () -> Unit)? = null
+    icon: (@Composable () -> Unit)? = null,
+    properties: DialogProperties = DialogProperties()
 ) {
     AlertDialog(
         onDismissRequest = onDismissRequest,
@@ -58,6 +60,7 @@ internal fun P2pAlertDialog(
         text = { Box(Modifier.verticalScroll(rememberScrollState())) { text() } },
         confirmButton = confirmButton,
         dismissButton = dismissButton,
-        containerColor = MaterialTheme.colorScheme.surface
+        containerColor = MaterialTheme.colorScheme.surface,
+        properties = properties
     )
 }

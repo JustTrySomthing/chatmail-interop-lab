@@ -1,8 +1,11 @@
 package app.p2p
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceError
 import android.webkit.WebView
@@ -22,12 +25,18 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -71,18 +80,54 @@ internal fun parsePreviewLink(value: String): PreviewLink? = runCatching {
     PreviewLink(url.toASCIIString(), host, id)
 }.getOrNull()
 
+internal fun inAppBrowserUrl(value: String, upgradeHttp: Boolean = false): String? {
+    val link = parsePreviewLink(value) ?: return null
+    val url = URI(link.url)
+    if (url.scheme.equals("https", ignoreCase = true)) return link.url
+    if (!upgradeHttp) return null
+    val authority = if (url.port == 80) url.host else url.rawAuthority
+    val suffix = link.url.substring(url.scheme.length + "://".length + url.rawAuthority.length)
+    return "https://$authority$suffix"
+}
+
+private val inlineMarkdown = Regex(
+    """(?<![\p{L}\p{N}\\])([*_]{1,2}|~~|`)(?!\s)([^\n]+?)(?<!\s)\1(?![*_~`\p{L}\p{N}])"""
+)
+
+internal fun formatMessageMarkdown(text: String): AnnotatedString = buildAnnotatedString {
+    var cursor = 0
+    for (match in inlineMarkdown.findAll(text)) {
+        val marker = match.groupValues[1]
+        val style = when (marker) {
+            "**", "__" -> SpanStyle(fontWeight = FontWeight.Bold)
+            "*", "_" -> SpanStyle(fontStyle = FontStyle.Italic)
+            "~~" -> SpanStyle(textDecoration = TextDecoration.LineThrough)
+            "`" -> SpanStyle(fontFamily = FontFamily.Monospace)
+            else -> continue
+        }
+        append(text.substring(cursor, match.range.first))
+        val start = length
+        append(match.groupValues[2])
+        addStyle(style, start, length)
+        cursor = match.range.last + 1
+    }
+    append(text.substring(cursor))
+}
+
 @Composable
 internal fun LinkedMessageText(
     text: String, open: (PreviewLink) -> Unit,
     style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyLarge,
-    background: Color = MaterialTheme.colorScheme.surface
+    background: Color = MaterialTheme.colorScheme.surface,
+    formatMarkdown: Boolean = false
 ) {
     val accent = readableAccent(background, LocalContentColor.current)
     val openLink by rememberUpdatedState(open)
-    val annotated = remember(text, accent) {
+    val annotated = remember(text, accent, formatMarkdown) {
+        val formatted = if (formatMarkdown) formatMessageMarkdown(text) else AnnotatedString(text)
         buildAnnotatedString {
-            append(text)
-            for (match in webLink.findAll(text)) {
+            append(formatted)
+            for (match in webLink.findAll(formatted.text)) {
                 val raw = match.value.trimEnd('.', ',', '!', '?', ')', ']', ';', ':')
                 val link = parsePreviewLink(raw) ?: continue
                 addLink(LinkAnnotation.Clickable(
@@ -94,6 +139,23 @@ internal fun LinkedMessageText(
         }
     }
     Text(annotated, style = contentTextStyle(style))
+}
+
+@Composable
+internal fun MessageBodyWithPreviews(
+    body: String, preview: (PreviewLink) -> Unit, open: (PreviewLink) -> Unit,
+    background: Color = MaterialTheme.colorScheme.surface
+) {
+    val links = remember(body) { previewLinks(body) }
+    val caption = remember(body, links) {
+        val rendered = links.mapTo(mutableSetOf(), PreviewLink::url)
+        webLink.replace(body) { match ->
+            val raw = match.value.trimEnd('.', ',', '!', '?', ')', ']', ';', ':')
+            if (parsePreviewLink(raw)?.url?.let(rendered::contains) == true) "" else match.value
+        }.trim()
+    }
+    if (caption.isNotBlank()) LinkedMessageText(caption, open, background = background, formatMarkdown = true)
+    links.forEach { link -> MessageLinkCard(link, { preview(link) }, { open(link) }) }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -117,17 +179,28 @@ internal fun MessageLinkCard(link: PreviewLink, preview: () -> Unit, open: () ->
 
 @Composable
 private fun YoutubeThumbnail(id: String, modifier: Modifier, open: () -> Unit) {
+    var requested by rememberSaveable(id) { mutableStateOf(false) }
+    if (!requested) {
+        TextButton(onClick = { requested = true }) { Text("Load YouTube thumbnail") }
+        return
+    }
     val download = LocalMediaDownload.current
-    val bitmap by produceState<Bitmap?>(null, id) {
+    val result by produceState<Result<Bitmap>?>(null, id) {
         value = withContext(Dispatchers.IO) {
-            runCatching { fetchYoutubeThumbnail(id) }.getOrNull()?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+            runCatching {
+                val bytes = fetchYoutubeThumbnail(id)
+                checkNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+            }
         }
     }
-    bitmap?.let {
-        Image(it.asImageBitmap(), "YouTube thumbnail", modifier.combinedClickable(onClick = open,
+    val image = result?.getOrNull()
+    when {
+        image != null -> Image(image.asImageBitmap(), "YouTube thumbnail", modifier.combinedClickable(onClick = open,
             onLongClickLabel = "Download image",
             onLongClick = download?.let { save -> { save(MediaDownload("YouTube-$id.jpg", "image/jpeg", thumbnail = id)) } }),
             contentScale = ContentScale.Fit)
+        result != null -> Text("YouTube thumbnail unavailable")
+        else -> LinearProgressIndicator(Modifier.fillMaxWidth())
     }
 }
 
@@ -159,12 +232,16 @@ internal fun fetchYoutubeThumbnail(id: String): ByteArray {
 
 @Composable
 internal fun InAppBrowser(link: PreviewLink, close: () -> Unit) {
+    val destination = remember(link.url) { inAppBrowserUrl(link.url, upgradeHttp = true) } ?: return
+    val context = LocalContext.current
     Dialog(onDismissRequest = close,
         properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = false,
             dismissOnClickOutside = false, decorFitsSystemWindows = false)) {
         var browser by remember(link.url) { mutableStateOf<WebView?>(null) }
-        var address by remember(link.url) { mutableStateOf(link.url) }
+        var address by remember(link.url) { mutableStateOf(destination) }
         var failed by remember(link.url) { mutableStateOf(false) }
+        var insecureRedirect by remember(link.url) { mutableStateOf<String?>(null) }
+        var noExternalBrowser by remember(link.url) { mutableStateOf(false) }
         fun back() {
             val view = browser
             if (view?.canGoBack() == true) view.goBack() else close()
@@ -177,7 +254,22 @@ internal fun InAppBrowser(link: PreviewLink, close: () -> Unit) {
                     Text(address, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     IconButton(onClick = close) { Icon(Icons.Outlined.Close, "Close browser") }
                 }
-                if (failed) Text("This page couldn’t load.", Modifier.padding(16.dp))
+                if (failed) {
+                    val fallback = insecureRedirect ?: link.url.takeIf { inAppBrowserUrl(it) == null }
+                    Column(Modifier.padding(16.dp)) {
+                        Text(if (fallback != null) "A secure connection to this page couldn’t be opened."
+                            else "This page couldn’t load.")
+                        if (fallback != null) TextButton(onClick = {
+                            try {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(fallback))
+                                    .addCategory(Intent.CATEGORY_BROWSABLE))
+                            } catch (_: ActivityNotFoundException) {
+                                noExternalBrowser = true
+                            }
+                        }) { Text("Open HTTP link in external browser") }
+                        if (noExternalBrowser) Text("No browser is available to open this link.")
+                    }
+                }
                 else AndroidView(factory = { context ->
                     WebView(context).apply {
                         settings.javaScriptEnabled = false
@@ -188,8 +280,15 @@ internal fun InAppBrowser(link: PreviewLink, close: () -> Unit) {
                         settings.setSupportMultipleWindows(false)
                         android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
                         webViewClient = object : WebViewClient() {
-                            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) =
-                                parsePreviewLink(request.url.toString()) == null
+                            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                                val url = request.url.toString()
+                                if (inAppBrowserUrl(url) != null) return false
+                                if (request.isForMainFrame && request.url.scheme.equals("http", ignoreCase = true)) {
+                                    insecureRedirect = parsePreviewLink(url)?.url
+                                    failed = true
+                                }
+                                return true
+                            }
 
                             override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
                                 address = url
@@ -205,7 +304,7 @@ internal fun InAppBrowser(link: PreviewLink, close: () -> Unit) {
                             }
                         }
                         browser = this
-                        loadUrl(link.url)
+                        loadUrl(destination)
                     }
                 }, modifier = Modifier.fillMaxWidth().weight(1f), onRelease = { view ->
                     browser = null

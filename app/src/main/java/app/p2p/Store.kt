@@ -52,6 +52,9 @@ interface Records {
     @Query("SELECT * FROM records WHERE key = :key")
     fun observeRecord(key: String): Flow<Record?>
 
+    @Query("SELECT * FROM records WHERE kind IN ('message', 'file-sent', 'file-received')")
+    suspend fun threadItems(): List<Record>
+
     @Query("SELECT * FROM records WHERE kind = :kind ORDER BY created ASC")
     suspend fun all(kind: String): List<Record>
 
@@ -82,7 +85,8 @@ abstract class LocalStore : RoomDatabase() {
     abstract fun records(): Records
 
     companion object {
-        fun open(context: Context) = Room.databaseBuilder(context, LocalStore::class.java, "p2p.db").build()
+        fun open(context: Context, profileId: String = PRIMARY_PROFILE): LocalStore =
+            Room.databaseBuilder(context, LocalStore::class.java, ProfileStorage(context, profileId).scoped("p2p.db")).build()
     }
 }
 
@@ -119,10 +123,11 @@ internal fun ByteArray.hex() = joinToString("") { "%02x".format(it.toInt() and 0
 internal fun digest(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).hex()
 internal fun jsonArray(values: Collection<String>) = JSONArray(values)
 
-class IdentityVault(context: Context) {
-    private val preferences = context.getSharedPreferences("identity", Context.MODE_PRIVATE)
+class IdentityVault(context: Context, profileId: String = PRIMARY_PROFILE) {
+    private val storage = ProfileStorage(context, profileId)
+    private val preferences = storage.preferences("identity")
     private val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    private val alias = "app.p2p.identity.v1"
+    private val alias = storage.scoped("app.p2p.identity.v1")
 
     fun load(): String {
         val saved = preferences.getString("sealed", null)
@@ -202,6 +207,9 @@ internal object Rendezvous {
 
 internal fun remainingMessageTargets(data: JSONObject): Int =
     (data.optInt("targets", 1) - data.optInt("delivered") - data.optInt("failed") - data.optInt("cancelled")).coerceAtLeast(0)
+
+internal fun canCancelLegacyDelivery(data: JSONObject): Boolean =
+    data.optInt("nativeMessage") <= 9 && remainingMessageTargets(data) > 0
 
 internal fun messageDeliveryStatus(data: JSONObject): String {
     val delivered = data.optInt("delivered")

@@ -36,10 +36,12 @@ class ThreadFeedTest {
     @get:Rule val compose = createEmptyComposeRule()
 
     @Test
-    fun feedShowsAnArrivalWhileReadingOlderMessages() {
+    fun feedKeepsTheReadingPositionAndOffersJumpToLatest() {
         val records = mutableStateOf((20 downTo 1).map { message(it) })
-        showFeed(records).use {
+        var appsOpened = false
+        showFeed(records, apps = { appsOpened = true }).use {
             compose.onNodeWithText("Feed").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Apps").assertIsDisplayed()
             compose.onNodeWithText("Message 20").assertIsDisplayed()
             compose.onNode(hasScrollToIndexAction()).performScrollToIndex(15)
             compose.onNodeWithText("Message 5").assertIsDisplayed()
@@ -51,6 +53,12 @@ class ThreadFeedTest {
             compose.onNodeWithText("Message 5").assertIsDisplayed()
 
             compose.runOnIdle { records.value = listOf(message(21)) + records.value }
+            compose.onNodeWithText("Message 5").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Scroll to latest message").performClick()
+            compose.onNodeWithText("Message 21").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Apps").performClick()
+            assertEquals(true, appsOpened)
+            compose.runOnIdle { records.value = records.value + message(0) }
             compose.onNodeWithText("Message 21").assertIsDisplayed()
         }
     }
@@ -67,7 +75,7 @@ class ThreadFeedTest {
         showFeed(records, file = { opened.add(it) }, react = { reacted.add(it) }).use {
             compose.onNodeWithContentDescription("Play video").performClick()
             compose.onNodeWithContentDescription("Play audio").performClick()
-            assertEquals(listOf(video.key, audio.key), opened)
+            assertEquals(listOf(video.key), opened)
             compose.onAllNodesWithContentDescription("React to attachment")[0].performClick()
             assertEquals(listOf(video.key), reacted)
             compose.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
@@ -77,10 +85,24 @@ class ThreadFeedTest {
             compose.onNodeWithText("Gallery").performClick()
             compose.onAllNodesWithContentDescription("Star attachment")[1].performClick()
             compose.onNodeWithContentDescription("Unstar attachment").assertIsDisplayed()
-            assertEquals(listOf(video.key, audio.key), opened)
+            assertEquals(listOf(video.key), opened)
             compose.onNodeWithText("Starred").performClick()
             compose.onNodeWithText("Recording.wav").assertIsDisplayed()
             compose.onNodeWithText("Message 1").assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun attachmentCaptionsKeepTheirTextAndRenderLinkCards() {
+        val url = "https://example.org/route"
+        val attachment = Record("clip", "file-received", obj(
+            "thread" to "test-thread", "author" to "avery", "name" to "Clip.mp4",
+            "mime" to "video/mp4", "state" to "Available", "caption" to "Route details $url"
+        ).toString())
+        showFeed(mutableStateOf(listOf(attachment))).use {
+            compose.onNodeWithText("Route details").assertIsDisplayed()
+            compose.onNodeWithText("example.org").assertIsDisplayed()
+            compose.onNodeWithText(url, substring = true).assertDoesNotExist()
         }
     }
 
@@ -118,7 +140,8 @@ class ThreadFeedTest {
         records: MutableState<List<Record>>,
         file: (String) -> Unit = {},
         react: (String) -> Unit = {},
-        appearance: Appearance = Appearance()
+        appearance: Appearance = Appearance(),
+        apps: (() -> Unit)? = null
     ): ActivityScenario<MainActivity> {
         seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
         val view = mutableStateOf("Feed")
@@ -139,7 +162,7 @@ class ThreadFeedTest {
                                     }.toString())
                                 }
                             },
-                            galleryFile = { if (it.kind == "file-sent") File(mediaDir, it.data().getString("name")) else null }, file = file)
+                            galleryFile = { if (it.kind == "file-sent") File(mediaDir, it.data().getString("name")) else null }, file = file, openApps = apps)
                     }
                 }
             }

@@ -170,7 +170,8 @@ internal class ReadAloud(context: Context, private val scope: CoroutineScope) {
             error = "Audio is busy. Try again."
             return
         }
-        val speaker = if (voice == ReadAloudVoice.Male) 1 else 0
+        // JNI accepts upstream voice IDs and maps them to the compact voice bank.
+        val speaker = voice.speaker
         val rate = speed
         active = key
         playback = scope.launch {

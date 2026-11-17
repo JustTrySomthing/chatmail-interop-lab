@@ -15,8 +15,8 @@ android {
         applicationId = "app.p2p.interop"
         minSdk = 31
         targetSdk = 35
-        versionCode = 81
-        versionName = "0.7.23-rc45"
+        versionCode = 93
+        versionName = "0.7.23-rc57"
         manifestPlaceholders["p2pAppLabel"] = "Relay Lab"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
@@ -37,6 +37,12 @@ android {
             applicationIdSuffix = ".audit"
             manifestPlaceholders["p2pAppLabel"] = "Relay Lab Recovery Test"
         }
+    }
+    buildTypes.create("preview") {
+        initWith(buildTypes.getByName("release"))
+        // Keep the existing test install eligible for in-place upgrades.
+        signingConfig = signingConfigs.getByName("debug")
+        matchingFallbacks += "release"
     }
     androidResources { noCompress += "voicepack" }
     packaging {
@@ -67,7 +73,7 @@ android {
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 
 dependencies {
-    implementation("io.github.webrtc-sdk:android:144.7559.15")
+    implementation("im.conversations.webrtc:webrtc-android:129.0.0")
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.compose.foundation:foundation")
@@ -78,10 +84,11 @@ dependencies {
     implementation("androidx.room:room-ktx:2.7.1")
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("com.google.zxing:core:3.5.3")
-    implementation("androidx.media3:media3-transformer:1.6.1")
-    implementation("androidx.media3:media3-effect:1.6.1")
-    implementation("androidx.media3:media3-exoplayer:1.6.1")
-    implementation("androidx.media3:media3-ui:1.6.1")
+    implementation("com.airbnb.android:lottie:6.6.7")
+    implementation("androidx.media3:media3-transformer:1.8.0")
+    implementation("androidx.media3:media3-effect:1.8.0")
+    implementation("androidx.media3:media3-exoplayer:1.8.0")
+    implementation("androidx.media3:media3-ui:1.8.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
     implementation("androidx.camera:camera-camera2:1.4.2")
     implementation("androidx.camera:camera-lifecycle:1.4.2")

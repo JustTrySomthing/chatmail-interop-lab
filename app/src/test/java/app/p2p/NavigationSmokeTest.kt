@@ -1,5 +1,9 @@
 package app.p2p
 
+import android.content.ClipData
+import android.content.Intent
+import android.net.Uri
+
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.isDisplayed
@@ -34,6 +38,27 @@ class NavigationSmokeTest {
         override fun before() = seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
     }
     @get:Rule(order = 1) val compose = createAndroidComposeRule<MainActivity>()
+
+    @Test
+    fun readsTextAndCaptionsFromAndroidShareIntents() {
+        val own = "app.p2p.interop.files"
+        val url = "https://example.org/article"
+        val link = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url)
+        org.junit.Assert.assertEquals(IncomingShare(emptyList(), url), readIncomingShare(link, own))
+
+        val video = Uri.parse("content://example.provider/video")
+        val caption = Intent(Intent.ACTION_SEND_MULTIPLE).setType("video/*")
+            .putExtra(Intent.EXTRA_TEXT, "Two clips from today")
+            .apply {
+                clipData = ClipData.newRawUri("video", video).apply {
+                    addItem(ClipData.Item(Uri.parse("content://$own/private")))
+                    addItem(ClipData.Item(Uri.parse("file:///private.mp4")))
+                    addItem(ClipData.Item(video))
+                }
+            }
+        org.junit.Assert.assertEquals(IncomingShare(listOf(video), "Two clips from today"),
+            readIncomingShare(caption, own))
+    }
 
     @Test
     fun settingsAndContactsShareTheSameToolbarWhileSwitching() {
@@ -101,8 +126,39 @@ class NavigationSmokeTest {
     }
 
     @Test
+    fun newChatmailGroupHasAnOptionalDescription() {
+        val groups = compose.onAllNodesWithText("Groups")[0]
+        compose.waitUntil(5_000) { groups.isDisplayed() }
+        groups.performClick()
+        compose.onNodeWithText("Create a group").performSemanticsAction(SemanticsActions.OnClick)
+        val description = compose.onNode(hasSetTextAction() and hasText("Description (optional)"))
+        description.assertIsDisplayed().performTextInput("Local trail updates")
+        compose.onNodeWithText("Local trail updates").assertIsDisplayed()
+    }
+
+    @Test
+    fun myChannelsOffersCreationFromItsOwnTab() {
+        val channels = compose.onAllNodesWithText("Channels")[0]
+        compose.waitUntil(5_000) { channels.isDisplayed() }
+        channels.performClick()
+        compose.onNodeWithText("Create a Channel").assertDoesNotExist()
+        compose.onNodeWithText("My Channels").performClick()
+        compose.onNodeWithText("Create a Channel").assertIsDisplayed()
+            .performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithText("Channel name").assertIsDisplayed()
+        val create = compose.onNode(hasClickAction() and hasText("Create channel"))
+        create.assertIsNotEnabled()
+        compose.onNode(hasSetTextAction() and hasText("Channel name")).performTextInput("Trail notes")
+        create.assertIsDisplayed()
+    }
+
+    @Test
     fun socialComposerKeepsItsOnlyAttachmentActionInsideTheSheet() {
-        compose.onAllNodesWithText("Social")[0].performClick()
+        val channels = compose.onAllNodesWithText("Channels")[0]
+        compose.waitUntil(5_000) { channels.isDisplayed() }
+        channels.performClick()
+        compose.onNodeWithText("My Channels").performClick()
+        compose.onNodeWithText("Previous Social posts").performClick()
         compose.onNodeWithText("My Page").performClick()
         compose.onNodeWithText("No posts yet").assertIsDisplayed()
         compose.onNodeWithText("Add media").assertDoesNotExist()
@@ -113,7 +169,9 @@ class NavigationSmokeTest {
 
     @Test
     fun opensAllFourAreasAndTheirPrimaryControls() {
-        compose.onNodeWithText("Inbox").assertIsDisplayed()
+        val inbox = compose.onNodeWithText("Inbox")
+        compose.waitUntil(5_000) { inbox.isDisplayed() }
+        inbox.assertIsDisplayed()
         compose.onNodeWithText("Archive").assertIsDisplayed()
         compose.onNodeWithText("Trash").assertIsDisplayed()
         compose.onNodeWithText("No messages").assertIsDisplayed()
@@ -132,16 +190,15 @@ class NavigationSmokeTest {
         compose.onNodeWithText("No deleted groups").assertIsDisplayed()
         compose.onNodeWithText("Empty trash").assertIsDisplayed().assertIsNotEnabled()
 
-        compose.onAllNodesWithText("Social")[0].performClick()
-        compose.onNodeWithText("My Page").assertIsDisplayed()
-        compose.onNodeWithText("Friends").performClick()
-        compose.onNodeWithText("No friends yet").assertIsDisplayed()
-        org.junit.Assert.assertEquals(1, compose.onAllNodesWithText("Add friend").fetchSemanticsNodes().size)
-        compose.onNodeWithText("Feed").performClick()
-        compose.onNodeWithText("No posts in your feed").assertIsDisplayed()
+        compose.onAllNodesWithText("Channels")[0].performClick()
+        compose.onNodeWithText("Feed").assertIsDisplayed()
+        compose.onNodeWithText("Publish").assertDoesNotExist()
+        compose.onNodeWithText("My Channels").assertIsDisplayed()
+        compose.onNodeWithText("Following").performClick()
+        compose.onNodeWithText("Join channel").assertIsDisplayed()
 
         compose.onAllNodesWithText("Talk")[0].performClick()
-        compose.onNodeWithText("VoiceMail").assertIsDisplayed()
+        compose.onNodeWithText("VoiceMail").assertDoesNotExist()
         compose.onNodeWithText("Call").assertIsDisplayed()
         compose.onNodeWithText("Files").assertDoesNotExist()
         compose.onAllNodesWithText("Chats")[0].performClick()
@@ -166,8 +223,9 @@ class NavigationSmokeTest {
     fun theSameNotificationBellWorksAcrossPages() {
         val mute = compose.onNodeWithContentDescription("Mute all notifications")
         val unmute = compose.onNodeWithContentDescription("Unmute all notifications")
+        compose.waitUntil(5_000) { mute.isDisplayed() }
         mute.assertIsOff().performClick()
-        for (area in listOf("Talk", "Groups", "Social", "Chats")) {
+        for (area in listOf("Talk", "Groups", "Channels", "Chats")) {
             compose.onAllNodesWithText(area)[0].performClick()
             unmute.assertIsOn()
             compose.onNodeWithContentDescription("Search").assertIsDisplayed()
