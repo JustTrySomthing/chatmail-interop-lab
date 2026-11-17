@@ -6,14 +6,14 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc53**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc53/P2P-0.7.23-rc53-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc54**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc54/P2P-0.7.23-rc54-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC53 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC54 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
 ### Update from the app
 
-Open **Settings → Updates**, enable **Include release candidates**, and tap **Check now**. RC53 is offered to ARM64 devices running an older Relay Lab build. You can turn on automatic checks in the same menu.
+Open **Settings → Updates**, enable **Include release candidates**, and tap **Check now**. RC54 is offered to ARM64 devices running an older Relay Lab build. You can turn on automatic checks in the same menu.
 
 ## Features
 
@@ -37,7 +37,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 
 
 For a non-debuggable development APK, run `./gradlew :app:assemblePreview`. The output is `app/build/outputs/apk/preview/app-preview.apk`. This variant uses the local debug signing configuration, so an existing Relay Lab test install can upgrade in place when built with the same keystore. Use the separate release key for distribution.
 
-The downloadable APK's source is at the [RC53 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc53). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and automatic update checks off by default.
+The downloadable APK's source is at the [RC54 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc54). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and automatic update checks off by default.
 
 ### Release publishing
 
@@ -71,7 +71,7 @@ In **Settings → Backup**, export a standard Chatmail archive that includes the
 
 ### Multiple profiles
 
-In this development branch, open **Settings → Profiles** to switch profiles or add a profile. A new profile opens Setup, where you can create a Chatmail identity, restore a standard backup, or scan an Add Second Device QR code. Setup's **Switch profile** button lets you return to your original profile even before finishing setup. The original profile keeps its existing conversations, identity, and files. Other profiles have their own Chatmail database, local history, attachments, and Webxdc storage.
+Open **Settings → Profiles** to switch profiles or add a profile. A new profile opens Setup, where you can create a Chatmail identity, restore a standard backup, or scan an Add Second Device QR code. Setup's **Switch profile** button lets you return to your original profile even before finishing setup. The original profile keeps its existing conversations, identity, and files. Other profiles have their own Chatmail database, local history, attachments, and Webxdc storage.
 
 Enabled profiles receive messages and incoming calls through the existing background connection or scheduled synchronization. An incoming call notification identifies the receiving profile. Opening or answering it switches to that profile if there is no call or other protected operation in progress. Declining keeps the current profile selected. In **Settings → Profiles**, disable an inactive profile to stop its background connection and alerts, or enable it to resume. Finish a call, a backup or device transfer, or a message that's currently sending before switching. Android permissions and the app's updater apply to the whole installation. Creating, switching, and restoring profiles on Android still need device testing.
 
@@ -112,7 +112,7 @@ The bottom-right button jumps to the newest messages when you are reading older 
 
 Use the back arrow to minimize a mini-app and return to the chat. The chat's **Apps** button or the mini-app's **Open apps** button opens the switcher. You can reopen or close a running mini-app there. Up to three mini-apps stay open in the current app session when the shared WebRTC guard is available. Each mini-app still checks its own renderer before it loads. If the shared guard is unavailable, one mini-app can run with its own isolation checks.
 
-The catalog is the same index used by Delta Chat's default Webxdc Store. Relay Lab ships Delta Chat Android v2.69.0's JavaScript API and WebRTC isolation assets and uses Chatmail Core for native Webxdc messages, status updates, and realtime data. Relay Lab hosts each message in its own isolated WebView origin. In this development branch, a mini-app can request camera, microphone, location, or motion access while open. Relay Lab asks for consent for that mini-app and checks Android permissions for camera, microphone, and location. Android's approximate location setting is supported. Allowing motion reloads the mini-app so its page can use the sensors. Minimizing the mini-app or leaving Relay Lab closes an instance that has been granted any of these permissions. Permission use still needs Android device testing. Two catalog apps passed offline Core tests. Android WebView isolation, game interaction, and multiplayer sync across installed clients still need device testing.
+The catalog is the same index used by Delta Chat's default Webxdc Store. Relay Lab ships Delta Chat Android v2.69.0's JavaScript API and WebRTC isolation assets and uses Chatmail Core for native Webxdc messages, status updates, and realtime data. Relay Lab hosts each message in its own isolated WebView origin. A mini-app can request camera, microphone, location, or motion access while open. Relay Lab asks for consent for that mini-app and checks Android permissions for camera, microphone, and location. Android's approximate location setting is supported. Allowing motion reloads the mini-app so its page can use the sensors. Minimizing the mini-app or leaving Relay Lab closes an instance that has been granted any of these permissions. Permission use still needs Android device testing. Two catalog apps passed offline Core tests. Android WebView isolation, game interaction, and multiplayer sync across installed clients still need device testing.
 
 ## Channels and Read Aloud
 

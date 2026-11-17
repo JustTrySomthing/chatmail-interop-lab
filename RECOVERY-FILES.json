@@ -1,10 +1,10 @@
 {
-  "version": "0.7.23-rc53",
-  "version_code": 89,
+  "version": "0.7.23-rc54",
+  "version_code": 90,
   "sha256": {
     ".gitignore": "57752bc83258c3f60383f01be18a07066ff22025f89f995f19878ee0664e740b",
-    "README.md": "7a05dacadb8309bcc3d135f3633f047561e7768ed436d14edd43d675bae23bf2",
-    "app/build.gradle.kts": "2af618cef7993d34a624ac50d438fef9e0edadf5a9620196c5be87c88bde7625",
+    "README.md": "8e65df333401fc6d8b5e51ad42b392ef58e32da132417621febd7c8cc7069f00",
+    "app/build.gradle.kts": "382c003f6bd4fecbf1d8e187ad489356d38ad2b0e5ba9371cb7e1982055ecd83",
     "app/proguard-rules.pro": "5c4bb565ceea112dfd25a087e5dbac2d4dcc1cd2f3a724d5b9031c836b39818b",
     "app/src/main/AndroidManifest.xml": "471f9af1d778a2ae60f96aabbeb14fb9599ff5dc9118e2788c5dd4a6d28f7af1",
     "app/src/main/assets/emoji.json": "513c7f8a8e07661e0aa16d27eea8a36dd813258f832e71d6f86f9411ff81dd94",
