@@ -1,10 +1,10 @@
 {
-  "version": "0.7.23-rc66",
-  "version_code": 102,
+  "version": "0.7.23-rc67",
+  "version_code": 103,
   "sha256": {
     ".gitignore": "57752bc83258c3f60383f01be18a07066ff22025f89f995f19878ee0664e740b",
-    "README.md": "f6e42f911f688031390196d58b23d69cadfd92a9ad8a07233638fd1fc0f9edb1",
-    "app/build.gradle.kts": "4c4a6acc154f01aebb744dd2c1d6f8f36d39c78c8a162d54d50832fbd298e902",
+    "README.md": "fd8256c2d61a926fcccfbf3d40735fd064ac5f4a36f9d0c988a8e57b0f06e18f",
+    "app/build.gradle.kts": "20e56500a9efc0eaf36a049c0b33a6015af4efd65b98c2066354d75648521942",
     "app/proguard-rules.pro": "5c4bb565ceea112dfd25a087e5dbac2d4dcc1cd2f3a724d5b9031c836b39818b",
     "app/src/main/AndroidManifest.xml": "5c095e13ddb5babe513ff0d20c1c2d3cb2ffc1e2bf59e637e63773127e1d1e30",
     "app/src/main/assets/emoji.json": "513c7f8a8e07661e0aa16d27eea8a36dd813258f832e71d6f86f9411ff81dd94",
@@ -33,7 +33,7 @@
     "app/src/main/java/app/p2p/BackgroundMessages.kt": "dd5407934958c36585b18b42c70fa82d930d9d1705de4baa987e8bc0719a2379",
     "app/src/main/java/app/p2p/Backgrounds.kt": "f20588c1e6af41da8fa2994f0183104cd93d24c47e95989668b69d97a067240a",
     "app/src/main/java/app/p2p/BackupArchive.kt": "3ed8c16b1eaadb957033ad25a1861c0c425456cc4c324ec624d6931073dd73af",
-    "app/src/main/java/app/p2p/ChannelBoard.kt": "7de8d56fa94b65d87cbff022696d64f9d119346de3d1a6b55540689c1a2edff0",
+    "app/src/main/java/app/p2p/ChannelBoard.kt": "ec4c1cfd2ae64a8366ab842bffb063cef3f04f073744d0b76b9837f1436c37c3",
     "app/src/main/java/app/p2p/Chatmail.kt": "fc8b18725d0098025d5a171b68afff63c1dc70b5d8414a3bdc235e4d5510d757",
     "app/src/main/java/app/p2p/ChatmailMessageTools.kt": "77275d1dfb50379f7537819a115a42cca203549cca81c50faf9737835cf8d188",
     "app/src/main/java/app/p2p/ConversationTools.kt": "13f0089b36a2c2a5d9ed248ed3c89d7d01d4ae5c59459fdf394ab6074fdb7eba",
@@ -46,7 +46,7 @@
     "app/src/main/java/app/p2p/InviteScanner.kt": "f68c67893262b25c6671319de0eeb6b10e1ab841ca3c4851d6b8cc69d24abb1d",
     "app/src/main/java/app/p2p/LinkPreviews.kt": "51122bdbdf48325fa9a0848f131c2f5d9696046ec4ca0d29e0d695df275b86ee",
     "app/src/main/java/app/p2p/LocalAlerts.kt": "28ed9167f7226f261c7008438b15e00698a1bfcbe64db0f36b5451983ceb552e",
-    "app/src/main/java/app/p2p/MainActivity.kt": "95829d48ed3618a40ab7b2533517f4f20a6c93cadef34b5fcdb520ac4345e65d",
+    "app/src/main/java/app/p2p/MainActivity.kt": "198d37dbbdc5f173ac70dc1bd04d133939ee1d49389786e6621f9d09135abb93",
     "app/src/main/java/app/p2p/MediaDownloads.kt": "4224adad4acbaeed08be4dbed1607b60f47e5f5b1926e4f51c75f6e1b2079e30",
     "app/src/main/java/app/p2p/MessageMedia.kt": "d05417601b4197030882e7672a65ee7359862b5efe731c8978ba631d97046570",
     "app/src/main/java/app/p2p/NativeContacts.kt": "91f67c659b471e01695e78f0d3967ff66f58bb6fffa3889dd0ff2fcc22e78bea",
@@ -190,13 +190,14 @@
     "third_party/webxdc/LICENSE": "c61f12da7cdad526bdcbed47a4c0a603e60dbbfdaf8b66933cd088e9132c303f",
     "third_party/webxdc/NOTICE.md": "da6aae6d1f7f768d8e32ecd4a5146a0ef1ff864946e71f32633781fb35093bb3",
     "AGENTS.md": "86444e4009890228fcf41eb7cca7b19fd3ccbe459dc02765dd94650e4e2f8d96",
-    "RECOVERY.md": "c4c994d24c7936976de4db2e5c1db7921eb90780dbfd85da28bf481e4faf6fcf",
-    "docs/CONTINUE-HERE.md": "39263e5237dad70bef1dda3c347dab45c9fd754e925c46d39e88e8dec782c76b",
+    "RECOVERY.md": "55aa52fe9941d329edbd662ee766b1e3a43e2e87f154066dc222d1b383bc37f4",
+    "docs/CONTINUE-HERE.md": "b210bee93552fdb0f6bbc8eb2ae1e5f5af6641935e31bcbc935d5d7765b2ed1b",
     "scripts/check-release-signature.py": "0e0d2f2a1c229ed544a78b5837ae62db072dfc330cc11c563f9b01f65f7daab1",
     "recovery/relay-lab-signing.enc.base64": "7fa780a06b75ed0c592e479169f381e10b610a4aeb7bf8d550a07ed924dbb601",
     "app/src/main/java/app/p2p/PersonalSpace.kt": "39304d69dc4bbea2823b9490a2b10c3b920bd399ef5c52ebadcfe3be117ae6d4",
     "app/src/test/java/app/p2p/PersonalSpaceTest.kt": "2148c62904fb048219ce3fbc0a99fdbfb6c49afa3a4aa2c5e8570747a7f2ef43",
     "app/src/test/java/app/p2p/PersonalSpaceUiTest.kt": "9e147d01c9081e50205e5650b7ecbf3c937c8f75dc299ead65bb0237cd67be55",
-    "app/src/test/java/app/p2p/SettingsTilesTest.kt": "621c292be6add678e37afd1ef43cc4252dd0fa95d0ffe0e9195ec0dcd958560f"
+    "app/src/test/java/app/p2p/SettingsTilesTest.kt": "621c292be6add678e37afd1ef43cc4252dd0fa95d0ffe0e9195ec0dcd958560f",
+    "app/src/test/java/app/p2p/BottomBarTest.kt": "18ff2a7664aca37520827a41f414f9d7cc7a822c5e53ea66a2500a8403bb2a39"
   }
 }

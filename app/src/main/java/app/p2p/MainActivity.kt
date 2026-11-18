@@ -19,6 +19,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.text.KeyboardActions
@@ -350,12 +353,41 @@ private val AccentPanel: Color @Composable get() = MaterialTheme.colorScheme.sec
 
 private const val Feed = "Feed"
 
-private enum class Area(val label: String, val icon: ImageVector) {
+internal enum class Area(val label: String, val icon: ImageVector) {
     Talk("Talk", Icons.Outlined.Call),
     Chats("Chats", Icons.AutoMirrored.Outlined.Chat),
     Groups("Groups", Icons.Outlined.Groups),
     Social("Channels", Icons.Outlined.Campaign),
     Apps("Apps", Icons.Outlined.GridView)
+}
+
+// Give labels the full tab width; Material's item insets clipped Channels on small phones.
+@Composable
+internal fun RelayNavigationBar(selected: Area, select: (Area) -> Unit, unread: (Area) -> Boolean = { false }) {
+    Row(modifier = Modifier.fillMaxWidth().wrapContentWidth().widthIn(max = 760.dp)
+        .background(Panel).windowInsetsPadding(NavigationBarDefaults.windowInsets).selectableGroup()) {
+        Area.entries.forEach { area ->
+            val active = selected == area
+            val tint = if (active) readableAccent(Panel, Ink) else Quiet
+            Column(Modifier.weight(1f).heightIn(min = 80.dp)
+                .selectable(selected = active, role = Role.Tab, onClick = { select(area) })
+                .padding(horizontal = 2.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(Modifier.size(width = 56.dp, height = 32.dp)
+                    .background(if (active) AccentPanel else Color.Transparent, RoundedCornerShape(16.dp)),
+                    contentAlignment = Alignment.Center) {
+                    // These two vectors have smaller painted bounds than the other navigation symbols.
+                    val iconSize = if (area == Area.Groups || area == Area.Social) 32.dp else 26.dp
+                    Icon(area.icon, null, Modifier.size(iconSize),
+                        tint = if (active) MaterialTheme.colorScheme.onSecondaryContainer else Quiet)
+                    if (unread(area)) Badge(Modifier.align(Alignment.TopEnd))
+                }
+                Text(area.label, Modifier.fillMaxWidth(), color = tint, fontSize = 12.sp,
+                    lineHeight = 14.sp, textAlign = TextAlign.Center,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal)
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -1343,36 +1375,17 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
             },
             bottomBar = {
                 if (thread == null) Surface(color = Panel) {
-                    NavigationBar(
-                        modifier = Modifier.fillMaxWidth().wrapContentWidth().widthIn(max = 760.dp)
-                            .fillMaxWidth().padding(horizontal = 8.dp),
-                        containerColor = Panel, tonalElevation = 0.dp
-                    ) {
-                        Area.entries.forEach { value ->
-                            NavigationBarItem(
-                                selected = area == value,
-                                onClick = { goArea(value) },
-                                icon = {
-                                    val unread = records.any { record ->
-                                        val data = record.data()
-                                        if (data.optBoolean("locallyDeleted") || !data.optBoolean("unread")) false
-                                        else when (value) {
-                                            Area.Talk -> (record.kind == "file-received" && data.optBoolean("voicemail")) || record.kind == "call-history"
-                                            Area.Chats -> record.kind in setOf("message", "file-received") && !data.optBoolean("voicemail") && groups.none { it.key == data.optString("thread") }
-                                            Area.Groups -> record.kind in setOf("message", "file-received") && groups.any { it.key == data.optString("thread") }
-                                            Area.Social -> record.kind in setOf("post", "social-action")
-                                            Area.Apps -> false
-                                        }
-                                    }
-                                    Box { Icon(value.icon, null); if (unread) Badge(Modifier.align(Alignment.TopEnd).offset(x = 16.dp, y = (-6).dp)) }
-                                },
-                                label = {
-                                    FittedLabel(value.label, fontWeight = if (area == value) FontWeight.SemiBold else FontWeight.Normal,
-                                        size = 12, modifier = Modifier.fillMaxWidth().padding(horizontal = 5.dp))
-                                },
-                                colors = NavigationBarItemDefaults.colors(indicatorColor = AccentPanel, selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    selectedTextColor = readableAccent(Panel, MaterialTheme.colorScheme.onSurface), unselectedIconColor = Quiet, unselectedTextColor = Quiet)
-                            )
+                    RelayNavigationBar(area, ::goArea) { value ->
+                        records.any { record ->
+                            val data = record.data()
+                            if (data.optBoolean("locallyDeleted") || !data.optBoolean("unread")) false
+                            else when (value) {
+                                Area.Talk -> (record.kind == "file-received" && data.optBoolean("voicemail")) || record.kind == "call-history"
+                                Area.Chats -> record.kind in setOf("message", "file-received") && !data.optBoolean("voicemail") && groups.none { it.key == data.optString("thread") }
+                                Area.Groups -> record.kind in setOf("message", "file-received") && groups.any { it.key == data.optString("thread") }
+                                Area.Social -> record.kind in setOf("post", "social-action")
+                                Area.Apps -> false
+                            }
                         }
                     }
                 } else SystemNavigationBar()
@@ -1799,7 +1812,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                     }
                     val actions = buildList {
                         if (!conversation && item.kind in setOf("message", "file-sent", "file-received", "post") && data.optInt("webxdcParent") <= 9) {
-                            add(ItemAction(if (item.isSavedItem()) "View Saved" else "Save", Icons.Outlined.BookmarkBorder) {
+                            add(ItemAction(if (item.isSavedItem()) "View Saved" else "Save", Icons.Outlined.StarBorder) {
                                 if (item.isSavedItem()) modal = "saved" else { model.star(item.key); modal = null }
                             })
                         }
@@ -2267,7 +2280,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                 Button(onClick = { modal = "add-contact" }) { Text(if (channelInviteOnly) "Back to join channel" else "Back to accept invite") }
             }
             "chat-new" -> Sheet("New chat", { modal = null }) {
-                P2pRow("Saved", "Your saved items from every conversation", Icons.Outlined.BookmarkBorder,
+                P2pRow("Saved", "Your saved items from every conversation", Icons.Outlined.StarBorder,
                     enabled = !nativeActionBusy) {
                     modal = "saved"
                 }
@@ -3062,7 +3075,7 @@ private fun AppToolbarActions(
     search: () -> Unit, contacts: () -> Unit, settings: () -> Unit, saved: () -> Unit
 ) {
     val tint = readableAccent(Base, Ink)
-    IconButton(onClick = saved) { Icon(Icons.Outlined.BookmarkBorder, "Saved", tint = tint) }
+    IconButton(onClick = saved) { Icon(Icons.Outlined.StarBorder, "Saved", tint = tint) }
     IconToggleButton(checked = muted, onCheckedChange = setMuted) {
         Icon(if (muted) Icons.Outlined.NotificationsOff else Icons.Outlined.NotificationsNone,
             if (muted) "Unmute all notifications" else "Mute all notifications", tint = tint)
@@ -3771,7 +3784,7 @@ private fun QuotedMessage(author: String, text: String) {
 @Composable
 private fun StarButton(starred: Boolean, item: String, toggle: () -> Unit) {
     IconButton(onClick = toggle) {
-        Icon(if (starred) Icons.Outlined.Bookmark else Icons.Outlined.BookmarkBorder,
+        Icon(if (starred) Icons.Outlined.Star else Icons.Outlined.StarBorder,
             if (starred) "Saved " + item else "Save " + item,
             Modifier.size(25.dp), tint = LocalContentColor.current)
     }

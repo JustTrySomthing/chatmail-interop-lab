@@ -24,8 +24,8 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.outlined.Bookmark
-import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.EmojiEmotions
@@ -543,7 +543,7 @@ private fun ChannelPostCard(
         }
         val reactions = post.reactions.values.flatten().groupingBy { it }.eachCount()
         Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = savePost) { Icon(if (post.saved) Icons.Outlined.Bookmark else Icons.Outlined.BookmarkBorder, if (post.saved) "Saved post" else "Save post") }
+            IconButton(onClick = savePost) { Icon(if (post.saved) Icons.Outlined.Star else Icons.Outlined.StarBorder, if (post.saved) "Saved post" else "Save post") }
             IconButton(onClick = react) { Icon(Icons.Outlined.EmojiEmotions, "React to post") }
             if (reactions.isNotEmpty()) Text(reactions.entries.joinToString("  ") { (emoji, count) ->
                 if (count == 1) emoji else "$emoji $count"
