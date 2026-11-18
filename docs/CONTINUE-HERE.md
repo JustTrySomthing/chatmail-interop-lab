@@ -1,5 +1,13 @@
 # Continue Relay Lab development
 
+## Pending next APK: focused regression review
+
+User asked for concrete bug fixes only, with no random changes or redesign. Two production edits: ReplyReminder.valid now accepts UUID Chatmail one-to-one chat keys as well as legacy P2P peer IDs (previously Remind me to reply was omitted for native direct chats); video calls obtain their screen-awake window from LocalActivity rather than casting LocalContext, which may be wrapped. Added native conversation/message reminder scheduling, rescheduling, persisted extras, legacy compatibility, and malformed-ID regression tests.
+
+Review covered recent setup/background permissions, call notifications, lock-screen and fullscreen state cleanup, Saved/Media paths, and reminder routing. Android lint initially found one error in the video-call Activity lookup and 50 warnings. Warnings were examined rather than suppressed: intentional ARM64-only packaging, optional PiP animation advice, style/API migration suggestions, application-context ownership, inlined notification permission constants guarded at runtime, immutable replacement of saveable ArrayLists, the existing WebView feature guard, and parent-handled SVG gestures. No dependency upgrades or unrelated UI changes made.
+
+Verification: Android lint passes with zero errors (50 existing warnings and one hint). The combined lint/test/build daemon stopped unexpectedly after lint completed; the fresh run passed all 213 unit/UI tests with zero failures/errors/skips and assembled the debug APK. WebRTC APK packaging verification passed. RC72 (108) remains the published APK. Physical-device interoperability, lock-screen/background delivery, and rotation behavior remain separate verification tasks. Do not claim the entire app is bug-free based on automated checks.
+
 ## Pending next APK: simpler Setup and call permissions
 
 Background delivery is now automatic, including boot, package updates, and old installations with the removed enabled=false preference. Removed the Receive in background switch from Setup and the equivalent Background delivery switch from Notifications. The optional reliable foreground connection mode remains in notification settings; it is not a receiving on/off switch. Android battery approval is still needed for the existing unobtrusive continuous connection; fallback network jobs remain available when approval is declined. Do not claim guaranteed delivery after force-stop or manufacturer process restrictions.

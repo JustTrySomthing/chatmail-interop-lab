@@ -184,7 +184,7 @@ internal fun TalkCallPanel(
     }
     if (mainVideo != null) {
         androidx.activity.compose.BackHandler(enabled = !inPip) { minimize?.invoke() }
-        val window = (LocalContext.current as? android.app.Activity)?.window
+        val window = androidx.activity.compose.LocalActivity.current?.window
         DisposableEffect(window, inPip) {
             if (!inPip) window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }

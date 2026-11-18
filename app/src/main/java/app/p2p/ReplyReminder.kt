@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 
 internal data class ReplyReminder(val area: AlertArea, val target: String, val item: String) {
     fun valid() = when (area) {
-        AlertArea.CHATS -> isPeer(target) && (item == target || isId(item))
+        AlertArea.CHATS -> (isPeer(target) || isId(target)) && (item == target || isId(item))
         AlertArea.GROUPS, AlertArea.SOCIAL -> isId(target) && isId(item)
         else -> false
     }
