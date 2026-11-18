@@ -1,12 +1,20 @@
 # Continue Relay Lab development
 
-## Pending after RC74: attention indicators and video control
+## RC75 release checkpoint — November 18, 2026
+
+RC75 (111) includes the unified attachment menu with compression preserved, clearer button labels, group leaving and channel management, mute/archive fixes, confirmed profile deletion, optional local storage cleanup, unread Channels indicators, and a more prominent in-call video control. Includes all RC74 fixes and keeps the established RC58+ signing identity. Install over RC74 without uninstalling. Android package app.p2p.interop; ARM64; Android 12+; target/compile SDK 35.
+
+Release verification: debug assembly, preview assembly and all 223 unit tests passed (zero failures/errors/skips). WebRTC packaging and established certificate checks passed. APK: `P2P-0.7.23-rc75-ARM64-Preview.apk`; SHA-256: `c08b11ba5d724e8bc4f35e5fdad159c2aac65c0240e4a0cf6964acdf698bf079`.
+
+Physical device tests for group/channel operations, profile deletion, local-retention expiry and attention indicators remain pending. Automated checks do not establish cross-client interoperability.
+
+## Included in RC75: attention indicators and video control
 
 User prioritized clear unread/missed-event indicators and deferred the remaining lower-priority parity additions. Existing chat/group unread counts and navigation dots, missed-call styling/Talk dot and voicemail badges remain. Fixed the main Channels tab omission: native channel unread state now feeds its navigation dot, refreshes during background/foreground Core catalog sync, and clears as channels are opened or removed. Following already shows channel unread counts.
 
-Audio-call UI now offers a full-width themed Turn Video On/Off button with a 32 dp camera icon and at least 56 dp height. The fullscreen video overlay camera icon is also 32 dp and high contrast, retaining its existing hit target/layout. Camera permission and signaling behavior are unchanged. Validation: debug assembly and all 223 automated tests passed with zero failures/errors/skips. Published APK remains RC74.
+Audio-call UI now offers a full-width themed Turn Video On/Off button with a 32 dp camera icon and at least 56 dp height. The fullscreen video overlay camera icon is also 32 dp and high contrast, retaining its existing hit target/layout. Camera permission and signaling behavior are unchanged. Validation: debug assembly and all 223 automated tests passed with zero failures/errors/skips. Included in RC75 (111).
 
-## Pending after RC74: group, channel, profile and storage controls
+## Included in RC75: group, channel, profile and storage controls
 
 Implemented the first requested Delta-help parity priorities. Group details now offer confirmed Leave Group, backed by Core self-removal, retaining history and showing membership status. Channel details offer Unfollow Channel for subscribers and Delete Channel for owners, with explicit consequences; owned posts have themed Post Options with Edit Post and confirmed Delete Post. Subscriber removal leaves through Core before deleting history; owner deletion does not claim to erase subscribers’ saved copies.
 
@@ -18,19 +26,19 @@ Settings → Storage adds optional per-profile Core local retention: keep all, 1
 
 Validation: debug APK assembly and all 223 automated tests passed, with zero failures/errors/skips. Added tests cover profile deletion confirmation/cancellation, registry persistence after removing the original profile, media/database isolation, app-storage isolation, Core group membership and muted/archive behavior. Settings layout tests still pass with the Storage tile. The initial 512 MiB compiler run ran out of heap; final compilation used the normal build heap and the separate test run passed. Recovery manifest: 210 files verified.
 
-API semantics were checked against the bundled Core v2.69.0 source, not assumed from main. Physical cross-client leave/unfollow, channel edit/delete, archive reception, WebView cleanup and retention expiry still need phone testing. No new release requested in this turn; published APK remains RC74.
+API semantics were checked against the bundled Core v2.69.0 source, not assumed from main. Physical cross-client leave/unfollow, channel edit/delete, archive reception, WebView cleanup and retention expiry still need phone testing. Included in RC75 (111).
 
 ## Delta Chat help review — November 18, 2026
 
 See [DELTA-HELP-PARITY-REVIEW.md](DELTA-HELP-PARITY-REVIEW.md) for the source-based comparison against the current Delta Chat FAQ. It records missing/partial controls, the local-mute/Core-archive mismatch, pending-source original-quality selection gap, intentional product differences, and device checks still required. Review only: no application behavior changed or new APK published. Do not treat the earlier completed parity countdown as exhaustive.
 
-## Pending after RC74: button label consistency
+## Included in RC75: button label consistency
 
-Talk’s primary action now reads Make a Call. My Channels retains Create a Channel with no leading plus icon. Audited static button/action labels across composers, settings, setup, media, app menus, profiles, invites and calls for Title Case, preserving acronyms and short connecting words (for example, Create a Channel). Updated existing UI-test selectors. No routes, compression behavior, user-supplied names or message content were changed. Published APK remains RC74; these changes and the attachment chooser are pending the next release.
+Talk’s primary action now reads Make a Call. My Channels retains Create a Channel with no leading plus icon. Audited static button/action labels across composers, settings, setup, media, app menus, profiles, invites and calls for Title Case, preserving acronyms and short connecting words (for example, Create a Channel). Updated existing UI-test selectors. No routes, compression behavior, user-supplied names or message content were changed. These changes and the attachment chooser are included in RC75 (111).
 
 Validation: debug assembly passed; all 217 automated tests passed with zero failures/errors/skips. Updated static-label selectors while retaining the generated Save attachment accessibility label; stabilized the Profiles test by waiting for startup.
 
-## Pending after RC74: unified attachment chooser
+## Included in RC75: unified attachment chooser
 
 Chats, groups, channels, and the retained Social post composer now use the same themed Add attachment sheet: Take Photo, Record Video, Record Audio, Attach File. The all-files picker supports multiple selections and retains URI read grants. Capture results retain their original destination; channel results are never assigned to a different selected channel. Cancelled camera output is deleted. Existing draft previews, trimming, and send paths remain in place.
 
@@ -38,7 +46,7 @@ Attach File describes media with asFile=false, so generic file selection does no
 
 Validation: all 217 automated tests passed with zero failures/errors/skips; final debug APK assembly passed. All 207 recovery checkpoint files verified. Added four-action menu routing/visibility coverage and updated the Social composer navigation check. Earlier combined and compile-plus-test runs lost their Gradle daemon under memory pressure; the fresh single-worker test run with a 512 MiB Gradle heap passed in 53 seconds.
 
-This is source work for the next APK; RC74 remains the published APK. Camera hardware, permission dialogs, and actual send-time compression on phones require device testing.
+These changes are included in RC75 (111). Camera hardware, permission dialogs, and actual send-time compression on phones require device testing.
 
 
 ## RC74 release checkpoint — November 18, 2026
