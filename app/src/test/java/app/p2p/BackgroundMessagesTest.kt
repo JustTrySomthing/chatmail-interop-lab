@@ -22,7 +22,6 @@ class BackgroundMessagesTest {
         val scheduler = app.getSystemService(JobScheduler::class.java)
         val receiver = BackgroundMessagesReceiver()
 
-        assertTrue(BackgroundMessages.enabled(app))
         receiver.onReceive(app, Intent(Intent.ACTION_BOOT_COMPLETED))
         receiver.onReceive(app, Intent(Intent.ACTION_MY_PACKAGE_REPLACED))
 
@@ -54,7 +53,9 @@ class BackgroundMessagesTest {
         receiver.onReceive(app, Intent(Intent.ACTION_BOOT_COMPLETED))
         assertEquals(ChatmailConnectionService::class.java.name, shadowOf(app).nextStartedService.component?.className)
 
-        BackgroundMessages.setEnabled(app, false)
+        // Battery revocation stops the live connection without disabling catch-up delivery.
+        power.setIgnoringBatteryOptimizations(app.packageName, false)
+        BackgroundMessages.updateConnection(app)
         assertFalse(BackgroundMessages.keepConnection(app))
         assertEquals(ChatmailConnectionService::class.java.name, shadowOf(app).nextStoppedService.component?.className)
         receiver.onReceive(app, Intent(Intent.ACTION_MY_PACKAGE_REPLACED))
@@ -62,16 +63,14 @@ class BackgroundMessagesTest {
     }
 
     @Test
-    fun disablingBackgroundChecksCancelsJobsAndPersistsAcrossBoot() {
+    fun oldDisabledPreferenceCannotDisableAutomaticDelivery() {
         val app = RuntimeEnvironment.getApplication()
+        app.getSharedPreferences("background-messages", 0).edit().putBoolean("enabled", false).commit()
         val scheduler = app.getSystemService(JobScheduler::class.java)
         val receiver = BackgroundMessagesReceiver()
-
-        assertTrue(BackgroundMessages.setEnabled(app, true))
-        assertEquals(2, scheduler.allPendingJobs.size)
-        assertTrue(BackgroundMessages.setEnabled(app, false))
         receiver.onReceive(app, Intent(Intent.ACTION_BOOT_COMPLETED))
-        assertFalse(BackgroundMessages.enabled(app))
-        assertTrue(scheduler.allPendingJobs.isEmpty())
+        assertEquals(2, scheduler.allPendingJobs.size)
+        receiver.onReceive(app, Intent(Intent.ACTION_MY_PACKAGE_REPLACED))
+        assertEquals(2, scheduler.allPendingJobs.size)
     }
 }

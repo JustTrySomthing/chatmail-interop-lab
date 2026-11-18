@@ -24,8 +24,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -53,19 +51,19 @@ internal fun FirstRunSetup(
     val permissions = remember(context) {
         buildList {
             add(PermissionStep(Manifest.permission.POST_NOTIFICATIONS, "Notifications",
-                "Get alerts for chats, groups, contact requests, social activity, and files.", "Allow notifications"))
+                "Receive calls, message alerts, and reply reminders.", "Allow notifications"))
             if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
                 add(PermissionStep(Manifest.permission.CAMERA, "Camera",
-                    "Scan invite QR codes and take photos in chats.", "Allow camera"))
+                    "Make video calls, scan invites, and take photos.", "Allow camera"))
             }
             if (context.packageManager.hasSystemFeature(PackageManager.FEATURE_MICROPHONE)) {
                 add(PermissionStep(Manifest.permission.RECORD_AUDIO, "Microphone",
-                    "Record voice messages.", "Allow microphone"))
+                    "Make voice and video calls and record voice messages.", "Allow microphone"))
             }
         }
     }
     fun missing() = permissions.filter {
-        if (it.permission == Manifest.permission.POST_NOTIFICATIONS) !alerts.enabled()
+        if (it.permission == Manifest.permission.POST_NOTIFICATIONS) !alerts.enabled() || !alerts.channelsEnabled()
         else context.checkSelfPermission(it.permission) != PackageManager.PERMISSION_GRANTED
     }.map { it.permission }
     var pending by remember { mutableStateOf(missing()) }
@@ -75,14 +73,15 @@ internal fun FirstRunSetup(
     var saving by remember { mutableStateOf<Job?>(null) }
     val busy = saving != null || restoringBackup
     LaunchedEffect(name) { if (name.isNotBlank() && draft.isBlank()) editing = false }
-    var background by remember { mutableStateOf(BackgroundMessages.enabled(context)) }
+    var callScreenAllowed by remember { mutableStateOf(CallAlertAccess.allowed(context)) }
+    var specialAccessError by remember { mutableStateOf<String?>(null) }
     var batteryExempt by remember { mutableStateOf(BackgroundMessages.batteryExempt(context)) }
     var backgroundError by rememberSaveable { mutableStateOf(false) }
     var batterySettingsError by rememberSaveable { mutableStateOf(false) }
     fun refreshBackground() {
-        background = BackgroundMessages.enabled(context)
         batteryExempt = BackgroundMessages.batteryExempt(context)
-        backgroundError = background && !BackgroundMessages.start(context)
+        backgroundError = !BackgroundMessages.start(context)
+        callScreenAllowed = CallAlertAccess.allowed(context)
     }
     val batterySettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         refreshBackground()
@@ -102,6 +101,7 @@ internal fun FirstRunSetup(
     }
     val settings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         pending = missing()
+        refreshBackground()
     }
     fun enable(permission: String) {
         val isNotification = permission == Manifest.permission.POST_NOTIFICATIONS
@@ -119,9 +119,9 @@ internal fun FirstRunSetup(
         }
     }
 
-    val total = 2 + permissions.size
-    val liveDelivery = background && batteryExempt && !backgroundError
-    val completed = (if (name.isNotBlank()) 1 else 0) + permissions.size - pending.size + (if (liveDelivery) 1 else 0)
+    val total = 3 + permissions.size
+    val liveDelivery = (batteryExempt || BackgroundMessages.reliable(context)) && !backgroundError
+    val completed = (if (name.isNotBlank()) 1 else 0) + permissions.size - pending.size + (if (liveDelivery) 1 else 0) + (if (callScreenAllowed) 1 else 0)
     if (back != null) BackHandler(onBack = back)
     Scaffold(topBar = {
         TopAppBar(title = { Text("Setup") }, actions = {
@@ -136,7 +136,7 @@ internal fun FirstRunSetup(
             horizontalAlignment = Alignment.CenterHorizontally) {
             Column(Modifier.weight(1f).widthIn(max = 560.dp).fillMaxWidth().verticalScroll(rememberScrollState())
                 .padding(top = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (completed == total) "P2P is ready" else "Set up P2P", style = MaterialTheme.typography.headlineSmall)
+                Text(if (completed == total) "Relay Lab is ready" else "Set up Relay Lab", style = MaterialTheme.typography.headlineSmall)
                 Text("$completed of $total complete", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LinearProgressIndicator(progress = { completed.toFloat() / total }, modifier = Modifier.fillMaxWidth())
                 SetupCard(1, "Profile", name.isNotBlank(), name.isBlank()) {
@@ -172,19 +172,21 @@ internal fun FirstRunSetup(
                         }
                     }
                 }
-                SetupCard(total, "Calls and messages in the background", liveDelivery,
-                    name.isNotBlank() && pending.isEmpty() && !liveDelivery) {
-                    if (liveDelivery) Text("P2P can stay connected when the app is closed.")
-                    else Text("Allow P2P to stay connected when the app is closed. Without this permission, Android schedules message checks and calls may be missed.")
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Receive in background", Modifier.weight(1f))
-                        Switch(background, { enabled ->
-                            backgroundError = !BackgroundMessages.setEnabled(context, enabled)
-                            background = BackgroundMessages.enabled(context)
-                        }, enabled = name.isNotBlank(),
-                            modifier = Modifier.semantics { contentDescription = "Receive in background" })
+                SetupCard(total - 1, "Incoming call screen", callScreenAllowed,
+                    name.isNotBlank() && pending.isEmpty() && !callScreenAllowed) {
+                    if (!callScreenAllowed) {
+                        Text("Show incoming calls when your phone is locked.")
+                        P2pOutlinedButton(onClick = {
+                            specialAccessError = runCatching { settings.launch(CallAlertAccess.settingsIntent(context)) }
+                                .exceptionOrNull()?.let { "Open Android settings → Apps → Relay Lab → Full-screen notifications." }
+                        }, modifier = Modifier.fillMaxWidth()) { Text("Allow call screen") }
                     }
-                    if (background && !batteryExempt) {
+                    specialAccessError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+                SetupCard(total, "Background connection", liveDelivery,
+                    name.isNotBlank() && pending.isEmpty() && callScreenAllowed && !liveDelivery) {
+                    if (!batteryExempt && !BackgroundMessages.reliable(context)) {
+                        Text("Allow unrestricted battery use so Android can deliver calls and messages promptly.")
                         P2pOutlinedButton(enabled = name.isNotBlank(), onClick = {
                             batterySettingsError = runCatching {
                                 batterySettings.launch(BackgroundMessages.batteryPermissionIntent(context))
@@ -194,16 +196,17 @@ internal fun FirstRunSetup(
                         }, modifier = Modifier.fillMaxWidth()) { Text("Allow background connection") }
                     }
                     if (backgroundError || batterySettingsError) {
-                        Text(if (batterySettingsError) "Open Android battery settings and allow unrestricted use for P2P."
-                            else "Couldn’t start background delivery. Try again from Setup.",
+                        Text(if (batterySettingsError) "Open Android battery settings and allow unrestricted use for Relay Lab."
+                            else "Couldn’t start the connection. Tap Retry to try again.",
                             color = MaterialTheme.colorScheme.error)
+                        if (backgroundError) P2pOutlinedButton(onClick = ::refreshBackground, modifier = Modifier.fillMaxWidth()) { Text("Retry") }
                     }
                 }
             }
             if (name.isNotBlank() && !editing) {
                 Button(onClick = finish, modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth()
                     .padding(vertical = 10.dp).heightIn(min = 52.dp), shape = RoundedCornerShape(12.dp)) {
-                    Text(if (back != null) "Done" else if (pending.isEmpty() && background) "Start chatting" else "Continue with current permissions")
+                    Text(if (back != null) "Done" else if (completed == total) "Start chatting" else "Continue with current permissions")
                 }
             }
         }
@@ -214,7 +217,8 @@ internal fun FirstRunSetup(
 private fun SetupCard(number: Int, title: String, complete: Boolean, next: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val colors = MaterialTheme.colorScheme
     Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp),
-        color = if (next) colors.secondaryContainer else colors.surface, contentColor = colors.onSurface) {
+        color = if (next) colors.secondaryContainer else colors.surface,
+        contentColor = if (next) colors.onSecondaryContainer else colors.onSurface) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Surface(Modifier.size(34.dp), shape = CircleShape, color = if (complete) colors.primary else colors.surfaceVariant,
@@ -227,7 +231,8 @@ private fun SetupCard(number: Int, title: String, complete: Boolean, next: Boole
                 Column {
                     Text(title, style = MaterialTheme.typography.titleMedium)
                     Text(if (complete) "Complete" else if (next) "Next step" else "To do",
-                        style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant)
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (next) colors.onSecondaryContainer else colors.onSurfaceVariant)
                 }
             }
             content()

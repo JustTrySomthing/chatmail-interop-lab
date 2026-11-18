@@ -112,6 +112,10 @@ internal class LocalAlerts(private val context: Context, private val profileId: 
 
     fun enabled() = manager.areNotificationsEnabled() && permitted()
 
+    fun channelsEnabled(): Boolean = AlertArea.entries.all {
+        manager.getNotificationChannel(it.channel)?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
     fun registerChannels() {
         manager.createNotificationChannels(AlertArea.entries.map { area ->
             NotificationChannel(area.channel, area.label,
@@ -172,6 +176,10 @@ internal class LocalAlerts(private val context: Context, private val profileId: 
                         PendingIntent.FLAG_IMMUTABLE)
                     setStyle(NotificationCompat.CallStyle.forIncomingCall(
                         Person.Builder().setName(title).setImportant(true).build(), decline, answer))
+                    if (!quiet && CallAlertAccess.allowed(context) &&
+                        manager.getNotificationChannel(area.channel).importance >= NotificationManager.IMPORTANCE_HIGH) {
+                        setFullScreenIntent(open, true)
+                    }
                     setCategory(NotificationCompat.CATEGORY_CALL)
                     setTimeoutAfter(remaining ?: TALK_RING_MS)
                 } else if (area == AlertArea.MISSED_CALLS) {

@@ -18,6 +18,41 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34], application = Application::class)
 class LocalAlertsTest {
     @Test
+    @Config(sdk = [33])
+    fun fullScreenCallAlertsRespectQuietHoursAndNeverApplyToMessages() {
+        val app = RuntimeEnvironment.getApplication()
+        shadowOf(app).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val alerts = LocalAlerts(app)
+        val manager = shadowOf(app.getSystemService(NotificationManager::class.java))
+        val id = newId()
+        alerts.show(AlertArea.TALK, id, "Pat", "Incoming call")
+        val call = manager.allNotifications.single()
+        org.junit.Assert.assertNotNull(call.fullScreenIntent)
+        assertEquals(AlertRoute(AlertArea.TALK, id), LocalAlerts.read(shadowOf(call.fullScreenIntent).savedIntent))
+        alerts.clear(AlertArea.TALK, id)
+        val now = java.util.Calendar.getInstance()
+        val minute = now.get(java.util.Calendar.HOUR_OF_DAY) * 60 + now.get(java.util.Calendar.MINUTE)
+        QuietHours(enabled = true, start = (minute + 1435) % 1440, end = (minute + 5) % 1440).save(app)
+        alerts.show(AlertArea.TALK, id, "Pat", "Incoming call")
+        assertNull(manager.allNotifications.single().fullScreenIntent)
+        alerts.clear(AlertArea.TALK, id)
+        alerts.show(AlertArea.CHATS, id, "Pat", "Message")
+        assertNull(manager.allNotifications.single().fullScreenIntent)
+    }
+
+    @Test
+    fun setupDetectsDisabledNotificationCategories() {
+        val app = RuntimeEnvironment.getApplication()
+        val manager = app.getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(android.app.NotificationChannel(AlertArea.TALK.channel,
+            "Calls", NotificationManager.IMPORTANCE_NONE))
+        val alerts = LocalAlerts(app)
+        org.junit.Assert.assertFalse(alerts.channelsEnabled())
+        assertEquals(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, CallAlertAccess.settingsIntent(app).action)
+        assertEquals("package:${app.packageName}", CallAlertAccess.settingsIntent(app).dataString)
+    }
+
+    @Test
     fun postsPrivateAlertsAfterPermissionAndKeepsOnePerConversation() {
         val app = RuntimeEnvironment.getApplication()
         val alerts = LocalAlerts(app)

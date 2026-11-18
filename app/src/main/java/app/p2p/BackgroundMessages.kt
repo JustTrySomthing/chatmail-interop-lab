@@ -37,8 +37,6 @@ internal object BackgroundMessages {
     private fun prefs(context: Context) =
         context.getSharedPreferences("background-messages", Context.MODE_PRIVATE)
 
-    fun enabled(context: Context) = prefs(context).getBoolean("enabled", true)
-
     fun batteryExempt(context: Context): Boolean =
         context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
 
@@ -52,7 +50,7 @@ internal object BackgroundMessages {
         return updateConnection(context)
     }
 
-    fun keepConnection(context: Context): Boolean = enabled(context) && (reliable(context) || batteryExempt(context))
+    fun keepConnection(context: Context): Boolean = reliable(context) || batteryExempt(context)
 
     fun updateConnection(context: Context): Boolean {
         val intent = Intent(context, ChatmailConnectionService::class.java)
@@ -66,22 +64,11 @@ internal object BackgroundMessages {
         }.getOrDefault(false)
     }
 
-    fun setEnabled(context: Context, enabled: Boolean): Boolean {
-        prefs(context).edit().putBoolean("enabled", enabled).apply()
-        if (enabled) return start(context, catchUp = true)
-        updateConnection(context)
-        val scheduler = context.getSystemService(JobScheduler::class.java)
-        scheduler.cancel(PERIODIC_JOB)
-        scheduler.cancel(CATCH_UP_JOB)
-        return true
-    }
-
     fun start(context: Context, catchUp: Boolean = false): Boolean {
         val notifications = context.getSystemService(NotificationManager::class.java)
         if (notifications.getNotificationChannel(LEGACY_CHANNEL) != null) {
             notifications.deleteNotificationChannel(LEGACY_CHANNEL)
         }
-        if (!enabled(context)) return false
         val scheduler = context.getSystemService(JobScheduler::class.java)
         val component = ComponentName(context, BackgroundMessageJob::class.java)
         fun schedule(id: Int, configure: JobInfo.Builder.() -> Unit): Boolean {
@@ -108,7 +95,7 @@ class ChatmailConnectionService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val reliable = BackgroundMessages.enabled(this) && BackgroundMessages.reliable(this)
+        val reliable = BackgroundMessages.reliable(this)
         if (reliable || intent?.getBooleanExtra("reliable", false) == true) promoteConnection()
         if (!reliable) stopForeground(STOP_FOREGROUND_REMOVE)
         if (!BackgroundMessages.keepConnection(this)) {
@@ -162,7 +149,6 @@ class BackgroundMessageJob : JobService() {
     private val active = mutableMapOf<Int, Job>()
 
     override fun onStartJob(params: JobParameters): Boolean {
-        if (!BackgroundMessages.enabled(this)) return false
         active.remove(params.jobId)?.cancel()
         active[params.jobId] = scope.launch {
             var retry = false
@@ -177,7 +163,7 @@ class BackgroundMessageJob : JobService() {
             } finally {
                 if (isActive) {
                     active.remove(params.jobId)
-                    jobFinished(params, retry && BackgroundMessages.enabled(this@BackgroundMessageJob))
+                    jobFinished(params, retry)
                 }
             }
         }
@@ -186,7 +172,7 @@ class BackgroundMessageJob : JobService() {
 
     override fun onStopJob(params: JobParameters): Boolean {
         active.remove(params.jobId)?.cancel()
-        return BackgroundMessages.enabled(this)
+        return true
     }
 
     override fun onDestroy() {

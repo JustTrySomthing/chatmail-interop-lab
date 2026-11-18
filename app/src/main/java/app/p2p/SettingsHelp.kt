@@ -37,7 +37,7 @@ private val helpEntries = listOf(
     HelpEntry("How do I control what notifications show?",
         "Open Settings → Notifications. Choose a preview, turn chat sounds on or off, and choose whether replies in muted groups and incoming calls alert you. Android controls each category’s sound, vibration, and priority."),
     HelpEntry("What if notifications arrive late?",
-        "Open Settings → Notifications and check that Android allows alerts. Turn on Background delivery and check Battery optimization. Reliable background connection shows an ongoing Android notification. You can silence alerts overnight from Quiet Hours or mute a particular conversation."),
+        "Open Settings → Notifications and check that Android allows alerts. Background delivery is automatic; check Battery optimization and Incoming call screen in Setup. Reliable background connection shows an ongoing Android notification. You can silence alerts overnight from Quiet Hours or mute a particular conversation."),
     HelpEntry("How do I switch profiles or move to a new phone?",
         "Open Settings → Profiles to add or switch profiles. Open Settings → Backup to export the selected Chatmail profile or show an Add second device QR code. On the new phone, choose the matching restore option during setup."),
     HelpEntry("How do I read messages aloud or change the theme?",
@@ -127,7 +127,6 @@ internal fun NotificationSettingsContent(
     val scope = rememberCoroutineScope()
     var preview by remember { mutableStateOf(NotificationPreferences.preview(context)) }
     var chatSounds by remember { mutableStateOf(NotificationPreferences.inChatSounds(context)) }
-    var background by remember { mutableStateOf(BackgroundMessages.enabled(context)) }
     var reliable by remember { mutableStateOf(BackgroundMessages.reliable(context)) }
     var batteryExempt by remember { mutableStateOf(BackgroundMessages.batteryExempt(context)) }
     var attempt by remember { mutableIntStateOf(0) }
@@ -148,7 +147,7 @@ internal fun NotificationSettingsContent(
     }
     val batterySettings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         batteryExempt = BackgroundMessages.batteryExempt(context)
-        if (background) BackgroundMessages.start(context, catchUp = true)
+        BackgroundMessages.start(context, catchUp = true)
     }
 
     SettingsSwitch("Notifications", "Turn Relay Lab alerts on or off.", !muted) { toggleMuted(!it) }
@@ -194,14 +193,8 @@ internal fun NotificationSettingsContent(
     }
 
     Text("Background delivery", style = MaterialTheme.typography.titleMedium)
-    SettingsSwitch("Background delivery", "Keep checking for messages when Relay Lab is closed.", background) {
-        if (!BackgroundMessages.setEnabled(context, it) && it) {
-            error = "Android couldn’t start background delivery yet. Check Battery optimization."
-        } else error = null
-        background = it
-    }
     SettingsSwitch("Reliable background connection", "Keep a connection active with a persistent Android notification.",
-        reliable, enabled = background) {
+        reliable) {
         if (!BackgroundMessages.setReliable(context, it)) {
             error = "Android couldn’t start the background connection yet."
         } else error = null

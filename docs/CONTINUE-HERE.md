@@ -1,5 +1,15 @@
 # Continue Relay Lab development
 
+## Pending next APK: simpler Setup and call permissions
+
+Background delivery is now automatic, including boot, package updates, and old installations with the removed enabled=false preference. Removed the Receive in background switch from Setup and the equivalent Background delivery switch from Notifications. The optional reliable foreground connection mode remains in notification settings; it is not a receiving on/off switch. Android battery approval is still needed for the existing unobtrusive continuous connection; fallback network jobs remain available when approval is declined. Do not claim guaranteed delivery after force-stop or manufacturer process restrictions.
+
+Setup uses Relay Lab branding and contrasting highlighted cards, describes camera/microphone use for calls, and detects disabled notification categories as well as global notification denial. Completed connection setup has no redundant explanatory text or switch. A failed start offers Retry. Added Incoming call screen approval on Android 14+, USE_FULL_SCREEN_INTENT, and actual incoming-call full-screen notification routing. Quiet Hours and low-priority/blocked channels cannot trigger full-screen alerts; ordinary message/reminder notifications never do. Only the visible live call UI may show over the lock screen, and it never dismisses the keyguard. Window access is removed when call UI closes or is disposed.
+
+Permission audit: notifications cover calls/messages/reply reminders; microphone covers voice/video calls and recording; camera covers video calls, QR scanning and captures. File selection uses Android's document picker, so broad storage access is unnecessary. Optional Webxdc location permission remains requested when used. Update installation access is requested at installation. Reply reminders use JobScheduler, not exact alarms, so no exact-alarm or Do Not Disturb bypass permission is added. User mute and Quiet Hours choices remain intact.
+
+Verification: all 211 debug unit/UI tests passed with zero failures/errors/skips, and Kotlin compilation passed. Setup rendering inspected in the dark theme; highlighted card contrast corrected. Tests cover background boot/upgrade scheduling with old disabled preferences, full-screen call versus message routing, Quiet Hours, blocked notification categories, and removal of lock-screen access when call UI closes. Physical locked-screen call reception and manufacturer battery behavior remain device-test tasks. Published APK remains RC72 (108); wait for the user's next APK request.
+
 ## Pending next APK: readable Settings, fullscreen apps, and save feedback
 
 Published APK remains RC72 (108). The user is collecting changes before the next APK; do not publish a new build until requested. This checkpoint includes the clearer Saved actions below.

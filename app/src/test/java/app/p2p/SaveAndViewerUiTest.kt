@@ -23,6 +23,23 @@ import org.robolectric.annotation.Config
 class SaveAndViewerUiTest {
     @get:Rule val compose = createEmptyComposeRule()
 
+    @Test fun lockScreenAccessEndsWhenCallUiCloses() {
+        val visible = mutableStateOf(true)
+        Robolectric.buildActivity(ComponentActivity::class.java).setup().use { controller ->
+            controller.get().setContent { CallLockScreen(visible.value, incoming = true) }
+            compose.waitForIdle()
+            val activity = org.robolectric.Shadows.shadowOf(controller.get())
+            assertTrue(activity.showWhenLocked)
+            assertTrue(activity.turnScreenOn)
+            compose.runOnIdle { visible.value = false }
+            compose.waitForIdle()
+            assertFalse(activity.showWhenLocked)
+            assertFalse(activity.turnScreenOn)
+            compose.runOnIdle { controller.get().setContent {} }
+            compose.waitForIdle()
+        }
+    }
+
     @Test fun saveStarShowsProgressThenSavedAndCanRetryAfterFailure() {
         val saving = mutableStateOf(false)
         val saved = mutableStateOf(false)

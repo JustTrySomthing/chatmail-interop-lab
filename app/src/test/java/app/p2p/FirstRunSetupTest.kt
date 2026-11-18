@@ -1,6 +1,8 @@
 package app.p2p
 
 import android.content.Context
+import android.graphics.Bitmap
+import java.io.File
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -51,6 +53,8 @@ class FirstRunSetupTest {
                 runCatching { compose.onNodeWithText("Allow notifications").assertIsDisplayed() }.isSuccess
             }
             compose.onNodeWithText("Display name").assertDoesNotExist()
+            compose.onNodeWithText("Receive in background").assertDoesNotExist()
+            compose.onNodeWithText("P2P can stay connected when the app is closed.").assertDoesNotExist()
         }
     }
 
@@ -58,13 +62,23 @@ class FirstRunSetupTest {
     fun opensSetupFromSettingsAndReturnsToSettings() {
         val context = ApplicationProvider.getApplicationContext<P2pApplication>()
         seedCompletedSetup(context)
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             compose.waitUntil(5_000) {
                 runCatching { compose.onNodeWithText("Inbox").assertIsDisplayed() }.isSuccess
             }
             compose.onNodeWithContentDescription("Settings").performClick()
             compose.onNodeWithText("Setup").performSemanticsAction(SemanticsActions.OnClick)
             compose.onNodeWithText("Edit name").assertIsDisplayed()
+            compose.onNodeWithText("Set up Relay Lab").assertIsDisplayed()
+            compose.onNodeWithText("Receive in background").assertDoesNotExist()
+            scenario.onActivity { activity ->
+                val view = activity.window.decorView
+                val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+                view.draw(android.graphics.Canvas(bitmap))
+                File("build/ui-checks/setup.png").apply { parentFile.mkdirs() }.outputStream().use {
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+                }
+            }
             compose.onNodeWithText("Done").performClick()
             compose.onNodeWithText("Settings").assertIsDisplayed()
         }
@@ -74,7 +88,7 @@ class FirstRunSetupTest {
     fun savesDisplayNameBeforePermissionsAndKeepsSetupCompleteAcrossRecreation() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario: ActivityScenario<MainActivity> ->
             compose.waitUntil(5_000) {
-                runCatching { compose.onNodeWithText("Set up P2P").assertIsDisplayed() }.isSuccess
+                runCatching { compose.onNodeWithText("Set up Relay Lab").assertIsDisplayed() }.isSuccess
             }
             compose.onNode(hasSetTextAction()).performTextInput("Charles")
             compose.onNodeWithText("Continue").performClick()

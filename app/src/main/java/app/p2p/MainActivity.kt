@@ -1106,6 +1106,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
         }
         val showTalkCall = inPip || (talkCall != null && modal !in setOf("talk-message", "talk-mic-required") &&
             (talkCall?.phase != TalkPhase.Finished || modal == null))
+        CallLockScreen(showTalkCall && liveCall && !inPip, talkCall?.phase == TalkPhase.Incoming)
         if (!appMuted && modal == null && download == null && !showTalkCall) UpdateNotice(updates) { modal = "updates" }
         val mainPageState = rememberSaveableStateHolder()
         val fullPage = if (showTalkCall) null else FullPageRoute.entries.firstOrNull { it.route == modal }
