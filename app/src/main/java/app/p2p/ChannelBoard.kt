@@ -1,6 +1,5 @@
 package app.p2p
 
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -29,7 +28,7 @@ import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.EmojiEmotions
-import androidx.compose.material.icons.outlined.PermMedia
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Campaign
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Icon
@@ -103,14 +102,15 @@ internal fun ChannelBoard(
     var attachments by remember(page, selected) { mutableStateOf<List<AttachmentDraft>>(emptyList()) }
     var trimIndex by remember(page, selected) { mutableStateOf<Int?>(null) }
     var previewing by remember(page, selected) { mutableStateOf<ChannelPost?>(null) }
-    val mediaPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        val drafts = uris.distinct().map { uri ->
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    val attachmentPicker = rememberAttachmentPicker(model) { target, drafts ->
+        if (target == selected?.toString()) {
+            attachments = (attachments + drafts).distinctBy(AttachmentDraft::uri)
+        } else {
+            // Never attach a delayed camera/picker result to a different channel.
+            drafts.filter { it.temporary && it.uri.scheme == "file" }.forEach {
+                it.uri.path?.let { path -> java.io.File(path).delete() }
             }
-            describeAttachment(context, uri, asFile = false)
         }
-        attachments = (attachments + drafts).distinctBy(AttachmentDraft::uri)
     }
     var revision by remember { mutableIntStateOf(0) }
     var limit by remember(selected) { mutableIntStateOf(50) }
@@ -238,10 +238,10 @@ internal fun ChannelBoard(
                 shape = RoundedFieldShape)
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 P2pTextButton(enabled = !busy,
-                    onClick = { mediaPicker.launch(arrayOf("image/*", "video/*", "audio/*")) }) {
-                    Icon(Icons.Outlined.PermMedia, null, Modifier.size(18.dp))
+                    onClick = { selected?.let { attachmentPicker(it.toString()) } }) {
+                    Icon(Icons.Outlined.AttachFile, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Add media")
+                    Text("Add attachment")
                 }
                 IconButton(enabled = !busy, onClick = {
                     if (!showEmoji) {

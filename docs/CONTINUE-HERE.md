@@ -1,5 +1,16 @@
 # Continue Relay Lab development
 
+## Pending after RC74: unified attachment chooser
+
+Chats, groups, channels, and the retained Social post composer now use the same themed Add attachment sheet: Take Photo, Record Video, Record Audio, Attach File. The all-files picker supports multiple selections and retains URI read grants. Capture results retain their original destination; channel results are never assigned to a different selected channel. Cancelled camera output is deleted. Existing draft previews, trimming, and send paths remain in place.
+
+Attach File describes media with asFile=false, so generic file selection does not bypass the existing compression policy. Chatmail Core still handles photos; video preparation uses the profile policy; AudioCapturePanel reads the profile quality/bitrate. Ordinary documents, Webxdc packages, GIFs and untrimmed imported audio retain existing handling. No compression settings or defaults were changed. Contact sharing moved to Contacts → contact options → Share contact → destination, leaving the four attachment actions uncluttered.
+
+Validation: all 217 automated tests passed with zero failures/errors/skips; final debug APK assembly passed. All 207 recovery checkpoint files verified. Added four-action menu routing/visibility coverage and updated the Social composer navigation check. Earlier combined and compile-plus-test runs lost their Gradle daemon under memory pressure; the fresh single-worker test run with a 512 MiB Gradle heap passed in 53 seconds.
+
+This is source work for the next APK; RC74 remains the published APK. Camera hardware, permission dialogs, and actual send-time compression on phones require device testing.
+
+
 ## RC74 release checkpoint — November 18, 2026
 
 RC74 (110) contains all post-RC73 source changes described below: unified Profiles controls, compact composer spacing, themed toggleable Saved stars, and Webxdc fullscreen requests with lifecycle cleanup. No scheduled sending or game-control modifications were added. Install over RC73 without uninstalling; established RC58+ signer retained.

@@ -27,9 +27,9 @@ private val helpEntries = listOf(
     HelpEntry("How do I create or follow a channel?",
         "Open Channels → My Channels to create a channel and write posts. Share the channel’s invite from its details. Use Following → Join a channel to follow someone else’s channel. Feed collects their recent posts."),
     HelpEntry("How do I share a photo, video, or other file?",
-        "Tap the paperclip in a chat or group. Choose a media type for inline playback or Other File Type to send the original as a file. Local file selection follows the Android clients’ 1 GiB ceiling. Mail relays can enforce smaller message limits."),
+        "Use Add attachment in chats, groups, or channels. Choose Take Photo, Record Video, Record Audio, or Attach File for existing media and documents. Local file selection follows the Android clients’ 1 GiB ceiling. Mail relays can enforce smaller message limits."),
     HelpEntry("How do I send media at its original quality?",
-        "Choose Other File Type in the attachment menu to send the original. Settings → Compression controls outgoing media quality for the current profile. A trimmed clip is saved as a new file."),
+        "Use Add attachment → Attach File to select existing media or documents. Settings → Compression controls outgoing media quality for the current profile. A trimmed clip is saved as a new file."),
     HelpEntry("How do I add a mini-app or a game?",
         "Tap the four-square Apps button near the bottom of a Chatmail chat or group. Choose an app, tap Add to chat, and send it. Tap its message to open it. Shared apps and games can exchange updates with compatible clients."),
     HelpEntry("How do I call someone or turn on video?",
@@ -114,7 +114,7 @@ internal fun CompressionSettingsContent(model: P2pModel) {
         P2pTextButton(onClick = { attempt++ }) { Text("Retry") }
     }
     error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-    Text("For an original, choose Other File Type in the attachment menu.",
+    Text("Attach File uses these settings for supported media. Documents and app packages are not recompressed.",
         color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 

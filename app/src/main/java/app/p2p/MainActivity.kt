@@ -551,11 +551,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
         var reminderArea by rememberSaveable { mutableStateOf<AlertArea?>(null) }
         var reminderTarget by rememberSaveable { mutableStateOf("") }
         var search by rememberSaveable { mutableStateOf("") }
-        var asFile by rememberSaveable { mutableStateOf(true) }
-        var pickerThread by rememberSaveable { mutableStateOf<String?>(null) }
-        var captureThread by rememberSaveable { mutableStateOf<String?>(null) }
-        var capturePath by rememberSaveable { mutableStateOf<String?>(null) }
-        var captureKind by rememberSaveable { mutableStateOf("photo") }
         var trimIndex by rememberSaveable { mutableIntStateOf(-1) }
         var contactQuery by rememberSaveable { mutableStateOf("") }
         var settingsQuery by rememberSaveable { mutableStateOf("") }
@@ -568,12 +563,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
         var chosenText by rememberSaveable { mutableStateOf("") }
         var postMedia by rememberSaveable { mutableStateOf(arrayListOf<Uri>()) }
         var postDraft by rememberSaveable { mutableStateOf("") }
-        val postPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { result ->
-            result.forEach { uri ->
-                runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            }
-            postMedia = ArrayList((postMedia + result).distinct())
-        }
         val contacts = remember(records) {
             records.filter { it.kind == "contact" && !it.data().optBoolean("nativeSelfTalk") }.sortedWith(
                 compareByDescending<Record> { it.data().optBoolean("pinnedContact") }
@@ -713,46 +702,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
             }
             mediaDrafts[id] = items.filterIndexed { i, _ -> i != index }
         }
-        fun finishCapture(success: Boolean) {
-            val destination = captureThread
-            val path = capturePath
-            capturePath = null
-            captureThread = null
-            if (path == null || destination == null) return
-            val file = File(path)
-            if (!success || file.length() == 0L) {
-                file.delete()
-                return
-            }
-            val video = captureKind == "video"
-            addDraft(destination, listOf(AttachmentDraft(Uri.fromFile(file),
-                if (video) "Recorded video.mp4" else "Camera photo.jpg",
-                if (video) "video/mp4" else "image/jpeg", false, temporary = true)))
-        }
-        val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture(), ::finishCapture)
-        val takeVideo = rememberLauncherForActivityResult(ActivityResultContracts.CaptureVideo(), ::finishCapture)
-        fun launchCapture() {
-            if (captureThread == null) return
-            val folder = File(context.cacheDir, "captures").apply { mkdirs() }
-            val video = captureKind == "video"
-            val file = File.createTempFile("p2p-camera-", if (video) ".mp4" else ".jpg", folder)
-            capturePath = file.absolutePath
-            val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-            runCatching { if (video) takeVideo.launch(uri) else takePhoto.launch(uri) }
-                .onFailure { finishCapture(false); modal = "capture-unavailable" }
-        }
-        val capturePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) launchCapture() else { captureThread = null; modal = "capture-unavailable" }
-        }
-        val microphonePermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            modal = if (granted) "record-audio" else "capture-unavailable"
-        }
-        fun capture(kind: String) {
-            captureThread = thread
-            captureKind = kind
-            modal = null
-            if (context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) launchCapture()
-            else capturePermission.launch(Manifest.permission.CAMERA)
+        val attachmentPicker = rememberAttachmentPicker(model) { target, drafts ->
+            if (target == "social-post") {
+                postMedia = ArrayList((postMedia + drafts.map { it.uri }).distinct())
+                modal = "post"
+            } else addDraft(target, drafts)
         }
         var talkMicAction by rememberSaveable { mutableStateOf<TalkMicAction?>(null) }
         var talkContact by rememberSaveable { mutableStateOf<String?>(null) }
@@ -791,24 +745,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
             if (context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
                 model.talk.toggleCamera()
             } else callCameraPermission.launch(Manifest.permission.CAMERA)
-        }
-        val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { result ->
-            val target = pickerThread
-            pickerThread = null
-            if (result.isNotEmpty()) {
-                if (target != null) {
-                    result.forEach { uri ->
-                        runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-                    }
-                    addDraft(target, result.map { describeAttachment(context, it, asFile) })
-                    modal = null
-                }
-            }
-        }
-        fun chooseAttachment(raw: Boolean, vararg formats: String) {
-            asFile = raw
-            pickerThread = thread
-            filePicker.launch(arrayOf(*formats))
         }
         fun blocked(id: String): Boolean =
             contacts.firstOrNull { it.key == id }?.data()?.optBoolean("blocked") == true ||
@@ -2238,8 +2174,41 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                     P2pRow(if (muted) "Unmute contact" else "Mute contact", "Silence this person’s alerts", Icons.Outlined.NotificationsOff) {
                         model.setContactFlag(id, "alertMuted", !muted); modal = "contacts"
                     }
+                    P2pRow("Share contact", "Choose a conversation", Icons.Outlined.Share) {
+                        modal = "share-contact-destination"
+                    }
                     val choice = if (blocked(id)) ThreadAction.UNBLOCK else ThreadAction.BLOCK
                     P2pRow(choice.label, "", Icons.Outlined.Block) { showAction(id, choice) }
+                }
+            }
+            "share-contact-destination" -> Sheet("Share contact", { modal = "contact-actions" }) {
+                val contact = contacts.firstOrNull { it.key == selected }
+                if (contact != null) {
+                    val destinations = records.filter {
+                        (it.kind == "contact" || it.kind == "group") && !blocked(it.key) &&
+                            (!it.data().has("nativeChat") || (it.data().optBoolean("nativeCanSend") &&
+                                !it.data().optBoolean("contactRequest")))
+                    }
+                    if (destinations.isEmpty()) Text("Open a conversation before sharing a contact.")
+                    destinations.forEach { recipient ->
+                        P2pRow(name(recipient.key), "", Icons.Outlined.ChatBubbleOutline, enabled = !nativeActionBusy) {
+                            runNativeAction {
+                                val nativeId = contact.data().optInt("nativeContact")
+                                val card = if (nativeId > 0) model.chatmailContactCard(nativeId) else {
+                                    val folder = File(context.cacheDir, "captures").apply { mkdirs() }
+                                    val file = File.createTempFile("p2p-contact-", ".vcf", folder)
+                                    file.writeText(listOf("BEGIN:VCARD", "VERSION:3.0",
+                                        "FN:" + escapeVCard(name(contact.key)),
+                                        "N:" + escapeVCard(name(contact.key)) + ";;;;",
+                                        "X-P2P-ADDRESS:" + contact.key, "END:VCARD", "").joinToString("\r\n"))
+                                    AttachmentDraft(Uri.fromFile(file), "Contact card.vcf", "text/x-vcard", false, temporary = true)
+                                }
+                                addDraft(recipient.key, listOf(card))
+                                goArea(if (recipient.kind == "group") Area.Groups else Area.Chats)
+                                goThread(recipient.key)
+                            }
+                        }
+                    }
                 }
             }
             "confirm-thread-action" -> {
@@ -2514,8 +2483,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                     textStyle = contentTextStyle(MaterialTheme.typography.bodyLarge), shape = RoundedFieldShape)
                 FlowRow(itemVerticalAlignment = Alignment.CenterVertically) {
                     P2pTextButton(enabled = !submitting,
-                        onClick = { postPicker.launch(arrayOf("image/*", "video/*", "audio/*")) }) {
-                        Icon(Icons.Outlined.PermMedia, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Add media")
+                        onClick = { modal = null; attachmentPicker("social-post") }) {
+                        Icon(Icons.Outlined.AttachFile, null, Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Add attachment")
                     }
                     if (postMedia.isNotEmpty()) {
                         P2pTextButton(enabled = !submitting, onClick = { postMedia = arrayListOf() }) {
@@ -2538,74 +2507,12 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                     modal = null
                 }, close = { modal = null })
             }
-            "attach" -> Sheet("Add attachment", { modal = null }) {
-                P2pRow("Other File Type", "", Icons.Outlined.AttachFile) { chooseAttachment(true, "*/*") }
-                P2pRow("Take photo", "", Icons.Outlined.PhotoCamera) { capture("photo") }
-                P2pRow("Record video", "", Icons.Outlined.Videocam) { capture("video") }
-                P2pRow("Record audio", "", Icons.Outlined.Mic) {
-                    if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                        modal = "record-audio"
-                    } else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
-                }
-                P2pRow("Photos", "", Icons.Outlined.PhotoLibrary) { chooseAttachment(false, "image/*") }
-                P2pRow("Videos", "", Icons.Outlined.VideoLibrary) { chooseAttachment(false, "video/*") }
-                P2pRow("Audio", "", Icons.Outlined.AudioFile) { chooseAttachment(false, "audio/*") }
-                P2pRow("Contact card (.vcf)", "", Icons.Outlined.ContactPage) { modal = "attach-contact" }
+            "attach" -> LaunchedEffect(thread) {
+                val target = thread
+                modal = null
+                if (target != null) attachmentPicker(target)
             }
-            "capture-unavailable" -> Sheet("Capture unavailable", { modal = "attach" }) {
-                Text("Check Android permissions, or select a photo, video, or audio file.")
-            }
-            "record-audio" -> Sheet("Record audio", { modal = "attach" }) {
-                AudioCapturePanel(model) { file ->
-                    val id = thread
-                    if (id != null) {
-                        addDraft(id, listOf(AttachmentDraft(Uri.fromFile(file), "Recorded audio.m4a", "audio/mp4", false, temporary = true)))
-                    } else file.delete()
-                    modal = null
-                }
-            }
-            "attach-contact" -> Sheet("Contact card (.vcf)", { modal = "attach" }) {
-                P2pRow("Choose a .vcf file", "", Icons.Outlined.ContactPage) {
-                    chooseAttachment(false, "text/x-vcard", "text/vcard", "application/vcard", "application/octet-stream")
-                }
-                val destination = thread
-                if (destination != null && records.any {
-                        it.key == destination && it.data().optInt("nativeChat") > 9
-                    }) {
-                    val available by produceState<Result<List<ChatmailContact>>?>(null, model, destination) {
-                        value = try {
-                            Result.success(model.chatmailCardContacts())
-                        } catch (cancelled: CancellationException) {
-                            throw cancelled
-                        } catch (error: Exception) {
-                            Result.failure(error)
-                        }
-                    }
-                    if (available == null) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    else if (available?.isFailure == true) Text("Couldn’t load Chatmail contacts.", color = Quiet)
-                    else if (available?.getOrNull().isNullOrEmpty()) Text("No Chatmail contacts to share yet.", color = Quiet)
-                    available?.getOrNull().orEmpty().forEach { contact ->
-                        P2pRow(contact.name, "Share Chatmail contact card", Icons.Outlined.PersonOutline,
-                            enabled = !nativeActionBusy) {
-                            runNativeAction { addDraft(destination, listOf(model.chatmailContactCard(contact.id))) }
-                        }
-                    }
-                } else contacts.filter { !it.data().optBoolean("blocked") }.forEach { contact ->
-                    P2pRow(name(contact.key), "Share P2P contact card", Icons.Outlined.PersonOutline) {
-                        val id = thread
-                        if (id != null) {
-                            val display = name(contact.key)
-                            val folder = File(context.cacheDir, "captures").apply { mkdirs() }
-                            val file = File.createTempFile("p2p-contact-", ".vcf", folder)
-                            file.writeText(listOf("BEGIN:VCARD", "VERSION:3.0", "FN:" + escapeVCard(display),
-                                "N:" + escapeVCard(display) + ";;;;", "X-P2P-ADDRESS:" + contact.key,
-                                "END:VCARD", "").joinToString("\r\n"))
-                            addDraft(id, listOf(AttachmentDraft(Uri.fromFile(file), "Contact card.vcf", "text/x-vcard", false, temporary = true)))
-                        }
-                        modal = null
-                    }
-                }
-            }
+
             "attach-p2p-files" -> Sheet("P2P Files", { modal = "attach" }) {
                 val files = records.filter { it.kind in listOf("file-sent", "file-received") && it.data().optBoolean("listed") }
                     .mapNotNull { file -> model.galleryFile(file)?.let { file to it } }

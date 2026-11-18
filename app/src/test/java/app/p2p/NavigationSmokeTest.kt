@@ -173,10 +173,15 @@ class NavigationSmokeTest {
         compose.onNodeWithText("Previous Social posts").performClick()
         compose.onNodeWithText("My Page").performClick()
         compose.onNodeWithText("No posts yet").assertIsDisplayed()
-        compose.onNodeWithText("Add media").assertDoesNotExist()
+        compose.onNodeWithText("Add attachment").assertDoesNotExist()
         compose.onNodeWithText("What’s on your mind?").performClick()
         compose.onNodeWithText("New post").assertIsDisplayed()
-        compose.onNodeWithText("Add media").assertIsDisplayed()
+        compose.onNodeWithText("Add attachment").assertIsDisplayed()
+        compose.onNodeWithText("Add attachment").performClick()
+        for (label in listOf("Take Photo", "Record Video", "Record Audio", "Attach File")) {
+            compose.onNodeWithText(label).assertIsDisplayed()
+        }
+
     }
 
     @Test
