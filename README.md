@@ -8,12 +8,12 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc62**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc62/P2P-0.7.23-rc62-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc63**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc63/P2P-0.7.23-rc63-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC62 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC63 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
-RC62 (98) retains the WebRTC isolation guard after shared apps close and prepares it when browsing apps or entering a chat containing them. Per-frame isolation checks remain enabled. Diagnostics now include preparation, guard wait and frame-load timings. The user confirmed RC61 opens apps on their phone, but reported 5–10 second startup. RC62 performance still needs phone verification. Install over RC58–RC61 using the same saved signing identity.
+RC63 (99) removes the Relay Lab-only three-open-app limit and its forced close prompt. Opening a fourth or later shared app follows the same launch path as the first; existing sessions remain available in the app switcher. No replacement numeric cap or automatic session eviction was added. Existing pause/resume, isolation checks, saved data and the RC62 warm guard remain intact. Install over RC58–RC62 using the saved signing identity. Multi-app phone verification for RC63 remains pending.
 
 ### Update from the app
 
@@ -31,7 +31,7 @@ Relay Lab uses Chatmail Core for interoperability. Cross-app support varies by c
 
 ## Build a debug APK
 
-First check out `securejoin-invites` (active development) or `v0.7.23-rc62` (release source); main currently retains older application source. Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
+First check out `securejoin-invites` (active development) or `v0.7.23-rc63` (release source); main currently retains older application source. Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
 
 ```sh
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
@@ -41,7 +41,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 
 
 For a non-debuggable development APK, run `./gradlew :app:assemblePreview`. The output is `app/build/outputs/apk/preview/app-preview.apk`. This variant uses the dedicated Relay Lab signing configuration. Set both signing environment variables using the restored backup described in RECOVERY.md. Do not distribute a debug-signed replacement.
 
-The downloadable APK's source is at the [RC62 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc62). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and automatic update checks off by default.
+The downloadable APK's source is at the [RC63 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc63). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and automatic update checks off by default.
 
 ### Release publishing
 
@@ -122,7 +122,7 @@ Use fresh profiles and record the client versions and networks used. SecureJoin 
 
 The bottom-right button jumps to the newest messages when you are reading older history. Near the bottom it opens **Apps** in writable Chatmail chats and groups. Search **Home**, **Tools**, or **Games**, open an app's details, and use **Add to chat** to attach it to the composer. Send the draft to share an app instance. Use **Open app** on its message to run it.
 
-Use the back arrow to return to the chat. The **Apps** button lists open mini-apps and app messages in the current chat. Each shared message is its own instance, so two copies of the same app can have different data. Up to three sessions can be open. If WebView needs to run one at a time to preserve isolation, reopening a minimized app reloads its page. Use **App options → Add to home screen** to pin a shortcut to that exact shared instance on a supported Android launcher.
+Use the back arrow to return to the chat. The **Apps** button lists open mini-apps and app messages in the current chat. Each shared message is its own instance, so two copies of the same app can have different data. There is no Relay Lab-imposed limit on the number of open sessions. Available device resources still apply. If WebView needs to run one at a time to preserve isolation, reopening a minimized app reloads its page. Use **App options → Add to home screen** to pin a shortcut to that exact shared instance on a supported Android launcher.
 
 The catalog is the same index used by Delta Chat's default Webxdc Store. Relay Lab ships Delta Chat Android v2.69.0's JavaScript API and WebRTC isolation assets and uses Chatmail Core for native Webxdc messages, status updates, and realtime data. Relay Lab hosts each message in its own isolated WebView origin. A mini-app can request camera, microphone, location, or motion access while open. Relay Lab asks for consent for that mini-app and checks Android permissions for camera, microphone, and location. Android's approximate location setting is supported. Allowing motion reloads the mini-app so its page can use the sensors. Minimizing the mini-app or leaving Relay Lab closes an instance that has been granted any of these permissions. Permission use still needs Android device testing. Seven catalog apps, including Pixel and Connect4, passed offline Core tests. Catalog downloads are validated against the actual response and archive. For native Chatmail attachments, Relay Lab uses the same 1 GiB local ceiling as Delta Chat and ArcaneChat Android. The mail relay determines which messages it will deliver. Android WebView isolation, game interaction, and multiplayer sync across installed clients still need device testing.
 
