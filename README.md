@@ -8,12 +8,12 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc64**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc64/P2P-0.7.23-rc64-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc65**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc65/P2P-0.7.23-rc65-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC64 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC65 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
-RC64 (100) adds an Apps bottom tab with a personal Webxdc desktop, catalog installation, icon ordering and pages. Saved is now a global collection backed by standard Chatmail saved copies, with bookmark actions and migration of old stars. Chat app instances remain separate. The RC62 startup improvements and RC63 removal of the three-app cap remain included. Install over RC58–RC63 using the established signing identity. Phone interaction and cross-client verification of the new navigation remain pending.
+RC65 (101) reviews and fixes the personal Apps/Saved implementation: moves onto full desktop pages now work and persist atomically; hidden icons no longer change explicit page placement; drag targets refresh after layout changes; deleted legacy stars are excluded from migration; caption search and existing-Saved attachment navigation work; notes have an accurate removal warning; catalog/Saved errors appear inside their dialogs. All RC64 features and earlier Webxdc fixes remain included. Uses the established RC58 signer. Device and cross-client checks remain separate from automated verification.
 
 ### Update from the app
 
@@ -31,7 +31,7 @@ Relay Lab uses Chatmail Core for interoperability. Cross-app support varies by c
 
 ## Build a debug APK
 
-First check out `securejoin-invites` (active development) or `v0.7.23-rc64` (release source); main currently retains older application source. Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
+First check out `securejoin-invites` (active development) or `v0.7.23-rc65` (release source); main currently retains older application source. Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
 
 ```sh
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
@@ -41,7 +41,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 
 
 For a non-debuggable development APK, run `./gradlew :app:assemblePreview`. The output is `app/build/outputs/apk/preview/app-preview.apk`. This variant uses the dedicated Relay Lab signing configuration. Set both signing environment variables using the restored backup described in RECOVERY.md. Do not distribute a debug-signed replacement.
 
-The downloadable APK's source is at the [RC64 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc64). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and automatic update checks off by default.
+The downloadable APK's source is at the [RC65 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc65). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and automatic update checks off by default.
 
 ### Release publishing
 
