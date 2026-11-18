@@ -32,7 +32,10 @@ class SettingsTilesTest {
     @Test fun lightTilesKeepEveryRouteAndSearchWorking() = verify(ThemeMode.LIGHT)
 
     @Test @Config(qualifiers = "w320dp-h900dp")
-    fun narrowScreenUsesReadableSingleColumnTiles() = verify(ThemeMode.DARK, twoColumns = false)
+    fun compactPhoneKeepsTwoColumns() = verify(ThemeMode.DARK)
+
+    @Test @Config(qualifiers = "w280dp-h900dp")
+    fun veryNarrowScreenUsesReadableSingleColumnTiles() = verify(ThemeMode.DARK, twoColumns = false)
 
     private fun verify(mode: ThemeMode, twoColumns: Boolean = true) {
         seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())

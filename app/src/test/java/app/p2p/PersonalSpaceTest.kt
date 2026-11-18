@@ -30,19 +30,19 @@ class PersonalSpaceTest {
         assertEquals(apps[3], result[0])
         assertEquals(apps[0], result[1])
         assertEquals(apps.toSet(), result.toSet())
-        val moved = movedApp(result.map { it.key }, result[0].key, 12)
-        assertEquals(result[0].key, moved[12])
-        assertEquals(result.map { it.key }.toSet(), moved.toSet())
+        val moved = personalDesktopLayout(apps, obj("order" to org.json.JSONArray(order))).move(result[0].key, 1, 0)
+        assertEquals(result[0].key, moved.pages[1][0])
+        assertEquals(result.map { it.key }.toSet(), moved.pages.flatten().toSet())
     }
 
     @Test fun explicitPagesAndOverflowKeepEveryAppExactlyOnce() {
         val apps = (20..34).map { app(it, nativeThreadKey(12)) }.toMutableList()
         apps[0] = apps[0].copy(payload = apps[0].data().put("desktopPage", 2).toString())
-        val pages = personalAppPages(apps)
+        val pages = personalDesktopLayout(apps, null).pages
         assertEquals(3, pages.size)
-        assertEquals(apps[0], pages[2][0])
+        assertEquals(apps[0].key, pages[2][0])
         assertEquals(15, pages.flatten().size)
-        assertEquals(apps.toSet(), pages.flatten().toSet())
+        assertEquals(apps.map(Record::key).toSet(), pages.flatten().toSet())
         assertTrue(pages.all { it.size <= 12 })
     }
 
@@ -65,20 +65,19 @@ class PersonalSpaceTest {
     }
     @Test fun movingOverflowAppToFullPreviousPageReallyMovesItAndPreservesEveryInstance() {
         val apps = (20..44).map { app(it, nativeThreadKey(12)) }
-        val pages = movedPersonalAppPages(apps, emptyList(), apps[12].key, 0)
-        assertEquals(apps[12].key, pages[0][0].key)
-        assertEquals(apps.size, pages.flatten().size)
-        assertEquals(apps.map { it.key }.toSet(), pages.flatten().map { it.key }.toSet())
-        assertTrue(pages.all { it.size <= 12 })
-        val persisted = pages.flatMapIndexed { page, entries -> entries.map { it.copy(payload = it.data().put("desktopPage", page).toString()) } }
-        assertEquals(pages.map { it.map(Record::key) }, personalAppPages(persisted).map { it.map(Record::key) })
+        val moved = personalDesktopLayout(apps, null).move(apps[12].key, 0, 0)
+        assertEquals(apps[12].key, moved.pages[0][0])
+        assertEquals(apps.size, moved.pages.flatten().size)
+        assertEquals(apps.map(Record::key).toSet(), moved.pages.flatten().toSet())
+        assertTrue(moved.pages.all { it.size <= DesktopPageSize })
+        assertEquals(moved, personalDesktopLayout(apps, moved.encode()))
     }
 
     @Test fun hidingIconsDoesNotPullOtherIconsOffAnExplicitPage() {
         val apps = (20..24).map { app(it, nativeThreadKey(12)) }.toMutableList()
         apps[0] = apps[0].copy(payload = apps[0].data().put("desktopPage", 4).toString())
         for (i in 1..4) apps[i] = apps[i].copy(payload = apps[i].data().put("desktopHidden", true).toString())
-        assertEquals(apps[0].key, personalAppPages(apps)[4].single().key)
+        assertEquals(apps[0].key, personalDesktopLayout(apps, null).pages[4].single())
     }
 
     @Test fun deletedLegacyStarsDoNotMigrateAndSavedNotesHaveHonestRemovalText() {
@@ -97,6 +96,28 @@ class PersonalSpaceTest {
         assertEquals(listOf(post, file), legacySavedParts(post, listOf(file, other)))
         assertTrue(runCatching { legacySavedParts(post, listOf(other)) }.isFailure)
         assertEquals(listOf(file), legacySavedParts(file, listOf(post, file)))
+    }
+
+    @Test fun foldersPreserveExactCopiesAcrossRenameHideMoveOutAndDeletion() {
+        val apps = (20..36).map { app(it, nativeThreadKey(12)) }
+        val first = apps[0].key
+        val second = apps[1].key
+        val third = apps[2].key
+        val folder = "desktop-folder:test"
+        val grouped = personalDesktopLayout(apps, null).group(first, second, folder)
+            .group(third, folder).rename(folder, " Work ")
+        assertEquals(DesktopFolder(folder, "Work", listOf(second, first, third)), grouped.folders.single())
+        assertEquals(grouped, personalDesktopLayout(apps, grouped.encode()))
+        assertFalse(first in grouped.pages.flatten())
+        val hidden = apps.map { if (it.key == first) it.copy(payload = it.data().put("desktopHidden", true).toString()) else it }
+        assertEquals(grouped, personalDesktopLayout(hidden, grouped.encode()))
+        val extracted = grouped.move(first, 0, 0)
+        assertEquals(first, extracted.pages[0][0])
+        assertEquals(listOf(second, third), extracted.folders.single().members)
+        val dissolved = extracted.dissolve(folder)
+        assertTrue(dissolved.folders.isEmpty())
+        assertEquals(apps.size, dissolved.pages.flatten().size)
+        assertEquals(apps.map(Record::key).toSet(), dissolved.pages.flatten().toSet())
     }
 
 }

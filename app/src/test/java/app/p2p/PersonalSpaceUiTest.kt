@@ -31,21 +31,25 @@ class PersonalSpaceUiTest {
         var opened: String? = null
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity -> activity.setContent { P2pTheme(Appearance()) {
-                PersonalAppsDesktop(apps.value, emptyList(), { null }, { opened = it.key }, {},
+                PersonalAppsDesktop(apps.value, null, { null }, { opened = it.key }, {},
                     hide = { key, hidden -> apps.value = apps.value.map { if (it.key == key) it.copy(payload = it.data().put("desktopHidden", hidden).toString()) else it } },
-                    movePage = { _, _ -> }, add = {}, loading = false, error = null, retry = {})
+                    add = {}, loading = false, error = null, retry = {})
             } } }
-            compose.onNodeWithText("Personal apps · Only you").assertIsDisplayed()
+            compose.onNodeWithText("Personal apps · Only you").assertDoesNotExist()
             compose.onNodeWithText("App 20").performClick()
             assertEquals(nativeMessageKey(20), opened)
             compose.onNodeWithContentDescription("Next page").performClick()
             compose.onNodeWithText("App 32").assertIsDisplayed().performClick()
             assertEquals(nativeMessageKey(32), opened)
             compose.onNodeWithContentDescription("Previous page").performClick()
-            compose.onNodeWithContentDescription("Options for App 20").performClick()
-            compose.onNodeWithText("Remove icon (keep app data)").performClick()
+            val icon = compose.onNodeWithTag("desktop-app-${nativeMessageKey(20)}")
+            icon.performTouchInput { down(center) }
+            compose.mainClock.advanceTimeBy(700)
+            icon.performTouchInput { up() }
+            compose.onNodeWithText("Remove icon (keep app data)").assertIsDisplayed().performClick()
+            assertEquals(nativeMessageKey(32), opened)
             compose.runOnIdle { assertEquals(13, apps.value.size) }
-            compose.onNodeWithContentDescription("Manage app icons").performClick()
+            compose.onNodeWithContentDescription("Manage hidden apps").performClick()
             compose.onNodeWithText("Restore App 20").performClick()
             compose.onNodeWithText("Done").performClick()
             compose.onNodeWithText("App 20").assertIsDisplayed()
@@ -81,20 +85,54 @@ class PersonalSpaceUiTest {
         seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
         val apps = (20..22).map { id -> Record(nativeMessageKey(id), "file-sent",
             obj("name" to "App $id.xdc", "nativeMessage" to id, "webxdc" to true, "thread" to nativeThreadKey(12)).toString(), id.toLong()) }
-        val order = mutableStateOf(apps.map { it.key })
+        val layout = mutableStateOf(personalDesktopLayout(apps, null))
         var opened = false
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity -> activity.setContent { P2pTheme(Appearance()) {
-                PersonalAppsDesktop(apps, order.value, { null }, { opened = true }, { order.value = it },
-                    { _, _ -> }, { _, _ -> }, {}, false, null, {})
+                PersonalAppsDesktop(apps, layout.value.encode(), { null }, { opened = true }, { layout.value = it(layout.value) },
+                    { _, _ -> }, {}, false, null, {})
             } } }
             val icon = compose.onNodeWithTag("desktop-app-${apps[0].key}")
-            icon.performTouchInput { down(Offset(20f, 70f)) }
+            icon.performTouchInput { down(center) }
             compose.mainClock.advanceTimeBy(1000)
-            icon.performTouchInput { moveBy(Offset(110f, 0f)); up() }
+            icon.performTouchInput { moveBy(Offset(width.toFloat(), 0f)); up() }
             compose.runOnIdle {
-                assertEquals(listOf(apps[1].key, apps[0].key, apps[2].key), order.value)
+                assertEquals(listOf(apps[1].key, apps[0].key, apps[2].key), layout.value.pages.single())
                 assertFalse(opened)
+            }
+            compose.onNodeWithText("Done").assertDoesNotExist()
+        }
+    }
+
+    @Test fun holdOverAppCreatesFolderAndDraggingOutReturnsAppToDesktop() {
+        seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
+        val apps = (20..22).map { id -> Record(nativeMessageKey(id), "file-sent",
+            obj("name" to "App $id.xdc", "nativeMessage" to id, "webxdc" to true,
+                "thread" to nativeThreadKey(12)).toString(), id.toLong()) }
+        val layout = mutableStateOf(personalDesktopLayout(apps, null))
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity -> activity.setContent { P2pTheme(Appearance()) {
+                PersonalAppsDesktop(apps, layout.value.encode(), { null }, {}, { layout.value = it(layout.value) },
+                    { _, _ -> }, {}, false, null, {})
+            } } }
+            val icon = compose.onNodeWithTag("desktop-app-${apps[0].key}")
+            icon.performTouchInput { down(center) }
+            compose.mainClock.advanceTimeBy(700)
+            icon.performTouchInput { moveBy(Offset(width.toFloat(), 0f)) }
+            compose.waitForIdle()
+            compose.mainClock.advanceTimeBy(600)
+            compose.onNodeWithTag("desktop-viewport").performTouchInput { up() }
+            assertEquals("Folder", layout.value.folders.singleOrNull()?.name)
+            compose.onNodeWithTag("desktop-folder-dialog").assertIsDisplayed()
+            val member = compose.onNodeWithTag("desktop-member-${apps[0].key}")
+            member.performTouchInput { down(center) }
+            compose.mainClock.advanceTimeBy(700)
+            val y = member.fetchSemanticsNode().boundsInRoot.center.y
+            val folderTop = compose.onNodeWithTag("desktop-folder-dialog").fetchSemanticsNode().boundsInRoot.top
+            member.performTouchInput { moveBy(Offset(0f, folderTop - y - 24f)); up() }
+            compose.runOnIdle {
+                assertEquals(listOf(apps[1].key), layout.value.folders.single().members)
+                assertTrue(apps[0].key in layout.value.pages.flatten())
             }
         }
     }

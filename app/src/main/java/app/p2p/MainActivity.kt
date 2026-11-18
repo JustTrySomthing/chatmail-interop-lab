@@ -1477,11 +1477,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                     }
                     area == Area.Apps -> PersonalAppsDesktop(
                         apps = personalApps(records, personalThread),
-                        order = records.firstOrNull { it.key == "personal-app-desktop" }?.data()?.strings("order").orEmpty(),
+                        saved = records.firstOrNull { it.key == "personal-app-desktop" }?.data(),
                         localFile = model::galleryFile,
                         open = { app -> val local = model.galleryFile(app)
                             if (local == null) model.requestDownload(app.key) else launchWebxdc(app, local) },
-                        reorder = model::saveDesktopOrder, hide = model::setDesktopHidden, movePage = model::moveDesktopPage,
+                        edit = { change -> model.editDesktop(personalThread, change) }, hide = model::setDesktopHidden,
                         add = { modal = "personal-catalog" }, loading = personalLoading,
                         error = personalError, retry = { personalRevision++ })
                     area == Area.Chats || area == Area.Groups -> {
@@ -2870,20 +2870,34 @@ internal fun SettingsGrid(query: String, open: (String) -> Unit) {
     val gap = 12.dp
     val fontScale = LocalDensity.current.fontScale
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val columns = if (maxWidth >= 148.dp * fontScale.coerceAtLeast(1f) * 2 + gap) 2 else 1
+        val compactGrid = maxWidth >= 272.dp && fontScale <= 1.45f
+        val wideGrid = maxWidth >= 148.dp * fontScale.coerceAtLeast(1f) * 2 + gap
+        val columns = if (compactGrid || wideGrid) 2 else 1
+        val stackIcon = columns == 2 && !wideGrid
         Column(verticalArrangement = Arrangement.spacedBy(gap)) {
             matches.chunked(columns).forEach { row ->
-                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
                     row.forEach { item ->
-                        Surface(onClick = { open(item.route) }, modifier = Modifier.weight(1f).fillMaxHeight(),
+                        Surface(onClick = { open(item.route) }, modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(20.dp), color = Panel, contentColor = Ink,
                             tonalElevation = 0.dp, shadowElevation = 1.dp,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .16f))) {
-                            Row(Modifier.heightIn(min = 80.dp).padding(horizontal = 10.dp, vertical = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(item.icon, null, Modifier.size(22.dp), tint = readableAccent(Panel, Ink))
-                                Text(item.label, Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                                    lineHeight = 21.sp)
+                            val tint = readableAccent(Panel, Ink)
+                            if (stackIcon) {
+                                Column(Modifier.fillMaxWidth().heightIn(min = 80.dp).padding(horizontal = 8.dp, vertical = 10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterVertically),
+                                    horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(item.icon, null, Modifier.size(22.dp), tint = tint)
+                                    Text(item.label, Modifier.fillMaxWidth(), fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                                        lineHeight = 20.sp, textAlign = TextAlign.Center)
+                                }
+                            } else {
+                                Row(Modifier.heightIn(min = 80.dp).padding(horizontal = 10.dp, vertical = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(item.icon, null, Modifier.size(22.dp), tint = tint)
+                                    Text(item.label, Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                                        lineHeight = 21.sp)
+                                }
                             }
                         }
                     }

@@ -2347,33 +2347,24 @@ class P2pModel internal constructor(application: Application, internal val profi
 
     private val desktopMutex = Mutex()
 
-    internal fun saveDesktopOrder(order: List<String>) = work {
+    internal fun editDesktop(thread: String?, edit: (PersonalDesktopLayout) -> PersonalDesktopLayout) = work {
         desktopMutex.withLock {
-            save("personal-app-desktop", "thread-pref", obj("order" to JSONArray(order.distinct())))
-        }
-    }
-
-    internal fun moveDesktopPage(key: String, page: Int) = work {
-        desktopMutex.withLock {
-            val item = requireNotNull(records.get(key))
-            val thread = item.data().optString("thread")
-            check(records.get(thread)?.data()?.optBoolean("nativeSelfTalk") == true)
-            val apps = personalApps(records.threadItems(), thread)
-            val order = records.get("personal-app-desktop")?.data()?.strings("order").orEmpty()
-            val pages = movedPersonalAppPages(apps, order, key, page)
-            database.withTransaction {
-                pages.forEachIndexed { index, entries -> entries.forEach { app -> change(app.key) { put("desktopPage", index) } } }
-                val keys = pages.flatten().map { it.key } + apps.filter { it.data().optBoolean("desktopHidden") }.map { it.key }
-                save("personal-app-desktop", "thread-pref", obj("order" to JSONArray(keys.distinct())))
-            }
+            if (thread == null || records.get(thread)?.data()?.optBoolean("nativeSelfTalk") != true) return@withLock
+            val saved = records.get("personal-app-desktop")?.data()
+            val current = personalDesktopLayout(personalApps(records.threadItems(), thread), saved)
+            val updated = edit(current)
+            if (updated != current) save("personal-app-desktop", "thread-pref", updated.encode())
         }
     }
 
     internal fun setDesktopHidden(key: String, hidden: Boolean) = work {
         desktopMutex.withLock {
-            val item = requireNotNull(records.get(key))
-            check(records.get(item.data().optString("thread"))?.data()?.optBoolean("nativeSelfTalk") == true)
-            change(key) { put("desktopHidden", hidden) }
+            database.withTransaction {
+                val item = records.get(key) ?: return@withTransaction
+                if (records.get(item.data().optString("thread"))?.data()?.optBoolean("nativeSelfTalk") == true) {
+                    change(key) { put("desktopHidden", hidden) }
+                }
+            }
         }
     }
 
