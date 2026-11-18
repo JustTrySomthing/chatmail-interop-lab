@@ -412,6 +412,45 @@ internal class Chatmail(directory: File) : AutoCloseable {
         return secureJoinLink(chat)
     }
 
+    fun nativeMute(chat: Int, muted: Boolean) {
+        call("set_chat_mute_duration", chat, obj("kind" to if (muted) "Forever" else "NotMuted"))
+    }
+
+    fun leaveGroup(chat: Int) {
+        require(nativeThread(chat)?.let { it.group && it.selfInGroup && !it.request } == true) {
+            "You’re no longer a member of this group."
+        }
+        call("remove_contact_from_chat", chat, 1)
+    }
+
+    fun removeChannel(id: Int) {
+        val channel = requireNotNull(channel(id)) { "This channel is unavailable." }
+        // Unsubscribe before deleting history; deleting a chat alone does not leave it.
+        if (!channel.owned && fullChat(id).optBoolean("selfInGroup")) call("remove_contact_from_chat", id, 1)
+        call("delete_chat", channel.id)
+    }
+
+    fun editChannelPost(id: Int, text: String) {
+        val post = requireNotNull(channelPost(id)) { "This post is unavailable." }
+        requireOwnedChannel(post.channelId)
+        require(text.length <= INTEROP_TEXT_LIMIT && text.isNotBlank() && post.text.isNotBlank()) {
+            "Only existing post text can be edited; keep the text nonempty."
+        }
+        editMessage(id, text)
+    }
+
+    fun deleteChannelPost(id: Int) {
+        val post = requireNotNull(channelPost(id)) { "This post is unavailable." }
+        requireOwnedChannel(post.channelId)
+        deleteMessageForEveryone(id)
+    }
+
+    fun localRetention(): Long = call("get_config", "delete_device_after").toString().toLongOrNull() ?: 0L
+    fun setLocalRetention(seconds: Long) {
+        require(seconds in LOCAL_RETENTION_CHOICES.map { it.first })
+        call("set_config", "delete_device_after", seconds.toString())
+    }
+
     fun nativeArchive(chat: Int, archived: Boolean) {
         if (fullChat(chat).optBoolean("archived") != archived) {
             call("set_chat_visibility", chat, if (archived) "Archived" else "Normal")
@@ -501,6 +540,14 @@ internal class Chatmail(directory: File) : AutoCloseable {
         check(message.optString("kind") == "message") { "Chatmail message state is unavailable." }
         if (isPendingChatmailSend(message, chat, transfer)) call("delete_messages", JSONArray(listOf(id)))
     }
+
+    fun webxdcSites(profile: String): List<Pair<Int, String>> =
+        nativeThreadIds().flatMap(::messageIds).distinct().chunked(100).flatMap { ids ->
+            messageRows(ids).filter { it.optString("viewType") == "Webxdc" && it.optString("downloadState") == "Done" }.map { row ->
+                val id = row.getInt("id")
+                id to webxdcHost(profile, webxdcInfo(id).getString("selfAddr"), id)
+            }.toList()
+        }
 
     fun webxdcInfo(id: Int): JSONObject = (call("get_webxdc_info", id) as JSONObject)
         .put("selfName", displayName ?: (call("get_config", "displayname") as? String).orEmpty())

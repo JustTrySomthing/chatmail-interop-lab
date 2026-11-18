@@ -258,6 +258,17 @@ class MainActivity : ComponentActivity() {
                                     profileError = error.message ?: "Couldn’t switch profiles."
                                 }
                             }
+                        }, remove = { id ->
+                            readAloud.stop()
+                            if (profiles.model.value.profileId == id) {
+                                val next = profiles.options().firstOrNull { it.id != id && it.enabled }?.id
+                                profiles.switchTo(next)
+                                resetProfileNavigation()
+                                androidx.compose.runtime.withFrameNanos { }
+                                androidx.compose.runtime.withFrameNanos { }
+                            }
+                            profiles.deleteInactiveProfile(id)
+                            BackgroundMessages.start(this@MainActivity, catchUp = true)
                         }, edit = {
                             profilesOpen = false
                             editProfileRequested = true
@@ -1177,6 +1188,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                     FullPageRoute.Notifications -> NotificationSettingsContent(model, appMuted, notificationsEnabled,
                         model::setAppNotificationsMuted, ::configureNotifications) { modal = "quiet-hours" }
                     FullPageRoute.Compression -> CompressionSettingsContent(model)
+                    FullPageRoute.Storage -> StorageSettingsContent(model)
                     FullPageRoute.Help -> HelpSettingsContent()
                     FullPageRoute.Address -> {
                         androidx.compose.foundation.text.selection.SelectionContainer { Text(peer) }
@@ -2367,10 +2379,22 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                 }
                 if (thread != null) P2pTextButton(onClick = { modal = "webxdc-catalog" }) { Text("Browse Apps") }
             }
+            "leave-group" -> groups.firstOrNull { it.key == selected }?.let { group ->
+                P2pAlertDialog(onDismissRequest = { if (!nativeActionBusy) modal = "group-info" },
+                    title = { Text("Leave Group?") },
+                    text = { Text(nativeActionError ?: "Leave ${name(group.key)}? The group will be notified. Your existing messages stay here; you’ll need an invite to rejoin.") },
+                    confirmButton = { P2pTextButton(enabled = !nativeActionBusy, onClick = {
+                        runNativeAction { model.leaveNativeGroup(group.key) }
+                    }) { Text(if (nativeActionBusy) "Leaving…" else "Leave Group") } },
+                    dismissButton = { P2pTextButton(enabled = !nativeActionBusy, onClick = { modal = "group-info" }) { Text("Cancel") } })
+            }
             "group-info" -> groups.firstOrNull { it.key == thread }?.let { group ->
                 val chat = group.data().optInt("nativeChat")
                 if (chat > 9) Sheet(name(group.key), { modal = null }) {
                     val description = rememberGroupDescription(model, chat)
+                    if (group.data().has("nativeSelfInGroup") && !group.data().optBoolean("nativeSelfInGroup")) {
+                        Text("You’re no longer a member of this group.", color = Quiet)
+                    }
                     Text("Description", style = MaterialTheme.typography.titleMedium)
                     description.value?.let {
                         if (it.isEmpty()) Text("No description", color = Quiet)
@@ -2383,6 +2407,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                     }) { Text("Chat Options") }
                     if (!group.data().optBoolean("contactRequest") && !blocked(group.key)) {
                         P2pTextButton(onClick = { selected = group.key; modal = "group-clone" }) { Text("Clone Group") }
+                    }
+                    if (group.data().optBoolean("nativeSelfInGroup") && !group.data().optBoolean("contactRequest")) {
+                        P2pTextButton(onClick = { selected = group.key; modal = "leave-group" }) { Text("Leave Group") }
                     }
                     if (peer.isNotBlank() && group.data().optString("owner") == peer) {
                         P2pTextButton(onClick = { selected = group.key; modal = "group-edit" }) { Text("Edit Group") }
@@ -2799,6 +2826,7 @@ internal val settingsDestinations = listOf(
     SettingsDestination("Updates", "updates", Icons.Outlined.SystemUpdate),
     SettingsDestination("App Log", "app-log", Icons.Outlined.ReceiptLong),
     SettingsDestination("Compression", "compression", Icons.Outlined.Compress),
+    SettingsDestination("Storage", "storage", Icons.Outlined.Inventory2),
     SettingsDestination("Help", "help", Icons.Outlined.HelpOutline)
 )
 
@@ -3010,6 +3038,7 @@ private enum class FullPageRoute(val route: String, val title: String) {
     Updates("updates", "P2P updates"),
     Notifications("notifications", "Notifications"),
     Compression("compression", "Compression"),
+    Storage("storage", "Storage"),
     Help("help", "Help"),
     Privacy("privacy", "Privacy"),
     Address("p2p-address", "P2P Address"),

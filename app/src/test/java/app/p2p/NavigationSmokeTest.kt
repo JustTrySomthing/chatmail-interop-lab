@@ -40,6 +40,20 @@ class NavigationSmokeTest {
     @get:Rule(order = 1) val compose = createAndroidComposeRule<MainActivity>()
 
     @Test
+    fun deletingProfileRequiresConfirmationAndCancelPreservesIt() {
+        compose.waitUntil(5_000) { compose.onNodeWithContentDescription("Settings").isDisplayed() }
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNodeWithText("Profiles", substring = false).performClick()
+        compose.waitUntil(5_000) { compose.onNodeWithText("Delete Profile", substring = false).isDisplayed() }
+        compose.onNodeWithText("Delete Profile", substring = false).performClick()
+        compose.onNodeWithText("Delete Profile?").assertIsDisplayed()
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithText("Delete Profile?").assertDoesNotExist()
+        compose.onNodeWithText("Edit Active Profile").assertIsDisplayed()
+        org.junit.Assert.assertEquals(setOf(PRIMARY_PROFILE), ProfileSelection(compose.activity).ids())
+    }
+
+    @Test
     fun profilesCombinesManagementAndEditing() {
         compose.waitUntil(5_000) { compose.onNodeWithContentDescription("Settings").isDisplayed() }
         compose.onNodeWithContentDescription("Settings").performClick()

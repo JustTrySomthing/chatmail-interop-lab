@@ -33,6 +33,19 @@ internal class ProfileStorage(private val context: Context, val id: String) {
 
     fun preferences(name: String) = context.getSharedPreferences(scoped(name), Context.MODE_PRIVATE)
 
+    fun rememberWebxdcSite(message: Int, host: String) {
+        val prefs = preferences("webxdc-sites")
+        val sites = prefs.getStringSet("sites", emptySet()).orEmpty() + "$message:$host"
+        check(prefs.edit().putStringSet("sites", sites).commit()) { "Couldn’t save app storage information." }
+    }
+
+    fun webxdcSites(): List<Pair<Int, String>> = preferences("webxdc-sites").getStringSet("sites", emptySet()).orEmpty()
+        .mapNotNull { entry ->
+            val id = entry.substringBefore(':').toIntOrNull() ?: return@mapNotNull null
+            val host = entry.substringAfter(':')
+            if (id > 9 && host.matches(Regex("[a-z0-9.-]+"))) id to host else null
+        }
+
     fun chatmailFile(path: String): File? = runCatching {
         val root = noBackup("chatmail").canonicalFile.toPath()
         File(path).canonicalFile.takeIf { it.isFile && it.toPath().startsWith(root) }
@@ -42,7 +55,17 @@ internal class ProfileStorage(private val context: Context, val id: String) {
 internal class ProfileSelection(context: Context) {
     private val preferences = context.getSharedPreferences("relay-profiles", Context.MODE_PRIVATE)
 
-    fun ids(): Set<String> = preferences.getStringSet("profiles", emptySet()).orEmpty().filter(::isId).toSet() + PRIMARY_PROFILE
+    fun ids(): Set<String> = preferences.getStringSet("profiles", emptySet()).orEmpty().filter(::isId).toSet() +
+        if (preferences.getBoolean("originalRemoved", false)) emptySet() else setOf(PRIMARY_PROFILE)
+
+    fun remove(id: String) {
+        require(id in ids()) { "This profile is unavailable." }
+        check(id != active()) { "Switch profiles before deleting the active profile." }
+        check(preferences.edit().putStringSet("profiles", ids() - id - PRIMARY_PROFILE)
+            .putStringSet("disabled", disabledIds() - id)
+            .putBoolean("originalRemoved", preferences.getBoolean("originalRemoved", false) || id == PRIMARY_PROFILE)
+            .commit()) { "Couldn’t remove this profile." }
+    }
 
     private fun disabledIds(): Set<String> = preferences.getStringSet("disabled", emptySet()).orEmpty()
 
@@ -55,7 +78,7 @@ internal class ProfileSelection(context: Context) {
         check(preferences.edit().putStringSet("disabled", next).commit()) { "Couldn’t update this profile." }
     }
 
-    fun active(): String = preferences.getString("active", PRIMARY_PROFILE)?.takeIf { it in ids() } ?: PRIMARY_PROFILE
+    fun active(): String = preferences.getString("active", PRIMARY_PROFILE)?.takeIf { it in ids() } ?: ids().first()
 
     fun select(id: String?): String {
         val profiles = ids()
@@ -183,6 +206,39 @@ internal class RelayProfiles(private val application: Application) {
                 incomingCalls.withdraw(id)
                 runCatching { LocalAlerts(application, id).clearProfileAlerts() }
             }
+        }
+    }
+
+    @MainThread
+    suspend fun deleteInactiveProfile(id: String) = withContext(NonCancellable) {
+        workerLock.withLock {
+            check(id != active.value.profileId) { "Switch profiles before deleting this profile." }
+            require(id in selection.ids()) { "This profile is unavailable." }
+            workers[id]?.checkCanSwitchProfiles()
+            selection.setEnabled(id, false)
+            workers.remove(id)?.retireForProfileSwitch()
+            incomingCalls.withdraw(id)
+            LocalAlerts(application, id).clearProfileAlerts()
+            val hosts = (ProfileStorage(application, id).webxdcSites() +
+                withStoredCallCore(id) { it.webxdcSites(id) }.orEmpty()).distinct()
+            if (hosts.isNotEmpty()) {
+                check(androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DELETE_BROWSING_DATA)) {
+                    "Update Android System WebView to delete this profile’s app data. The profile is disabled; you can retry deletion."
+                }
+                for ((message, host) in hosts) {
+                    kotlinx.coroutines.suspendCancellableCoroutine<Unit> { continuation ->
+                        androidx.webkit.WebStorageCompat.deleteBrowsingDataForSite(android.webkit.WebStorage.getInstance(), "https://$host") {
+                            if (continuation.isActive) continuation.resumeWith(Result.success(Unit))
+                        }
+                    }
+                    android.webkit.GeolocationPermissions.getInstance().clear("https://$host")
+                    androidx.core.content.pm.ShortcutManagerCompat.disableShortcuts(application,
+                        listOf("webxdc-$id-$message"), "This profile was deleted.")
+                }
+            }
+            withContext(Dispatchers.IO) { deleteProfileStorage(application, id) }
+            selection.remove(id)
+            reconcileWorkers()
         }
     }
 

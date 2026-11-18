@@ -59,8 +59,8 @@ class SettingsTilesTest {
                     }
                 }
             } } }
-            assertEquals(15, settingsDestinations.size)
-            assertEquals(15, settingsDestinations.map { it.route }.distinct().size)
+            assertEquals(16, settingsDestinations.size)
+            assertEquals(16, settingsDestinations.map { it.route }.distinct().size)
             val first = compose.onNodeWithText("Profiles").fetchSemanticsNode().boundsInRoot
             val second = compose.onNodeWithText("Setup").fetchSemanticsNode().boundsInRoot
             assertTrue(second.left > first.right)

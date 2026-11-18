@@ -11,7 +11,8 @@ internal fun nativePeerKey(id: Int): String = "chatmail-peer:$id"
 internal data class NativeThread(
     val id: Int, val name: String, val group: Boolean, val members: List<Int>,
     val canSend: Boolean, val request: Boolean, val archived: Boolean,
-    val selfTalk: Boolean = false, val imagePath: String? = null
+    val selfTalk: Boolean = false, val imagePath: String? = null,
+    val muted: Boolean = false, val selfInGroup: Boolean = false
 ) {
     val contactId: Int? get() = if (group) null else members.singleOrNull()
 }
@@ -28,7 +29,8 @@ internal fun readNativeThread(chat: JSONObject): NativeThread? {
     if (type == "Single" && !selfTalk && members.size != 1) return null
     return NativeThread(id, chat.optString("name").ifBlank { if (type == "Single") "Contact" else "Group" },
         type == "Group", members, chat.optBoolean("canSend"), chat.optBoolean("isContactRequest"), chat.optBoolean("archived"),
-        selfTalk, chat.optString("profileImage").takeIf { type == "Group" && !chat.isNull("profileImage") && it.isNotBlank() })
+        selfTalk, chat.optString("profileImage").takeIf { type == "Group" && !chat.isNull("profileImage") && it.isNotBlank() },
+        chat.optBoolean("isMuted"), chat.optBoolean("selfInGroup"))
 }
 
 internal data class NativeMessage(
@@ -182,3 +184,12 @@ internal fun readNativeReactions(row: JSONObject): Map<Int, List<String>> {
         key.toIntOrNull()?.takeIf { emoji.isNotEmpty() }?.let { it to emoji }
     }?.toMap().orEmpty()
 }
+
+/** Preserve muted archives while retaining the existing Trash/new-message behavior. */
+internal fun shouldRestoreNativeInbox(archived: Boolean, muted: Boolean, folder: String?, blocked: Boolean): Boolean =
+    !archived && when (folder) {
+        "Archive" -> !muted
+        "Cleared" -> true
+        "Trash" -> !blocked
+        else -> false
+    }

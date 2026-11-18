@@ -871,6 +871,21 @@ class P2pModel internal constructor(application: Application, internal val profi
         val pending = (records.all("invite-pending") + records.all("invite-in"))
             .map { it.data().optInt("chatmailChat") }.toSet() - legacy.keys
         val threads = core.nativeThreadIds().filterNot { it in pending }.mapNotNull(core::nativeThread)
+        for (chat in threads) {
+            val key = legacy[chat.id] ?: nativeThreadKey(chat.id)
+            val prefKey = "thread-pref:$key"
+            val pref = records.get(prefKey)?.data() ?: obj()
+            // Import the old local mute once. Afterwards Core is authoritative, including other devices.
+            val legacyMuted = pref.optBoolean("muted") || records.get(key)?.data()?.optBoolean("alertMuted") == true
+            val muted = if (!pref.optBoolean("nativeMuteSynced") && legacyMuted) {
+                core.nativeMute(chat.id, true)
+                if (records.get("folder:$key")?.data()?.optString("name") == "Archive") core.nativeArchive(chat.id, true)
+                true
+            } else chat.muted
+            pref.put("muted", muted).put("nativeMuteSynced", true)
+            cacheNativeRecord(prefKey, "thread-pref", pref, 0L)
+            if (records.get(key)?.data()?.optBoolean("alertMuted") == true) change(key) { put("alertMuted", false) }
+        }
         database.withTransaction {
             for (chat in threads) cacheNativeThread(chat, legacy[chat.id] ?: nativeThreadKey(chat.id))
             for (contact in core.contacts()) {
@@ -898,7 +913,7 @@ class P2pModel internal constructor(application: Application, internal val profi
         val saved = records.get(key)
         val data = saved?.data() ?: obj()
         data.put("nativeChat", chat.id).put("contactRequest", chat.request).put("nativeCanSend", chat.canSend)
-        data.put("nativeSelfTalk", chat.selfTalk)
+        data.put("nativeSelfTalk", chat.selfTalk).put("nativeSelfInGroup", chat.selfInGroup)
         if (chat.group) {
             val path = chat.imagePath
             if (path == null) {
@@ -918,7 +933,7 @@ class P2pModel internal constructor(application: Application, internal val profi
         }
         if (key == nativeThreadKey(chat.id)) {
             data.put("name", chat.name)
-                .put("members", jsonArray(listOf(peer.value) + chat.members.map(::nativePeerKey)))
+                .put("members", jsonArray((if (!chat.group || chat.selfInGroup) listOf(peer.value) else emptyList()) + chat.members.map(::nativePeerKey)))
                 .put("owner", if (chat.canSend) peer.value else "")
             chat.contactId?.let { data.put("nativeContact", it) }
         }
@@ -1051,9 +1066,8 @@ class P2pModel internal constructor(application: Application, internal val profi
             if (newMessage != null) {
                 val key = "folder:$thread"
                 val location = records.get(key)?.data()?.optString("name")
-                if (!chat.archived && (location == "Cleared" || location == "Archive" ||
-                        location == "Trash" && !groupBlocked(thread) &&
-                        records.get(thread)?.data()?.optBoolean("blocked") != true)) records.remove(key)
+                if (shouldRestoreNativeInbox(chat.archived, muted, location,
+                        groupBlocked(thread) || records.get(thread)?.data()?.optBoolean("blocked") == true)) records.remove(key)
             }
         }
         for (file in discardedFiles) {
@@ -2163,12 +2177,33 @@ class P2pModel internal constructor(application: Application, internal val profi
         else save("folder:" + thread, "folder", obj("name" to folder))
     }
 
+    internal suspend fun leaveNativeGroup(thread: String) = withChatmail { core ->
+        val id = requireNotNull(records.get(thread)).data().optInt("nativeChat")
+        core.leaveGroup(id)
+        core.nativeThread(id)?.let { cacheNativeThread(it, thread) }
+        clearThreadAlerts(thread)
+        nextNativeSync = 0L
+    }
+
+    internal suspend fun removeChatmailChannel(id: Int) = withChatmail { core ->
+        core.removeChannel(id)
+        clearThreadAlerts(nativeThreadKey(id))
+    }
+    internal suspend fun editChannelPost(id: Int, text: String) = withChatmail { it.editChannelPost(id, text.trim()) }
+    internal suspend fun deleteChannelPost(id: Int) = withChatmail { it.deleteChannelPost(id) }
+    internal suspend fun localRetention() = withChatmail { it.localRetention() }
+    internal suspend fun setLocalRetention(seconds: Long) = withChatmail { it.setLocalRetention(seconds) }
+
     fun setThreadPreference(thread: String, name: String, enabled: Boolean) = work {
         require(name in setOf("pinned", "muted"))
+        val native = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+        if (name == "muted" && native > 9) withChatmail { it.nativeMute(native, enabled) }
         database.withTransaction {
             val key = "thread-pref:" + thread
             val value = records.get(key)?.data() ?: obj()
-            save(key, "thread-pref", value.put(name, enabled))
+            save(key, "thread-pref", value.put(name, enabled).apply {
+                if (name == "muted" && native > 9) put("nativeMuteSynced", true)
+            })
             if (records.get(thread)?.kind == "contact") {
                 if (name == "pinned") change(thread) { put("pinnedContact", enabled) }
                 if (name == "muted" && !enabled) change(thread) { put("alertMuted", false) }
@@ -2750,7 +2785,9 @@ class P2pModel internal constructor(application: Application, internal val profi
             "This app is no longer in the conversation."
         }
         check(message.optString("downloadState") == "Done") { "Download the app before opening it." }
-        WebxdcInfo.from(core.webxdcInfo(id))
+        WebxdcInfo.from(core.webxdcInfo(id)).also {
+            storage.rememberWebxdcSite(id, webxdcHost(profileId, it.selfAddr, id))
+        }
     }
 
     internal suspend fun prepareWebxdcShortcut(shortcut: WebxdcShortcut): Pair<Record, File> =

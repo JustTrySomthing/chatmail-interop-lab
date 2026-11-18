@@ -15,6 +15,29 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], application = android.app.Application::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ChatmailTest {
+    @Test fun mutedArchivesStayArchivedWithoutChangingTrashAndRestoreRules() {
+        assertFalse(shouldRestoreNativeInbox(false, true, "Archive", false))
+        assertTrue(shouldRestoreNativeInbox(false, false, "Archive", false))
+        assertFalse(shouldRestoreNativeInbox(true, false, "Archive", false))
+        assertFalse(shouldRestoreNativeInbox(false, false, "Trash", true))
+        assertTrue(shouldRestoreNativeInbox(false, true, "Trash", false))
+        assertTrue(shouldRestoreNativeInbox(false, false, "Cleared", false))
+        assertFalse(shouldRestoreNativeInbox(false, false, "Inbox", false))
+    }
+
+    @Test fun nativeGroupMembershipAndMuteReflectCoreState() {
+        val row = obj("id" to 15, "chatType" to "Group", "name" to "Group", "isEncrypted" to true,
+            "contactIds" to JSONArray(listOf(1, 12)), "canSend" to true,
+            "selfInGroup" to true, "isMuted" to true)
+        val member = requireNotNull(readNativeThread(row))
+        assertTrue(member.selfInGroup)
+        assertTrue(member.muted)
+        assertEquals(listOf(12), member.members)
+        val left = requireNotNull(readNativeThread(row.put("selfInGroup", false).put("canSend", false)))
+        assertFalse(left.selfInGroup)
+        assertFalse(left.canSend)
+    }
+
     @Test
     fun nativeContactCardsKeepTheirChatmailAttachmentType() {
         assertEquals("Vcard", chatmailAttachmentViewType("text/x-vcard", asFile = true))

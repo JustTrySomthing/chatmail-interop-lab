@@ -1,5 +1,19 @@
 # Continue Relay Lab development
 
+## Pending after RC74: group, channel, profile and storage controls
+
+Implemented the first requested Delta-help parity priorities. Group details now offer confirmed Leave Group, backed by Core self-removal, retaining history and showing membership status. Channel details offer Unfollow Channel for subscribers and Delete Channel for owners, with explicit consequences; owned posts have themed Post Options with Edit Post and confirmed Delete Post. Subscriber removal leaves through Core before deleting history; owner deletion does not claim to erase subscribers’ saved copies.
+
+Mute changes now reach Core before the local UI changes. Existing local mute settings migrate once; later Core mute changes are reflected locally. Muted Archive stays archived when messages arrive, while existing unmuted/Trash behavior is preserved.
+
+Profiles has confirmed local deletion. An active profile switches to another enabled profile (or creates a fresh one) first. Background models stop before files are removed; notification routes, profile database, identity, media and tracked Webxdc site data are cleaned up. The original profile registry supports removal without resurrecting it. Original media directories preserve nested additional-profile data. Saved copies on other devices and exported backups are unaffected. Site-specific WebView deletion is required when apps have local storage; an unsupported WebView leaves the profile disabled with a retryable error.
+
+Settings → Storage adds optional per-profile Core local retention: keep all, 1 hour, 1 day, 1 week, 30 days, 1 year. Default remains off; enabling asks for confirmation covering existing history. Core 2.69.0 excludes Saved/self-chat, which also holds personal apps. Existing cache reconciliation removes expired local message/media copies. Help text is updated.
+
+Validation: debug APK assembly and all 223 automated tests passed, with zero failures/errors/skips. Added tests cover profile deletion confirmation/cancellation, registry persistence after removing the original profile, media/database isolation, app-storage isolation, Core group membership and muted/archive behavior. Settings layout tests still pass with the Storage tile. The initial 512 MiB compiler run ran out of heap; final compilation used the normal build heap and the separate test run passed. Recovery manifest: 210 files verified.
+
+API semantics were checked against the bundled Core v2.69.0 source, not assumed from main. Physical cross-client leave/unfollow, channel edit/delete, archive reception, WebView cleanup and retention expiry still need phone testing. No new release requested in this turn; published APK remains RC74.
+
 ## Delta Chat help review — November 18, 2026
 
 See [DELTA-HELP-PARITY-REVIEW.md](DELTA-HELP-PARITY-REVIEW.md) for the source-based comparison against the current Delta Chat FAQ. It records missing/partial controls, the local-mute/Core-archive mismatch, pending-source original-quality selection gap, intentional product differences, and device checks still required. Review only: no application behavior changed or new APK published. Do not treat the earlier completed parity countdown as exhaustive.

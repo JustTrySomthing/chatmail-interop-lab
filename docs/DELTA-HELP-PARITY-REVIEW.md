@@ -1,5 +1,7 @@
 # Delta Chat help parity review
 
+Implementation update: the first five priorities below (leave/unfollow, mute/archive consistency, channel management, profile deletion and local retention) have now been addressed in development source. See [CONTINUE-HERE.md](CONTINUE-HERE.md) for behavior, validation and remaining device tests. The table below preserves the original review findings; it is not a current list of unimplemented tasks.
+
 Reviewed 2026-11-18 against https://delta.chat/en/help and Relay Lab source commit `499bd77ec51abf26b969f72adc02412c0e370629` on securejoin-invites. Published APK: RC74 (110); attachment-menu and button-label changes are newer source awaiting release.
 
 This is a source/API/UI review, not a new device interoperability test or independent security audit. The help page is an overview, not an exhaustive conformance specification. Existing automated tests do not demonstrate complete interoperability.

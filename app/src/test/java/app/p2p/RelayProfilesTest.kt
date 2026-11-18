@@ -15,6 +15,15 @@ import org.robolectric.annotation.Config
 class RelayProfilesTest {
     private val context: Context get() = RuntimeEnvironment.getApplication()
 
+    @Test fun appStorageTrackingIsScopedToItsProfile() {
+        val original = ProfileStorage(context, PRIMARY_PROFILE)
+        val other = ProfileStorage(context, newId())
+        original.rememberWebxdcSite(25, "original.localhost")
+        other.rememberWebxdcSite(25, "other.localhost")
+        assertEquals(listOf(25 to "original.localhost"), original.webxdcSites())
+        assertEquals(listOf(25 to "other.localhost"), other.webxdcSites())
+    }
+
     @Test fun existingInstallationKeepsOriginalProfileAndRemembersNewSelection() {
         val selection = ProfileSelection(context)
         assertEquals(PRIMARY_PROFILE, selection.active())
@@ -81,4 +90,40 @@ class RelayProfilesTest {
             oldStore.close()
         }
     }
+    @Test fun removingOriginalProfileDoesNotResurrectItAfterRestart() {
+        val registry = ProfileSelection(context)
+        val alternate = registry.select(null)
+        registry.remove(PRIMARY_PROFILE)
+        val restarted = ProfileSelection(context)
+        assertEquals(setOf(alternate), restarted.ids())
+        assertEquals(alternate, restarted.active())
+        assertThrows(IllegalStateException::class.java) { restarted.remove(alternate) }
+        assertThrows(IllegalArgumentException::class.java) { restarted.select(PRIMARY_PROFILE) }
+    }
+
+    @Test fun deletingOriginalFilesPreservesOtherProfileMediaAndDatabases() {
+        val otherId = newId()
+        val original = ProfileStorage(context, PRIMARY_PROFILE)
+        val other = ProfileStorage(context, otherId)
+        for (name in listOf("sent", "received", "partial")) {
+            original.files(name).resolve("original").apply { parentFile!!.mkdirs(); writeText("original") }
+            other.files(name).resolve("other").apply { parentFile!!.mkdirs(); writeText("other") }
+        }
+        original.noBackup("chatmail").resolve("db").apply { parentFile!!.mkdirs(); writeText("original") }
+        other.noBackup("chatmail").resolve("db").apply { parentFile!!.mkdirs(); writeText("other") }
+        context.getDatabasePath(other.scoped("p2p.db")).apply { parentFile!!.mkdirs(); writeText("other database") }
+        deleteProfileFiles(context, PRIMARY_PROFILE)
+        for (name in listOf("sent", "received", "partial")) {
+            assertFalse(original.files(name).resolve("original").exists())
+            assertEquals("other", other.files(name).resolve("other").readText())
+        }
+        assertFalse(original.noBackup("chatmail").exists())
+        assertEquals("other", other.noBackup("chatmail").resolve("db").readText())
+        assertEquals("other database", context.getDatabasePath(other.scoped("p2p.db")).readText())
+        deleteProfileFiles(context, otherId)
+        assertFalse(other.noBackup("chatmail").exists())
+        assertFalse(other.files("received").exists())
+        assertFalse(context.getDatabasePath(other.scoped("p2p.db")).exists())
+    }
+
 }

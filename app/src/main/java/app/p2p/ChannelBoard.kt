@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.AttachFile
@@ -112,6 +113,10 @@ internal fun ChannelBoard(
             }
         }
     }
+    var postOptions by remember(page, selected) { mutableStateOf<ChannelPost?>(null) }
+    var editPost by remember(page, selected) { mutableStateOf<ChannelPost?>(null) }
+    var deletePost by remember(page, selected) { mutableStateOf<ChannelPost?>(null) }
+    var removeChannel by remember(page, selected) { mutableStateOf<ChatmailChannel?>(null) }
     var revision by remember { mutableIntStateOf(0) }
     var limit by remember(selected) { mutableIntStateOf(50) }
     var hasOlder by remember(selected) { mutableStateOf(false) }
@@ -160,6 +165,53 @@ internal fun ChannelBoard(
                 busy = false
             }
         }
+    }
+
+    postOptions?.let { post ->
+        Sheet("Post Options", { postOptions = null }) {
+            if (post.text.isNotBlank()) PageActionButton("Edit Post", { postOptions = null; actionError = null; editPost = post }, Modifier.fillMaxWidth())
+            PageActionButton("Delete Post", { postOptions = null; actionError = null; deletePost = post }, Modifier.fillMaxWidth())
+        }
+    }
+    editPost?.let { post ->
+        var text by remember(post.id) { mutableStateOf(post.text) }
+        Sheet("Edit Post", { if (!busy) editPost = null }) {
+            OutlinedTextField(text, { if (it.length <= INTEROP_TEXT_LIMIT) text = it },
+                Modifier.fillMaxWidth(), label = { Text("Post text") }, minLines = 3, maxLines = 6,
+                enabled = !busy, shape = RoundedFieldShape)
+            if (post.attachment != null) Text("The existing attachment will stay with this post.")
+            actionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            PageActionButton(if (busy) "Saving…" else "Save Changes", {
+                submit { model.editChannelPost(post.id, text); editPost = null }
+            }, Modifier.fillMaxWidth(), enabled = !busy && text.isNotBlank())
+        }
+    }
+    deletePost?.let { post ->
+        P2pAlertDialog(onDismissRequest = { if (!busy) deletePost = null },
+            title = { Text("Delete Post?") },
+            text = { Text(actionError ?: "Ask subscribers’ apps to delete this post. Copies already saved or exported may remain.") },
+            confirmButton = { P2pTextButton(enabled = !busy, onClick = {
+                submit { model.deleteChannelPost(post.id); posts = posts.filterNot { it.id == post.id }; deletePost = null }
+            }) { Text(if (busy) "Deleting…" else "Delete Post") } },
+            dismissButton = { P2pTextButton(enabled = !busy, onClick = { deletePost = null }) { Text("Cancel") } })
+    }
+    removeChannel?.let { channel ->
+        val label = if (channel.owned) "Delete Channel" else "Unfollow Channel"
+        P2pAlertDialog(onDismissRequest = { if (!busy) removeChannel = null },
+            title = { Text("$label?") },
+            text = { Text(actionError ?: if (channel.owned)
+                "Delete ${channel.name} and its history from your profile? You won’t be able to publish to this channel again. Subscribers may keep copies of earlier posts. Saved items are kept."
+                else "Stop following ${channel.name} and remove its history? You can follow again using an invite. Saved items are kept.") },
+            confirmButton = { P2pTextButton(enabled = !busy, onClick = {
+                submit {
+                    model.removeChatmailChannel(channel.id)
+                    channels = channels?.filterNot { it.id == channel.id }
+                    posts = posts.filterNot { it.channelId == channel.id }
+                    removeChannel = null
+                    selectChannel(null)
+                }
+            }) { Text(if (busy) "Removing…" else label) } },
+            dismissButton = { P2pTextButton(enabled = !busy, onClick = { removeChannel = null }) { Text("Cancel") } })
     }
 
     reactingTo?.let { post ->
@@ -325,7 +377,7 @@ internal fun ChannelBoard(
                 if (current != null) {
                     item {
                         ChannelProfileCard(current, description, channelPhoto.ifEmpty { profilePhoto.takeIf { current.owned }.orEmpty() },
-                            share, edit = { editChannel(current) })
+                            share, edit = { editChannel(current) }, remove = { actionError = null; removeChannel = current }, busy = busy)
                     }
                     if (current.owned) item {
                         PageActionButton("Write a Post", {
@@ -359,7 +411,7 @@ internal fun ChannelBoard(
                         }
                     }
                     ChannelPostCard(post, ownedPost, channelPhoto.ifEmpty { profilePhoto.takeIf { ownedPost }.orEmpty() },
-                        null, preview, openLink, { openAttachment(post) }, { if (!busy) reactingTo = post }, views, savePost = { submit { savingPost = post.id; try { model.saveChannelPost(post.id) } finally { savingPost = null } } }, saving = savingPost == post.id)
+                        null, preview, openLink, { openAttachment(post) }, { if (!busy) reactingTo = post }, views, savePost = { submit { savingPost = post.id; try { model.saveChannelPost(post.id) } finally { savingPost = null } } }, saving = savingPost == post.id, options = if (ownedPost) ({ if (!busy) postOptions = post }) else null)
                 }
                 if (hasOlder) item { P2pTextButton(onClick = { limit += 50 }) { Text("Load Older Posts") } }
             }
@@ -472,7 +524,8 @@ private fun ChannelRow(channel: ChatmailChannel, open: () -> Unit) {
 
 @Composable
 private fun ChannelProfileCard(
-    channel: ChatmailChannel, description: String, photo: String, share: (ChatmailChannel) -> Unit, edit: () -> Unit
+    channel: ChatmailChannel, description: String, photo: String, share: (ChatmailChannel) -> Unit, edit: () -> Unit,
+    remove: () -> Unit, busy: Boolean
 ) {
     val colors = MaterialTheme.colorScheme
     Surface(color = colors.surfaceVariant, contentColor = colors.onSurface, shape = RoundedCornerShape(22.dp)) {
@@ -491,7 +544,10 @@ private fun ChannelProfileCard(
                 }
                 if (channel.owned) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     P2pTextButton(onClick = { share(channel) }) { Text("Share Invite") }
-                    P2pTextButton(onClick = edit) { Text("Edit Channel") }
+                    P2pTextButton(enabled = !busy, onClick = edit) { Text("Edit Channel") }
+                }
+                P2pTextButton(enabled = !busy, onClick = remove) {
+                    Text(if (channel.owned) "Delete Channel" else "Unfollow Channel")
                 }
             }
         }
@@ -526,7 +582,7 @@ internal fun SocialPostCard(
 @Composable
 private fun ChannelPostCard(
     post: ChannelPost, owned: Boolean, photo: String, open: (() -> Unit)?, preview: (PreviewLink) -> Unit,
-    openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit, react: () -> Unit, views: Int? = null, savePost: () -> Unit, saving: Boolean = false
+    openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit, react: () -> Unit, views: Int? = null, savePost: () -> Unit, saving: Boolean = false, options: (() -> Unit)? = null
 ) {
     val save = LocalMediaDownload.current
     val colors = MaterialTheme.colorScheme
@@ -546,6 +602,7 @@ private fun ChannelPostCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             StarButton(post.saved, "post", saving, savePost)
             IconButton(onClick = react) { Icon(Icons.Outlined.EmojiEmotions, "React to post") }
+            options?.let { action -> IconButton(onClick = action) { Icon(Icons.Outlined.MoreVert, "Post options") } }
             if (reactions.isNotEmpty()) Text(reactions.entries.joinToString("  ") { (emoji, count) ->
                 if (count == 1) emoji else "$emoji $count"
             }, style = MaterialTheme.typography.labelLarge)
