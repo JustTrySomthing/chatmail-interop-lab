@@ -8,12 +8,12 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc71**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc71/P2P-0.7.23-rc71-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc72**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc72/P2P-0.7.23-rc72-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC71 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC72 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
-RC71 (107) replaces Gallery with conversation-scoped Media for all attachments, keeps Saved access in the top-bar star, and preserves two-column Settings across narrow phones and larger system fonts. Uses the established RC58 signing identity.
+RC72 (108) redesigns Saved with themed cards, photo/video previews, attachment filters, search, source labels and compact item actions. Preserves conversation Media, two-column Settings, and the established RC58 signing identity.
 
 ### Update from the app
 
@@ -41,7 +41,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 
 
 Download signed Android builds from the Releases page.
 
-The downloadable APK's source is at the [RC71 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc71). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
+The downloadable APK's source is at the [RC72 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc72). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
 
 ### Release publishing
 

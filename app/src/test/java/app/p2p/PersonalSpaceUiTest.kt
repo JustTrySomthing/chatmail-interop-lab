@@ -74,7 +74,8 @@ class PersonalSpaceUiTest {
             compose.onNodeWithText("Saved from family").assertIsDisplayed()
             compose.onNodeWithText("Original Avery").assertDoesNotExist()
             
-            compose.onAllNodesWithText("Remove saved copy")[0].performClick()
+            compose.onAllNodesWithContentDescription("Options for Saved message")[0].performClick()
+            compose.onNodeWithText("Remove saved copy").performClick()
             assertNull(removed)
             compose.onNodeWithText("Remove", useUnmergedTree = true).performClick()
             assertEquals(nativeMessageKey(40), removed)

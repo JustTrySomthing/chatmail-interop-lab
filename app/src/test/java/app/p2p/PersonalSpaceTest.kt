@@ -13,6 +13,19 @@ class PersonalSpaceTest {
         nativeMessageKey(id), "file-sent", obj("nativeMessage" to id, "thread" to thread,
             "webxdc" to true, "nativeOriginalId" to original, "locallyDeleted" to deleted).toString(), id.toLong())
 
+    @Test fun savedCollectionClassifiesAttachmentsAndSortsWithoutLeakingOtherChats() {
+        fun row(id: Int, name: String, mime: String) = Record("item-$id", "file-sent", obj("thread" to "self", "name" to name, "mime" to mime).toString(), id.toLong())
+        val rows = listOf(row(1, "photo.jpg", "image/jpeg"), row(2, "movie.mp4", "video/mp4"), row(3, "song.mp3", "audio/mpeg"),
+            row(4, "document.pdf", "application/pdf"), row(5, "contact.vcf", "text/x-vcard"),
+            row(6, "app.xdc", WEBXDC_MIME).let { it.copy(payload = it.data().put("webxdc", true).put("nativeOriginalId", 30).toString()) },
+            row(7, "note", "text/plain").copy(kind = "message"))
+        assertEquals(listOf(SavedKind.Photo, SavedKind.Video, SavedKind.Audio, SavedKind.File, SavedKind.Contact, SavedKind.App, SavedKind.Message), rows.map(::savedKind))
+        val other = rows[0].copy(key = "other", payload = rows[0].data().put("thread", "other").toString())
+        val deleted = rows[0].copy(key = "deleted", payload = rows[0].data().put("locallyDeleted", true).toString())
+        assertEquals(rows.reversed(), savedCollectionItems(rows + other + deleted, "self"))
+        assertTrue(savedCollectionItems(rows, null).isEmpty())
+    }
+
     @Test fun conversationMediaNeverLeaksOtherThreadsOrDeletedItems() {
         fun row(key: String, kind: String = "file-sent", thread: String = "chat-a", deleted: Boolean = false) =
             Record(key, kind, obj("thread" to thread, "name" to "$key.bin", "locallyDeleted" to deleted).toString())
