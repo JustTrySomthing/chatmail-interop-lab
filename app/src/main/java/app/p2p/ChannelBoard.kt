@@ -171,7 +171,7 @@ internal fun ChannelBoard(
             if (post.reactions.containsKey(1)) P2pTextButton(onClick = {
                 reactingTo = null
                 submit { model.reactToChannelPost(post.id, "") }
-            }) { Text("Remove your reaction") }
+            }) { Text("Remove Your Reaction") }
         }
     }
 
@@ -227,7 +227,7 @@ internal fun ChannelBoard(
 
     if (composePost && current?.owned == true && trimIndex == null) {
         val channel = current
-        Sheet("Write a post", { if (!busy) composePost = false }) {
+        Sheet("Write a Post", { if (!busy) composePost = false }) {
             val focus = LocalFocusManager.current
             val keyboard = LocalSoftwareKeyboardController.current
             var showEmoji by rememberSaveable { mutableStateOf(false) }
@@ -241,7 +241,7 @@ internal fun ChannelBoard(
                     onClick = { selected?.let { attachmentPicker(it.toString()) } }) {
                     Icon(Icons.Outlined.AttachFile, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Add attachment")
+                    Text("Add Attachment")
                 }
                 IconButton(enabled = !busy, onClick = {
                     if (!showEmoji) {
@@ -307,7 +307,7 @@ internal fun ChannelBoard(
         PageActionButton("Create a Channel", {
             actionError = null
             creating = true
-        }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), icon = Icons.Outlined.Add, enabled = !busy)
+        }, Modifier.fillMaxWidth().padding(horizontal = 16.dp), enabled = !busy)
     }
     val listState = key(page) { rememberLazyListState() }
     val detailState = key(selected) { rememberLazyListState() }
@@ -328,7 +328,7 @@ internal fun ChannelBoard(
                             share, edit = { editChannel(current) })
                     }
                     if (current.owned) item {
-                        PageActionButton("Write a post", {
+                        PageActionButton("Write a Post", {
                             actionError = null
                             composePost = true
                         }, Modifier.fillMaxWidth(), icon = Icons.Outlined.Edit, enabled = current.canPost && !busy)
@@ -361,7 +361,7 @@ internal fun ChannelBoard(
                     ChannelPostCard(post, ownedPost, channelPhoto.ifEmpty { profilePhoto.takeIf { ownedPost }.orEmpty() },
                         null, preview, openLink, { openAttachment(post) }, { if (!busy) reactingTo = post }, views, savePost = { submit { savingPost = post.id; try { model.saveChannelPost(post.id) } finally { savingPost = null } } }, saving = savingPost == post.id)
                 }
-                if (hasOlder) item { P2pTextButton(onClick = { limit += 50 }) { Text("Load older posts") } }
+                if (hasOlder) item { P2pTextButton(onClick = { limit += 50 }) { Text("Load Older Posts") } }
             }
             viewingFeed -> {
                 if (matches.isEmpty() && channels != null && error == null) item {
@@ -373,7 +373,7 @@ internal fun ChannelBoard(
                 }
             }
             page == "Following" -> {
-                item { P2pOutlinedButton(onClick = join, modifier = Modifier.fillMaxWidth()) { Text("Join channel") } }
+                item { P2pOutlinedButton(onClick = join, modifier = Modifier.fillMaxWidth()) { Text("Join Channel") } }
                 val following = channels.orEmpty().filter { !it.owned && it.name.contains(search, true) }
                 if (following.isEmpty() && channels != null && error == null) item {
                     EmptyTabMessage(if (search.isBlank()) "You’re not following any channels yet" else "No matching channels")
@@ -407,7 +407,7 @@ internal fun ChannelBoard(
             }
         }
         if (page == "My Channels" && selected == null) item {
-            P2pTextButton(onClick = legacy) { Text("Previous Social posts") }
+            P2pTextButton(onClick = legacy) { Text("Previous Social Posts") }
         }
     }
 }
@@ -427,7 +427,7 @@ private fun ChannelEditor(
             loadError = chatAction { description = model.chatmailDescription(channel.id) }
         }
     }
-    Sheet(if (channel == null) "Create a Channel" else "Edit channel", dismiss) {
+    Sheet(if (channel == null) "Create a Channel" else "Edit Channel", dismiss) {
         OutlinedTextField(name, { name = it.take(80) }, modifier = Modifier.fillMaxWidth(),
             label = { Text("Channel name") }, shape = RoundedFieldShape, singleLine = true, enabled = !busy)
         if (channel != null) {
@@ -435,10 +435,10 @@ private fun ChannelEditor(
                 modifier = Modifier.fillMaxWidth(), label = { Text("Description") }, shape = RoundedFieldShape,
                 minLines = 2, maxLines = 5, enabled = !busy && description != null)
             choosePhoto?.let { action ->
-                P2pTextButton(enabled = !busy, onClick = action) { Text("Choose channel photo") }
+                P2pTextButton(enabled = !busy, onClick = action) { Text("Choose Channel Photo") }
             }
             removePhoto?.let { action ->
-                P2pTextButton(enabled = !busy, onClick = action) { Text("Remove channel photo") }
+                P2pTextButton(enabled = !busy, onClick = action) { Text("Remove Channel Photo") }
             }
             loadError?.let {
                 Text(it, color = MaterialTheme.colorScheme.error)
@@ -449,7 +449,7 @@ private fun ChannelEditor(
         if (busy || (channel != null && description == null && loadError == null)) {
             LinearProgressIndicator(Modifier.fillMaxWidth())
         }
-        PageActionButton(if (channel == null) "Create channel" else "Save changes",
+        PageActionButton(if (channel == null) "Create Channel" else "Save Changes",
             onClick = { save(name, description.orEmpty()) },
             modifier = Modifier.fillMaxWidth(),
             enabled = !busy && name.isNotBlank() && (channel == null || description != null))
@@ -490,8 +490,8 @@ private fun ChannelProfileCard(
                     Text(description, style = contentTextStyle(MaterialTheme.typography.bodyMedium))
                 }
                 if (channel.owned) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    P2pTextButton(onClick = { share(channel) }) { Text("Share invite") }
-                    P2pTextButton(onClick = edit) { Text("Edit channel") }
+                    P2pTextButton(onClick = { share(channel) }) { Text("Share Invite") }
+                    P2pTextButton(onClick = edit) { Text("Edit Channel") }
                 }
             }
         }

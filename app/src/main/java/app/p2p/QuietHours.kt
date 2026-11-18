@@ -77,7 +77,7 @@ internal fun QuietHoursControls(current: QuietHours, cancel: () -> Unit, save: (
                 val selected = time.hour * 60 + time.minute
                 if (from) start = selected else end = selected
                 pickingStart = null
-            }) { Text("Set time") } },
+            }) { Text("Set Time") } },
             dismissButton = { P2pTextButton(onClick = { pickingStart = null }) { Text("Cancel") } })
     }
 

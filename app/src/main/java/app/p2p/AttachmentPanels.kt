@@ -67,7 +67,7 @@ internal fun AudioCapturePanel(model: P2pModel, limitSeconds: Int? = null, recor
     if (current != null) {
         val time = (elapsed / 60).toString() + ":" + (elapsed % 60).toString().padStart(2, '0')
         Text(if (limitSeconds == null) "Recording $time" else "Recording $time / 1:00")
-        Button(onClick = ::finish) { Text(if (limitSeconds == null) "Stop and add" else "Stop recording") }
+        Button(onClick = ::finish) { Text(if (limitSeconds == null) "Stop and Add" else "Stop Recording") }
     } else {
         Text(if (limitSeconds == null) "Record an audio attachment for your draft."
             else "Record up to one minute.")
@@ -108,7 +108,7 @@ internal fun AudioCapturePanel(model: P2pModel, limitSeconds: Int? = null, recor
                 output.delete()
                 error = "The microphone couldn’t start."
             }
-        }) { Text("Start recording") }
+        }) { Text("Start Recording") }
     }
     if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
 }
@@ -190,13 +190,13 @@ internal fun TrimAttachmentPanel(attachment: AttachmentDraft, done: (MediaRange?
                     problem = false
                 }.onFailure { problem = true }
             }
-        }) { Text(if (playing) "Pause" else "Preview selection") }
+        }) { Text(if (playing) "Pause" else "Preview Selection") }
         Button(onClick = {
             stop()
             done(MediaRange(range.start.toLong(), range.endInclusive.toLong().coerceAtMost(length)))
-        }) { Text("Use trim") }
+        }) { Text("Use Trim") }
     }
-    P2pTextButton(onClick = { stop(); done(null) }) { Text("Use full length") }
+    P2pTextButton(onClick = { stop(); done(null) }) { Text("Use Full Length") }
     if (problem) Text("This format couldn’t be previewed here.", color = MaterialTheme.colorScheme.error)
 }
 

@@ -93,7 +93,7 @@ internal fun RecentTalkCalls(
                 Button(onClick = onClear, shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = colors.surfaceVariant, contentColor = colors.onSurface),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)) {
-                    Text("Clear recent")
+                    Text("Clear Recent")
                 }
             }
         }
@@ -252,21 +252,21 @@ internal fun TalkCallPanel(
                             Button(onClick = mute, shape = P2pButtonShape, modifier = Modifier.fillMaxWidth()) {
                                 Icon(if (call.muted) Icons.Outlined.MicOff else Icons.Outlined.Mic, null)
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (call.muted) "Unmute microphone" else "Mute microphone")
+                                Text(if (call.muted) "Unmute Microphone" else "Mute Microphone")
                             }
                             P2pOutlinedButton(onClick = speaker, modifier = Modifier.fillMaxWidth().semantics {
                                 stateDescription = if (call.speaker) "On" else "Off"
                             }) {
                                 Icon(if (call.speaker) Icons.AutoMirrored.Outlined.VolumeUp else Icons.Outlined.Hearing, null)
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (call.speaker) "Speaker on" else "Speaker off")
+                                Text(if (call.speaker) "Speaker On" else "Speaker Off")
                             }
                         }
                         Button(onClick = end, shape = P2pButtonShape, modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(containerColor = colors.error, contentColor = colors.onError)) {
                             Icon(Icons.Outlined.CallEnd, null)
                             Spacer(Modifier.width(8.dp))
-                            Text("End call")
+                            Text("End Call")
                         }
                     }
                     TalkPhase.Finished -> {
@@ -274,7 +274,7 @@ internal fun TalkCallPanel(
                             Button(onClick = message, shape = P2pButtonShape, modifier = Modifier.fillMaxWidth()) {
                                 Icon(Icons.Outlined.MicNone, null)
                                 Spacer(Modifier.width(8.dp))
-                                Text("Leave message")
+                                Text("Leave Message")
                             }
                         }
                         P2pTextButton(onClick = end) { Text("Done") }
@@ -332,7 +332,7 @@ private fun FullScreenTalkVideo(
                     }
                     IconButton(onClick = mute) {
                         Icon(if (call.muted) Icons.Outlined.MicOff else Icons.Outlined.Mic,
-                            if (call.muted) "Unmute microphone" else "Mute microphone")
+                            if (call.muted) "Unmute Microphone" else "Mute Microphone")
                     }
                     IconButton(onClick = speaker, modifier = Modifier.semantics {
                         stateDescription = if (call.speaker) "On" else "Off"
@@ -345,7 +345,7 @@ private fun FullScreenTalkVideo(
                     }
                     FilledIconButton(onClick = end, colors = IconButtonDefaults.filledIconButtonColors(
                         containerColor = colors.error, contentColor = colors.onError)) {
-                        Icon(Icons.Outlined.CallEnd, "End call")
+                        Icon(Icons.Outlined.CallEnd, "End Call")
                     }
                 }
             }

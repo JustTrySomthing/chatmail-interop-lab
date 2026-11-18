@@ -1,5 +1,11 @@
 # Continue Relay Lab development
 
+## Pending after RC74: button label consistency
+
+Talk’s primary action now reads Make a Call. My Channels retains Create a Channel with no leading plus icon. Audited static button/action labels across composers, settings, setup, media, app menus, profiles, invites and calls for Title Case, preserving acronyms and short connecting words (for example, Create a Channel). Updated existing UI-test selectors. No routes, compression behavior, user-supplied names or message content were changed. Published APK remains RC74; these changes and the attachment chooser are pending the next release.
+
+Validation: debug assembly passed; all 217 automated tests passed with zero failures/errors/skips. Updated static-label selectors while retaining the generated Save attachment accessibility label; stabilized the Profiles test by waiting for startup.
+
 ## Pending after RC74: unified attachment chooser
 
 Chats, groups, channels, and the retained Social post composer now use the same themed Add attachment sheet: Take Photo, Record Video, Record Audio, Attach File. The all-files picker supports multiple selections and retains URI read grants. Capture results retain their original destination; channel results are never assigned to a different selected channel. Cancelled camera output is deleted. Existing draft previews, trimming, and send paths remain in place.

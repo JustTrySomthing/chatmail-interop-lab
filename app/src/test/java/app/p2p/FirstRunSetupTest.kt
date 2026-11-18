@@ -52,7 +52,7 @@ class FirstRunSetupTest {
             compose.waitUntil(5_000) {
                 runCatching { compose.onNodeWithText("Allow notifications").assertIsDisplayed() }.isSuccess
             }
-            compose.onNodeWithText("Display name").assertDoesNotExist()
+            compose.onNodeWithText("Display Name").assertDoesNotExist()
             compose.onNodeWithText("Receive in background").assertDoesNotExist()
             compose.onNodeWithText("P2P can stay connected when the app is closed.").assertDoesNotExist()
         }
@@ -68,7 +68,7 @@ class FirstRunSetupTest {
             }
             compose.onNodeWithContentDescription("Settings").performClick()
             compose.onNodeWithText("Setup").performSemanticsAction(SemanticsActions.OnClick)
-            compose.onNodeWithText("Edit name").assertIsDisplayed()
+            compose.onNodeWithText("Edit Name").assertIsDisplayed()
             compose.onNodeWithText("Set up Relay Lab").assertIsDisplayed()
             compose.onNodeWithText("Receive in background").assertDoesNotExist()
             scenario.onActivity { activity ->
@@ -95,7 +95,7 @@ class FirstRunSetupTest {
             compose.waitUntil(5_000) {
                 runCatching { compose.onNodeWithText("Allow notifications").assertIsDisplayed() }.isSuccess
             }
-            compose.onNodeWithText("Continue with current permissions").performClick()
+            compose.onNodeWithText("Continue with Current Permissions").performClick()
             compose.onNodeWithText("Inbox").assertIsDisplayed()
             scenario.recreate()
             compose.onNodeWithText("Inbox").assertIsDisplayed()

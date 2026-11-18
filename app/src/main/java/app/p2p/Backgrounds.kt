@@ -87,7 +87,7 @@ internal fun BackgroundControls(current: Appearance, change: ((Appearance) -> Ap
                 "ANGKOR_WAT" to "Angkor Wat", "GREAT_WAVE" to "The Great Wave").forEach { (key, label) ->
                 Button(onClick = { change { it.copy(wallpaper = key) }; choosing = false }, shape = P2pButtonShape, modifier = Modifier.fillMaxWidth()) { Text(label) }
             }
-            Button(onClick = { picker.launch(arrayOf("image/*")) }, shape = P2pButtonShape, modifier = Modifier.fillMaxWidth()) { Text("Upload your own") }
+            Button(onClick = { picker.launch(arrayOf("image/*")) }, shape = P2pButtonShape, modifier = Modifier.fillMaxWidth()) { Text("Upload Your Own") }
         }
     }, confirmButton = { P2pTextButton(onClick = { choosing = false }) { Text("Done") } })
 }

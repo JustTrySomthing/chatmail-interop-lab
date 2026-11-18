@@ -31,7 +31,7 @@ internal fun UpdateNotice(model: P2pUpdateModel, open: () -> Unit) {
         dismissButton = { P2pTextButton(onClick = model::dismissPrompt) { Text("Later") } },
         confirmButton = {
             Button(onClick = { model.dismissPrompt(); open() }, shape = P2pButtonShape) {
-                Text("View update")
+                Text("View Update")
             }
         }
     )
@@ -97,14 +97,14 @@ internal fun UpdateSettingsContent(model: P2pUpdateModel) {
     UpdateToggle("Include release candidates", model.previews, enabled = !state.busy, onChange = model::changePreviews)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         when {
-            state.downloading -> P2pOutlinedButton(onClick = model::cancelDownload) { Text("Cancel download") }
+            state.downloading -> P2pOutlinedButton(onClick = model::cancelDownload) { Text("Cancel Download") }
             state.release != null -> {
                 Button(onClick = model::updateNow, shape = P2pButtonShape, enabled = !state.busy) {
-                    Text(if (state.ready) "Install update" else "Download update")
+                    Text(if (state.ready) "Install Update" else "Download Update")
                 }
-                P2pTextButton(onClick = { model.checkNow() }, enabled = !state.busy) { Text("Check again") }
+                P2pTextButton(onClick = { model.checkNow() }, enabled = !state.busy) { Text("Check Again") }
             }
-            else -> Button(onClick = { model.checkNow() }, shape = P2pButtonShape, enabled = !state.busy) { Text("Check now") }
+            else -> Button(onClick = { model.checkNow() }, shape = P2pButtonShape, enabled = !state.busy) { Text("Check Now") }
         }
     }
 }

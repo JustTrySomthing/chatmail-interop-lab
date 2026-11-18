@@ -84,7 +84,7 @@ internal fun ReadAloudSettings(reader: ReadAloud) {
     Button(onClick = {
         reader.toggle("voice-preview", "This is how your messages will sound when read aloud.")
     }) {
-        Text(if (reader.active == "voice-preview") "Stop preview" else "Preview voice")
+        Text(if (reader.active == "voice-preview") "Stop Preview" else "Preview Voice")
     }
     reader.error?.let {
         Text(it, color = MaterialTheme.colorScheme.error,

@@ -78,7 +78,7 @@ internal fun SendProfileDialog(model: P2pModel, close: () -> Unit) {
         status = error ?: "Your profile was sent to the second device."
     }
     P2pAlertDialog(
-        onDismissRequest = close, title = { Text("Add second device") },
+        onDismissRequest = close, title = { Text("Add Second Device") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 val image = qr
@@ -133,7 +133,7 @@ internal fun ReceiveProfileDialog(model: P2pModel, close: () -> Unit) {
             close = close, pickImage = { scanning = false; pickImage.launch(arrayOf("image/*")) },
             transferProfile = true, scanned = { code -> receive { code } })
     } else P2pAlertDialog(
-        onDismissRequest = close, title = { Text("Add as second device") },
+        onDismissRequest = close, title = { Text("Add as Second Device") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Connect both devices to the same network. Open Add second device on the device that already has your profile.")
@@ -144,8 +144,8 @@ internal fun ReceiveProfileDialog(model: P2pModel, close: () -> Unit) {
                     P2pTextButton(onClick = {
                         if (context.checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) scanning = true
                         else requestCamera.launch(Manifest.permission.CAMERA)
-                    }) { Text("Scan QR code") }
-                    P2pTextButton(onClick = { pickImage.launch(arrayOf("image/*")) }) { Text("Read QR from image") }
+                    }) { Text("Scan QR Code") }
+                    P2pTextButton(onClick = { pickImage.launch(arrayOf("image/*")) }) { Text("Read QR from Image") }
                     OutlinedTextField(pasted, { pasted = it.take(8192) },
                         label = { Text("Transfer code") }, modifier = Modifier.fillMaxWidth(),
                         shape = RoundedFieldShape, maxLines = 2)

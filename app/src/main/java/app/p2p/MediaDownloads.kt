@@ -149,7 +149,7 @@ internal fun DownloadMediaDialog(
                 if (!busy) OutlinedButton(onClick = choose, shape = P2pButtonShape, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.FolderOpen, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Choose location")
+                    Text("Choose Location")
                 }
             }
         },

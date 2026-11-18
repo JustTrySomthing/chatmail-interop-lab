@@ -145,13 +145,13 @@ internal fun InviteScanner(
                     TextButton(onClick = {
                         val target = !torch
                         runCatching { camera.enableTorch(target) }.onSuccess { torch = target }
-                    }) { Text(if (torch) "Turn off flashlight" else "Turn on flashlight") }
+                    }) { Text(if (torch) "Turn Off Flashlight" else "Turn On Flashlight") }
                 }
-                if (!detected || importResult.failed) TextButton(onClick = pickImage) { Text("Read QR from image") }
+                if (!detected || importResult.failed) TextButton(onClick = pickImage) { Text("Read QR from Image") }
                 FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    if (detected && importResult.failed) TextButton(onClick = { wrongCode = false; detected = false }) { Text("Scan again") }
+                    if (detected && importResult.failed) TextButton(onClick = { wrongCode = false; detected = false }) { Text("Scan Again") }
                     TextButton(onClick = close) {
-                        Text(if (detected && !transferProfile) "Back to accept invite" else "Close")
+                        Text(if (detected && !transferProfile) "Back to Accept Invite" else "Close")
                     }
                 }
             }

@@ -33,7 +33,7 @@ class TalkCallService : Service() {
                 .setContentIntent(PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE))
                 .setCategory(Notification.CATEGORY_CALL).setVisibility(Notification.VISIBILITY_PRIVATE)
                 .setOngoing(true).setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
-                .addAction(Notification.Action.Builder(null, "End call",
+                .addAction(Notification.Action.Builder(null, "End Call",
                     PendingIntent.getBroadcast(this, 0, end, PendingIntent.FLAG_IMMUTABLE)).build()).build()
             startForeground(4201, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
             callId = id

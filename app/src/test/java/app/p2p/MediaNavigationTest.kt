@@ -60,8 +60,8 @@ class MediaNavigationTest {
             compose.waitUntil(5_000) { runCatching { chat.assertIsDisplayed() }.isSuccess }
             chat.performTouchInput { longClick() }
             compose.onNode(hasText("Archive") and hasAnyAncestor(isDialog())).assertExists()
-            compose.onNodeWithText("Copy text").assertDoesNotExist()
-            compose.onNodeWithText("Remind me to reply").performScrollTo().performClick()
+            compose.onNodeWithText("Copy Text").assertDoesNotExist()
+            compose.onNodeWithText("Remind Me to Reply").performScrollTo().performClick()
             compose.onNodeWithText("In 1 hour").performClick()
             val jobs = context.getSystemService(android.app.job.JobScheduler::class.java).allPendingJobs
             val scheduled = jobs.single { it.service.className == ReplyReminderJob::class.java.name }
@@ -72,11 +72,11 @@ class MediaNavigationTest {
             chat.performClick()
             compose.onNodeWithText("Could you reply?", useUnmergedTree = true).performTouchInput { longClick() }
             compose.onNode(hasText("Message options") and hasAnyAncestor(isDialog())).assertExists()
-            compose.onNodeWithText("Copy text").performClick()
+            compose.onNodeWithText("Copy Text").performClick()
             val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
             org.junit.Assert.assertEquals("Could you reply?", clipboard.primaryClip?.getItemAt(0)?.text.toString())
             compose.onNodeWithText("Could you reply?", useUnmergedTree = true).performTouchInput { longClick() }
-            compose.onNodeWithText("Mark unread").performScrollTo().performClick()
+            compose.onNodeWithText("Mark Unread").performScrollTo().performClick()
             compose.waitUntil(5_000) { runCatching { compose.onNodeWithText("Inbox").assertIsDisplayed() }.isSuccess }
             compose.waitUntil(5_000) { withTestRecords(context) { it.get(message)?.data()?.optBoolean("unread") == true } }
 
@@ -88,7 +88,7 @@ class MediaNavigationTest {
 
             compose.onAllNodesWithText("Channels")[0].performClick()
             compose.onNodeWithText("My Channels").performClick()
-            compose.onNodeWithText("Previous Social posts").performClick()
+            compose.onNodeWithText("Previous Social Posts").performClick()
             compose.onNodeWithText("Feed").performClick()
             compose.onNodeWithText("A new post", useUnmergedTree = true).performTouchInput { longClick() }
             compose.onNodeWithText("Post options").assertIsDisplayed()
@@ -118,9 +118,9 @@ class MediaNavigationTest {
             for ((area, emptyLabel) in listOf("Chats" to "No deleted messages", "Groups" to "No deleted groups")) {
                 compose.onNode(hasText(area) and hasClickAction()).performClick()
                 compose.onNodeWithText("Trash").performClick()
-                compose.onNodeWithText("Empty trash").assertIsEnabled().performClick()
+                compose.onNodeWithText("Empty Trash").assertIsEnabled().performClick()
                 compose.onNodeWithText("Empty trash?").assertIsDisplayed()
-                compose.onNode(hasText("Empty trash") and hasAnyAncestor(isDialog())).performClick()
+                compose.onNode(hasText("Empty Trash") and hasAnyAncestor(isDialog())).performClick()
                 compose.waitUntil(5_000) { runCatching { compose.onNodeWithText(emptyLabel).assertIsDisplayed() }.isSuccess }
             }
         }
@@ -146,7 +146,7 @@ class MediaNavigationTest {
             compose.onNodeWithContentDescription("Search conversation").assertIsDisplayed()
             compose.onNodeWithContentDescription("Back").performClick()
 
-            compose.onNodeWithText("Start a chat").performClick()
+            compose.onNodeWithText("Start a Chat").performClick()
             message.assertIsDisplayed()
             message.performClick()
             compose.onNodeWithContentDescription("Back").performClick()
@@ -159,7 +159,7 @@ class MediaNavigationTest {
             compose.onNodeWithContentDescription("Call Blocked contact").assertDoesNotExist()
             compose.onNodeWithContentDescription("Back").performClick()
 
-            compose.onNodeWithText("Call").performClick()
+            compose.onNodeWithText("Make a Call").performClick()
             call.assertIsDisplayed()
             compose.onNodeWithText("Blocked contact").assertDoesNotExist()
         }
@@ -195,7 +195,7 @@ class MediaNavigationTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.onAllNodesWithText("Channels")[0].performClick()
             compose.onNodeWithText("My Channels").performClick()
-            compose.onNodeWithText("Previous Social posts").performClick()
+            compose.onNodeWithText("Previous Social Posts").performClick()
             compose.onNodeWithText("Feed").performClick()
             val picture = compose.onNodeWithContentDescription("Garden.png", useUnmergedTree = true)
             try {
@@ -254,7 +254,7 @@ class MediaNavigationTest {
             listOf(latestDate, olderDate, incomingRow, outgoingRow).forEach { it.assertIsDisplayed() }
             val title = compose.onNodeWithText("Recent calls").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             val screen = compose.onRoot().fetchSemanticsNode().boundsInRoot
-            val clear = compose.onNodeWithText("Clear recent")
+            val clear = compose.onNodeWithText("Clear Recent")
             val action = clear.assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             org.junit.Assert.assertTrue(title.center.x < screen.center.x && action.center.x > screen.center.x)
             org.junit.Assert.assertTrue(kotlin.math.abs(title.center.y - action.center.y) <= 2f)
@@ -270,7 +270,7 @@ class MediaNavigationTest {
             compose.onNodeWithText("Cancel").performClick()
             outgoingRow.assertIsDisplayed()
             clear.performClick()
-            compose.onNode(hasText("Clear recent") and hasAnyAncestor(isDialog())).performClick()
+            compose.onNode(hasText("Clear Recent") and hasAnyAncestor(isDialog())).performClick()
             compose.waitUntil(5_000) { runCatching { compose.onNodeWithText("No recent calls").assertIsDisplayed() }.isSuccess }
             org.junit.Assert.assertTrue(withTestRecords(context) { it.all("call-history").isEmpty() })
             org.junit.Assert.assertTrue(withTestRecords(context) { it.get(voicemail)?.data()?.optBoolean("unread") == true })
@@ -314,14 +314,14 @@ class MediaNavigationTest {
                 runCatching { compose.onNodeWithText("Inbox").assertIsDisplayed() }.isSuccess
             }
             compose.onNodeWithContentDescription("Contacts").performSemanticsAction(SemanticsActions.OnClick)
-            val add = compose.onNodeWithText("Add contact")
+            val add = compose.onNodeWithText("Add Contact")
             compose.waitUntil(5_000) { runCatching { add.assertIsDisplayed() }.isSuccess }
             add.performClick()
             compose.onNodeWithText("Send invite").assertIsDisplayed()
             compose.onNodeWithText("Copy code").assertDoesNotExist()
             compose.onNodeWithText("Accept invite").performSemanticsAction(SemanticsActions.OnClick)
-            compose.onNodeWithText("Scan QR code").assertIsDisplayed()
-            compose.onNodeWithText("Choose QR image").assertIsDisplayed()
+            compose.onNodeWithText("Scan QR Code").assertIsDisplayed()
+            compose.onNodeWithText("Choose QR Image").assertIsDisplayed()
             compose.onNodeWithText("Invite link or code").assertIsDisplayed()
             compose.onNodeWithText("Nearby devices").assertDoesNotExist()
         }
@@ -357,16 +357,16 @@ class MediaNavigationTest {
             compose.waitUntil(5_000) { runCatching { firstPhoto.assertIsDisplayed() }.isSuccess }
             firstPhoto.performTouchInput { longClick() }
             compose.onNodeWithText("Attachment options").assertIsDisplayed()
-            compose.onNodeWithText("Download media").performScrollTo().performClick()
+            compose.onNodeWithText("Download Media").performScrollTo().performClick()
             compose.onNodeWithText("Download image").assertIsDisplayed()
-            compose.onNodeWithText("Choose location").assertIsDisplayed()
+            compose.onNodeWithText("Choose Location").assertIsDisplayed()
             compose.onNodeWithText("Save to Downloads").assertIsDisplayed()
             compose.onNodeWithText("Cancel").performClick()
             firstPhoto.performClick()
             compose.onNodeWithText("1 / 2").assertIsDisplayed()
             compose.onNodeWithContentDescription("Media pages").performTouchInput { swipeLeft() }
             compose.onNodeWithText("2 / 2").assertIsDisplayed()
-            compose.onNodeWithContentDescription("Download media").performClick()
+            compose.onNodeWithContentDescription("Download Media").performClick()
             compose.onNodeWithText("Download image").assertIsDisplayed()
             org.junit.Assert.assertEquals(2, compose.onAllNodesWithText(photos.last()).fetchSemanticsNodes().size)
             compose.onNodeWithText("Cancel").performClick()
@@ -410,15 +410,15 @@ class MediaNavigationTest {
             }
             compose.onNodeWithContentDescription("Play audio").performClick()
             compose.onNodeWithContentDescription("Close media").assertDoesNotExist()
-            compose.onNodeWithContentDescription("File details").assertDoesNotExist()
+            compose.onNodeWithContentDescription("File Details").assertDoesNotExist()
             compose.waitUntil(5_000) {
                 runCatching { compose.onNodeWithContentDescription("Pause audio").assertIsDisplayed() }.isSuccess
             }
             compose.onNodeWithContentDescription("Pause audio").performClick()
             compose.onNodeWithText("Family recording.wav").performTouchInput { longClick() }
-            compose.onNodeWithText("Download media").performScrollTo().performClick()
+            compose.onNodeWithText("Download Media").performScrollTo().performClick()
             compose.onNodeWithText("Download audio").assertIsDisplayed()
-            compose.onNodeWithText("Choose location").assertIsDisplayed()
+            compose.onNodeWithText("Choose Location").assertIsDisplayed()
             compose.onNodeWithText("Cancel").performClick()
             compose.onNodeWithContentDescription("Close media").assertDoesNotExist()
         }

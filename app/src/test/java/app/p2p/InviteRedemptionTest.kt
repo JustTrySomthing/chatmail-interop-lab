@@ -25,7 +25,7 @@ class InviteRedemptionTest {
         val model = app.model
         val first = "F".repeat(40)
         val second = "S".repeat(40)
-        val hello = obj("token" to token, "name" to "New contact")
+        val hello = obj("token" to token, "name" to "New Contact")
         val a = async { model.receiveInvite(first, hello, null, 20, 1) }
         val b = async { model.receiveInvite(second, hello, null, 21, 1) }
         val result = listOf(a.await(), b.await())
@@ -59,7 +59,7 @@ class InviteRedemptionTest {
                 "payload" to obj("type" to "hello", "token" to outgoing)).toString()))
         }
         assertEquals("paired", app.model.receiveInvite(remote,
-            obj("token" to incoming, "name" to "New contact"), null, 20, 1))
+            obj("token" to incoming, "name" to "New Contact"), null, 20, 1))
         withTestRecords(app) { records ->
             assertNull(records.get(requestKey))
             assertNull(records.get("outgoing-hello"))

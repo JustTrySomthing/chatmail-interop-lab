@@ -180,7 +180,7 @@ internal fun NotificationSettingsContent(
 
     Text("Sound, vibration, and priority", style = MaterialTheme.typography.titleMedium)
     if (!allowed) Text("Android is blocking Relay Lab notifications.", color = MaterialTheme.colorScheme.error)
-    P2pRow("Android notification settings", "Enable alerts and choose which categories can appear.", click = systemSettings)
+    P2pRow("Android Notification Settings", "Enable alerts and choose which categories can appear.", click = systemSettings)
     listOf(AlertArea.CHATS, AlertArea.GROUPS, AlertArea.TALK).forEach { area ->
         P2pRow(area.label, "Sound, vibration, and other Android options") {
             LocalAlerts(context).registerChannels()
@@ -200,7 +200,7 @@ internal fun NotificationSettingsContent(
         } else error = null
         reliable = it
     }
-    P2pRow("Battery optimization", if (batteryExempt) "Relay Lab can keep its connection active" else
+    P2pRow("Battery Optimization", if (batteryExempt) "Relay Lab can keep its connection active" else
         "Allow Relay Lab to keep its connection active") {
         val intent = if (batteryExempt) Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
             else BackgroundMessages.batteryPermissionIntent(context)

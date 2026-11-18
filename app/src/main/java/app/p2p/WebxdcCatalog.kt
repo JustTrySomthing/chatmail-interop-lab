@@ -198,7 +198,7 @@ internal fun WebxdcCatalog(close: () -> Unit, actionLabel: String = "Add to chat
                     downloadError = null
                     loading = true
                     attempt++
-                }) { Text("Refresh catalog") }
+                }) { Text("Refresh Catalog") }
             }
         }
         if (selection == null) {

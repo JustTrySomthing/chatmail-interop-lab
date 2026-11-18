@@ -225,5 +225,5 @@ internal fun AppearanceControls(current: Appearance, change: ((Appearance) -> Ap
     Slider(value = scale, onValueChange = { scale = it }, valueRange = 85f..140f, steps = 10,
         modifier = Modifier.semantics { contentDescription = "Content font size" },
         onValueChangeFinished = { change { it.copy(fontSize = scale.roundToInt()) } })
-    P2pTextButton(onClick = { scale = 100f; change { it.copy(fontSize = 100) } }) { Text("Reset font size") }
+    P2pTextButton(onClick = { scale = 100f; change { it.copy(fontSize = 100) } }) { Text("Reset Font Size") }
 }

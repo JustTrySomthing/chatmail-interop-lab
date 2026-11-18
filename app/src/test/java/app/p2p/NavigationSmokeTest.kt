@@ -41,14 +41,15 @@ class NavigationSmokeTest {
 
     @Test
     fun profilesCombinesManagementAndEditing() {
+        compose.waitUntil(5_000) { compose.onNodeWithContentDescription("Settings").isDisplayed() }
         compose.onNodeWithContentDescription("Settings").performClick()
         compose.onNodeWithText("Profile", substring = false).assertDoesNotExist()
         compose.onNodeWithText("Profiles", substring = false).performClick()
-        compose.onNodeWithText("Add profile").assertIsDisplayed()
-        compose.onNodeWithText("Edit active profile").performClick()
-        compose.onNodeWithText("Display name").assertIsDisplayed()
+        compose.onNodeWithText("Add Profile").assertIsDisplayed()
+        compose.onNodeWithText("Edit Active Profile").performClick()
+        compose.onNodeWithText("Display Name").assertIsDisplayed()
         compose.onNodeWithText("Bio", substring = false).assertIsDisplayed()
-        compose.onNodeWithText("Choose profile photo").assertIsDisplayed()
+        compose.onNodeWithText("Choose Profile Photo").assertIsDisplayed()
     }
 
     @Test
@@ -84,14 +85,14 @@ class NavigationSmokeTest {
         repeat(2) {
             compose.onNodeWithContentDescription("Contacts").performClick()
             compose.onNodeWithText("Contacts").assertIsDisplayed()
-            compose.onNodeWithText("Add contact").assertIsDisplayed()
+            compose.onNodeWithText("Add Contact").assertIsDisplayed()
             compose.onNodeWithText("Notifications").assertDoesNotExist()
             compose.onNodeWithText("Inbox").assertDoesNotExist()
             org.junit.Assert.assertEquals(toolbarId, back.fetchSemanticsNode().id)
 
             settings.performClick()
             compose.onNodeWithText("Notifications").assertIsDisplayed()
-            compose.onNodeWithText("Add contact").assertDoesNotExist()
+            compose.onNodeWithText("Add Contact").assertDoesNotExist()
             org.junit.Assert.assertEquals(toolbarId, back.fetchSemanticsNode().id)
         }
     }
@@ -102,9 +103,9 @@ class NavigationSmokeTest {
         val settings = compose.onNodeWithContentDescription("Settings")
         compose.waitUntil(5_000) { settings.isDisplayed() }
         settings.performClick()
-        compose.onNodeWithText("App log").performSemanticsAction(SemanticsActions.OnClick)
-        compose.onNodeWithText("Copy log").assertIsDisplayed()
-        compose.onNodeWithText("Clear log").performClick()
+        compose.onNodeWithText("App Log").performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithText("Copy Log").assertIsDisplayed()
+        compose.onNodeWithText("Clear Log").performClick()
         org.junit.Assert.assertFalse(AppLog.read(compose.activity).contains("old-call-marker"))
         compose.onNodeWithText("No activity recorded yet.", substring = true).assertIsDisplayed()
     }
@@ -114,8 +115,8 @@ class NavigationSmokeTest {
         val settings = compose.onNodeWithContentDescription("Settings")
         compose.waitUntil(5_000) { settings.isDisplayed() }
         settings.performClick()
-        compose.onNodeWithText("Read aloud").performClick()
-        compose.onNodeWithText("Read aloud").assertIsDisplayed()
+        compose.onNodeWithText("Read Aloud").performClick()
+        compose.onNodeWithText("Read Aloud").assertIsDisplayed()
     }
 
     @Test
@@ -130,7 +131,7 @@ class NavigationSmokeTest {
             .performSemanticsAction(SemanticsActions.OnClick)
         compose.onNodeWithText("From").performSemanticsAction(SemanticsActions.OnClick)
         compose.onNodeWithText("Start time").assertIsDisplayed()
-        compose.onNodeWithText("Set time").performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithText("Set Time").performSemanticsAction(SemanticsActions.OnClick)
         compose.onNodeWithText("Save").performSemanticsAction(SemanticsActions.OnClick)
         org.junit.Assert.assertTrue(QuietHours.read(compose.activity).enabled)
         compose.onNodeWithText("Quiet Hours").performSemanticsAction(SemanticsActions.OnClick)
@@ -142,7 +143,7 @@ class NavigationSmokeTest {
         val groups = compose.onAllNodesWithText("Groups")[0]
         compose.waitUntil(5_000) { groups.isDisplayed() }
         groups.performClick()
-        compose.onNodeWithText("Create a group").performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithText("Create a Group").performSemanticsAction(SemanticsActions.OnClick)
         val description = compose.onNode(hasSetTextAction() and hasText("Description (optional)"))
         description.assertIsDisplayed().performTextInput("Local trail updates")
         compose.onNodeWithText("Local trail updates").assertIsDisplayed()
@@ -158,7 +159,7 @@ class NavigationSmokeTest {
         compose.onNodeWithText("Create a Channel").assertIsDisplayed()
             .performSemanticsAction(SemanticsActions.OnClick)
         compose.onNodeWithText("Channel name").assertIsDisplayed()
-        val create = compose.onNode(hasClickAction() and hasText("Create channel"))
+        val create = compose.onNode(hasClickAction() and hasText("Create Channel"))
         create.assertIsNotEnabled()
         compose.onNode(hasSetTextAction() and hasText("Channel name")).performTextInput("Trail notes")
         create.assertIsDisplayed()
@@ -170,14 +171,14 @@ class NavigationSmokeTest {
         compose.waitUntil(5_000) { channels.isDisplayed() }
         channels.performClick()
         compose.onNodeWithText("My Channels").performClick()
-        compose.onNodeWithText("Previous Social posts").performClick()
+        compose.onNodeWithText("Previous Social Posts").performClick()
         compose.onNodeWithText("My Page").performClick()
         compose.onNodeWithText("No posts yet").assertIsDisplayed()
-        compose.onNodeWithText("Add attachment").assertDoesNotExist()
-        compose.onNodeWithText("What’s on your mind?").performClick()
+        compose.onNodeWithText("Add Attachment").assertDoesNotExist()
+        compose.onNodeWithText("What’s on Your Mind?").performClick()
         compose.onNodeWithText("New post").assertIsDisplayed()
-        compose.onNodeWithText("Add attachment").assertIsDisplayed()
-        compose.onNodeWithText("Add attachment").performClick()
+        compose.onNodeWithText("Add Attachment").assertIsDisplayed()
+        compose.onNodeWithText("Add Attachment").performClick()
         for (label in listOf("Take Photo", "Record Video", "Record Audio", "Attach File")) {
             compose.onNodeWithText(label).assertIsDisplayed()
         }
@@ -196,34 +197,34 @@ class NavigationSmokeTest {
         compose.onNodeWithText("No archived messages").assertIsDisplayed()
         compose.onNodeWithText("Trash").performClick()
         compose.onNodeWithText("No deleted messages").assertIsDisplayed()
-        compose.onNodeWithText("Empty trash").assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithText("Empty Trash").assertIsDisplayed().assertIsNotEnabled()
 
         compose.onAllNodesWithText("Groups")[0].performClick()
-        compose.onNodeWithText("Create a group").assertIsDisplayed()
+        compose.onNodeWithText("Create a Group").assertIsDisplayed()
         compose.onNodeWithContentDescription("New group").assertDoesNotExist()
         compose.onNodeWithText("No groups").assertIsDisplayed()
-        compose.onNodeWithText("Create group").assertDoesNotExist()
+        compose.onNodeWithText("Create Group").assertDoesNotExist()
         compose.onNodeWithText("Trash").performClick()
         compose.onNodeWithText("No deleted groups").assertIsDisplayed()
-        compose.onNodeWithText("Empty trash").assertIsDisplayed().assertIsNotEnabled()
+        compose.onNodeWithText("Empty Trash").assertIsDisplayed().assertIsNotEnabled()
 
         compose.onAllNodesWithText("Channels")[0].performClick()
         compose.onNodeWithText("Feed").assertIsDisplayed()
         compose.onNodeWithText("Publish").assertDoesNotExist()
         compose.onNodeWithText("My Channels").assertIsDisplayed()
         compose.onNodeWithText("Following").performClick()
-        compose.onNodeWithText("Join channel").assertIsDisplayed()
+        compose.onNodeWithText("Join Channel").assertIsDisplayed()
 
         compose.onAllNodesWithText("Talk")[0].performClick()
         compose.onNodeWithText("VoiceMail").assertDoesNotExist()
-        compose.onNodeWithText("Call").assertIsDisplayed()
+        compose.onNodeWithText("Make a Call").assertIsDisplayed()
         compose.onNodeWithText("Files").assertDoesNotExist()
         compose.onAllNodesWithText("Chats")[0].performClick()
         compose.onNodeWithText("Inbox").assertIsDisplayed()
         compose.onNodeWithContentDescription("Settings").performClick()
         compose.onNodeWithText("Backup").performClick()
-        compose.onNodeWithText("Create backup").assertIsDisplayed()
-        compose.onNodeWithText("Restore backup").assertIsDisplayed()
+        compose.onNodeWithText("Create Backup").assertIsDisplayed()
+        compose.onNodeWithText("Restore Backup").assertIsDisplayed()
         compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Appearance").performSemanticsAction(SemanticsActions.OnClick)
         compose.onNodeWithText("Dark").assertIsDisplayed()

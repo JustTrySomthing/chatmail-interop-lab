@@ -108,9 +108,9 @@ class ResponsiveAppearanceTest {
             settings.performClick()
             compose.onNodeWithText("Appearance").performClick()
             compose.onNodeWithText("Background").performScrollTo().performClick()
-            compose.onNodeWithText("Upload your own").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Upload Your Own").performScrollTo().assertIsDisplayed()
             compose.onNodeWithText("Done").assertIsDisplayed().performClick()
-            compose.onNodeWithText("Upload your own").assertDoesNotExist()
+            compose.onNodeWithText("Upload Your Own").assertDoesNotExist()
         }
     }
 
@@ -148,7 +148,7 @@ class ResponsiveAppearanceTest {
         seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
         ActivityScenario.launch(MainActivity::class.java).use {
             compose.waitUntil(5_000) { runCatching { compose.onNodeWithText("Inbox").assertIsDisplayed() }.isSuccess }
-            compose.onNodeWithText("Start a chat").assertIsDisplayed()
+            compose.onNodeWithText("Start a Chat").assertIsDisplayed()
             val empty = compose.onNodeWithText("No messages").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             val whole = compose.onRoot().fetchSemanticsNode().boundsInRoot
             assertTrue("Empty message is horizontally centered", kotlin.math.abs(empty.center.x - whole.center.x) <= 2f)
@@ -161,7 +161,7 @@ class ResponsiveAppearanceTest {
                 assertFalse(label, text.hasVisualOverflow)
             }
             compose.onNodeWithContentDescription("Settings").performClick()
-            for (label in listOf("Notifications", "P2P address", "Connections", "Compression", "Help")) {
+            for (label in listOf("Notifications", "P2P Address", "Connections", "Compression", "Help")) {
                 compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
                 val text = layout(label)
                 assertEquals(label, 1, text.lineCount)
@@ -170,7 +170,7 @@ class ResponsiveAppearanceTest {
             }
             compose.onNodeWithText("Notifications").performScrollTo().performClick()
             compose.onNodeWithText("Show in notifications").performScrollTo().assertIsDisplayed()
-            compose.onNodeWithText("Android notification settings").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithText("Android Notification Settings").performScrollTo().assertIsDisplayed()
         }
     }
 

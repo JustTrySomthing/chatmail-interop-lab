@@ -39,7 +39,7 @@ internal fun MessageInfoSheet(model: P2pModel, message: String, close: () -> Uni
             Result.failure(error)
         }
     }
-    Sheet("Message info", close) {
+    Sheet("Message Info", close) {
         val result = details
         val info = result?.getOrNull()
         if (info != null) {
@@ -77,7 +77,7 @@ internal fun ForwardMessageSheet(
             Text("Forward to " + selected.data().optString("name") + "?")
             error?.let { Text(it) }
             PageActionButton("Forward", { forward(selected.key) }, enabled = !busy)
-            P2pTextButton(enabled = !busy, onClick = { target = null }) { Text("Choose another chat") }
+            P2pTextButton(enabled = !busy, onClick = { target = null }) { Text("Choose Another Chat") }
         }
     }
 }
@@ -88,7 +88,7 @@ internal fun EncryptionInfoSheet(model: P2pModel, thread: String, close: () -> U
     val error by produceState<String?>(null, model, thread) {
         value = chatAction { info = model.nativeEncryptionInfo(thread) }
     }
-    Sheet("Encryption info", close) {
+    Sheet("Encryption Info", close) {
         val details = info
         when {
             details != null -> {
@@ -120,7 +120,7 @@ internal fun ChatmailRelaysSheet(
                 list.forEach { address ->
                     Text(address)
                     P2pTextButton(enabled = list.size > 1 && !busy, onClick = { pending = address }) {
-                        Text("Remove relay")
+                        Text("Remove Relay")
                     }
                 }
                 if (list.size == 1) Text("Add another relay in Your profile before removing this one.")

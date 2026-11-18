@@ -45,7 +45,7 @@ internal fun ProfileChooser(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (alertProfile != null) Text("Choose the profile that received this alert to open it.")
                 Text("Enabled profiles can receive background messages. Calls ring for the active profile.")
-                PageActionButton("Edit active profile", edit, Modifier.fillMaxWidth(), enabled = !saving)
+                PageActionButton("Edit Active Profile", edit, Modifier.fillMaxWidth(), enabled = !saving)
                 if (options == null) Text("Loading profiles…")
                 if (loadFailed) Text("Couldn’t load profiles.", color = MaterialTheme.colorScheme.error)
                 options.orEmpty().forEach { profile ->
@@ -70,13 +70,13 @@ internal fun ProfileChooser(
                                 saving = false
                             }
                         }
-                    }) { Text(if (profile.enabled) "Disable profile" else "Enable profile") }
+                    }) { Text(if (profile.enabled) "Disable Profile" else "Enable Profile") }
                 }
                 settingsError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 if (error != null) Text(error, color = MaterialTheme.colorScheme.error)
             }
         },
-        confirmButton = { P2pTextButton(enabled = !saving, onClick = { select(null) }) { Text("Add profile") } },
+        confirmButton = { P2pTextButton(enabled = !saving, onClick = { select(null) }) { Text("Add Profile") } },
         dismissButton = { P2pTextButton(onClick = close) { Text("Close") } }
     )
 }

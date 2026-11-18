@@ -149,7 +149,7 @@ internal fun PersonalAppsDesktop(
         if (!loading && shown.isEmpty() && folders.isEmpty()) {
             Column(Modifier.padding(16.dp)) {
                 Text("No apps yet", color = foreground, style = MaterialTheme.typography.headlineSmall)
-                Button(onClick = add, modifier = Modifier.padding(top = 12.dp)) { Text("Add apps") }
+                Button(onClick = add, modifier = Modifier.padding(top = 12.dp)) { Text("Add Apps") }
             }
         }
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
@@ -351,7 +351,7 @@ internal fun PersonalAppsDesktop(
                                 Text(activeFolder.name, Modifier.weight(1f).padding(start = 8.dp),
                                     style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 IconButton(onClick = { naming = activeFolder.id }, enabled = drag == null) {
-                                    Icon(Icons.Outlined.Edit, "Rename folder")
+                                    Icon(Icons.Outlined.Edit, "Rename Folder")
                                 }
                                 IconButton(onClick = { folderOpen = null }, enabled = drag == null) {
                                     Icon(Icons.Outlined.Close, "Close folder")
@@ -422,10 +422,10 @@ internal fun PersonalAppsDesktop(
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (folder != null) {
-                            DesktopAction("Rename folder", Icons.Outlined.Edit) { options = null; naming = id }
-                            DesktopAction("Delete folder", Icons.Outlined.FolderDelete) { options = null; deleting = id }
+                            DesktopAction("Rename Folder", Icons.Outlined.Edit) { options = null; naming = id }
+                            DesktopAction("Delete Folder", Icons.Outlined.FolderDelete) { options = null; deleting = id }
                         }
-                        if (parent != null) DesktopAction("Remove from folder", Icons.Outlined.FolderOpen) {
+                        if (parent != null) DesktopAction("Remove from Folder", Icons.Outlined.FolderOpen) {
                             edit { current ->
                                 val page = current.pageOf(parent.id).coerceAtLeast(0)
                                 val cells = current.pages[page]
@@ -434,8 +434,8 @@ internal fun PersonalAppsDesktop(
                             options = null
                         }
                         if (app != null) {
-                            DesktopAction("Remove icon", Icons.Outlined.HideSource, "Keep app and saved data") { hide(id, true); options = null }
-                            DesktopAction("Delete app and data", Icons.Outlined.DeleteOutline, "Delete this personal copy", destructive = true) { deletingApp = id; options = null }
+                            DesktopAction("Remove Icon", Icons.Outlined.HideSource, "Keep app and saved data") { hide(id, true); options = null }
+                            DesktopAction("Delete App and Data", Icons.Outlined.DeleteOutline, "Delete this personal copy", destructive = true) { deletingApp = id; options = null }
                         }
                     }
                 }, confirmButton = { P2pTextButton(onClick = { options = null }) { Text("Done", color = MaterialTheme.colorScheme.onSurface) } })
@@ -454,7 +454,7 @@ internal fun PersonalAppsDesktop(
         if (id.isEmpty() || folder != null) {
             var name by rememberSaveable(id) { mutableStateOf(folder?.name.orEmpty()) }
             P2pAlertDialog(onDismissRequest = { naming = null },
-                title = { Text(if (id.isEmpty()) "New folder" else "Rename folder") },
+                title = { Text(if (id.isEmpty()) "New folder" else "Rename Folder") },
                 text = { OutlinedTextField(name, { name = it.take(40) }, label = { Text("Folder name") },
                     singleLine = true, modifier = Modifier.fillMaxWidth()) },
                 confirmButton = {
@@ -476,7 +476,7 @@ internal fun PersonalAppsDesktop(
         P2pAlertDialog(onDismissRequest = { deleting = null }, title = { Text("Delete folder?") },
             text = { Text("The apps in this folder will move back to the Apps pages.") },
             confirmButton = {
-                P2pTextButton(onClick = { edit { it.dissolve(id) }; deleting = null; folderOpen = null }) { Text("Delete folder", color = MaterialTheme.colorScheme.error) }
+                P2pTextButton(onClick = { edit { it.dissolve(id) }; deleting = null; folderOpen = null }) { Text("Delete Folder", color = MaterialTheme.colorScheme.error) }
             }, dismissButton = { P2pTextButton(onClick = { deleting = null }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurface) } })
     }
     if (manage) P2pAlertDialog(onDismissRequest = { manage = false }, title = { Text("Hidden app icons") },

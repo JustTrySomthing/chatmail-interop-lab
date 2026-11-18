@@ -73,7 +73,7 @@ internal fun rememberAttachmentPicker(
         finish(items)
     }
     when (screen) {
-        "menu" -> Sheet("Add attachment", { finish() }) {
+        "menu" -> Sheet("Add Attachment", { finish() }) {
             AttachmentActions(
                 photo = {
                     video = false

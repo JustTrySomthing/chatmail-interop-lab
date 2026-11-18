@@ -46,7 +46,7 @@ class PersonalSpaceUiTest {
             icon.performTouchInput { down(center) }
             compose.mainClock.advanceTimeBy(700)
             icon.performTouchInput { up() }
-            compose.onNodeWithText("Remove icon").assertIsDisplayed().performClick()
+            compose.onNodeWithText("Remove Icon").assertIsDisplayed().performClick()
             assertEquals(nativeMessageKey(32), opened)
             compose.runOnIdle { assertEquals(13, apps.value.size) }
             compose.onNodeWithContentDescription("Manage hidden apps").performClick()
@@ -186,14 +186,14 @@ class PersonalSpaceUiTest {
             icon.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
             compose.onNodeWithText("Move to next page").assertDoesNotExist()
             compose.onNodeWithText("Move to previous page").assertDoesNotExist()
-            compose.onNodeWithText("Remove icon").assertIsDisplayed()
+            compose.onNodeWithText("Remove Icon").assertIsDisplayed()
             scenario.onActivity { screenshot("app-options-${mode.name.lowercase()}", org.robolectric.shadows.ShadowDialog.getLatestDialog().window!!.decorView) }
-            compose.onNodeWithText("Delete app and data").performClick()
+            compose.onNodeWithText("Delete App and Data").performClick()
             assertNull(deleted)
             compose.onNodeWithText("Cancel").performClick()
             assertNull(deleted)
             icon.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
-            compose.onNodeWithText("Delete app and data").performClick()
+            compose.onNodeWithText("Delete App and Data").performClick()
             compose.onNodeWithText("Delete", substring = false).performClick()
             assertEquals(apps[0].key, deleted)
         }

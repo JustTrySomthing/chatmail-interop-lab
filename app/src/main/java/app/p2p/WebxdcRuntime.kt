@@ -634,7 +634,7 @@ private fun ColumnScope.SandboxedWebxdc(
                     bodyDisplay:b?w.getComputedStyle(b).display:null,
                     frameWidth:r?.width,frameHeight:r?.height,scripts:d?.scripts.length});
             } catch(e) {return 'unavailable';}})()""") { result -> copyReport(result ?: "unavailable") }
-        }) { Text("Copy app diagnostics") }
+        }) { Text("Copy App Diagnostics") }
     }
     if (visible && !rendererFailed) permissions.promptCapabilities?.let { capabilities ->
         WebxdcPermissionPrompt(info.name, capabilities,

@@ -171,7 +171,7 @@ internal fun MessageLinkCard(link: PreviewLink, preview: () -> Unit, open: () ->
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (link.videoId != null) TextButton(onClick = preview) { Text("Play in P2P") }
-                TextButton(onClick = open) { Text("Open in P2P browser") }
+                TextButton(onClick = open) { Text("Open in P2P Browser") }
             }
         }
     }
@@ -181,7 +181,7 @@ internal fun MessageLinkCard(link: PreviewLink, preview: () -> Unit, open: () ->
 private fun YoutubeThumbnail(id: String, modifier: Modifier, open: () -> Unit) {
     var requested by rememberSaveable(id) { mutableStateOf(false) }
     if (!requested) {
-        TextButton(onClick = { requested = true }) { Text("Load YouTube thumbnail") }
+        TextButton(onClick = { requested = true }) { Text("Load YouTube Thumbnail") }
         return
     }
     val download = LocalMediaDownload.current
@@ -266,7 +266,7 @@ internal fun InAppBrowser(link: PreviewLink, close: () -> Unit) {
                             } catch (_: ActivityNotFoundException) {
                                 noExternalBrowser = true
                             }
-                        }) { Text("Open HTTP link in external browser") }
+                        }) { Text("Open HTTP Link in External Browser") }
                         if (noExternalBrowser) Text("No browser is available to open this link.")
                     }
                 }
@@ -319,7 +319,7 @@ internal fun InAppBrowser(link: PreviewLink, close: () -> Unit) {
 @Composable
 internal fun LinkPreviewContent(link: PreviewLink, open: () -> Unit) {
     link.videoId?.let { YoutubePlayer(it) }
-    Button(onClick = open) { Text("Open in P2P browser") }
+    Button(onClick = open) { Text("Open in P2P Browser") }
 }
 
 internal fun youtubeEmbedUrl(id: String): String? = id.takeIf(videoIdPattern::matches)

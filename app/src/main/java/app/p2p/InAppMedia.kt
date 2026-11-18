@@ -138,7 +138,7 @@ internal fun MediaDialog(
                     Text(current.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium,
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (pages.size > 1) Text("${pager.currentPage + 1} / ${pages.size}")
-                    IconButton(onClick = { download(current.id) }) { Icon(Icons.Outlined.Download, "Download media") }
+                    IconButton(onClick = { download(current.id) }) { Icon(Icons.Outlined.Download, "Download Media") }
                 }
                 feedback?.let { Text(it, Modifier.align(Alignment.CenterHorizontally).padding(8.dp),
                     color = MaterialTheme.colorScheme.primary) }
@@ -146,7 +146,7 @@ internal fun MediaDialog(
                     .semantics { contentDescription = "Media pages" }, key = { pages[it].id }) { index ->
                     val page = pages[index]
                     val save = { download(page.id) }
-                    val longPress = Modifier.mediaLongPress("Download media", save)
+                    val longPress = Modifier.mediaLongPress("Download Media", save)
                     Box(Modifier.fillMaxSize().then(if (page.kind == MediaKind.Photo || page.kind == MediaKind.Video) Modifier else longPress),
                         contentAlignment = Alignment.Center) {
                         when (page.kind) {
@@ -241,7 +241,7 @@ private fun LocalPlayer(
             inlineAudioLabel?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             Text("This file couldn’t be played on this device.")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                P2pTextButton(onClick = { failed = false; attempt++ }) { Text("Try again") }
+                P2pTextButton(onClick = { failed = false; attempt++ }) { Text("Try Again") }
                 audioOptions?.let { P2pTextButton(onClick = it) { Text(audioOptionsLabel) } }
             }
         }

@@ -125,7 +125,7 @@ internal fun FirstRunSetup(
     if (back != null) BackHandler(onBack = back)
     Scaffold(topBar = {
         TopAppBar(title = { Text("Setup") }, actions = {
-            if (switchProfile != null) P2pTextButton(onClick = switchProfile) { Text("Switch profile") }
+            if (switchProfile != null) P2pTextButton(onClick = switchProfile) { Text("Switch Profile") }
         }, navigationIcon = {
             if (back != null) IconButton(onClick = back) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
@@ -141,23 +141,23 @@ internal fun FirstRunSetup(
                 LinearProgressIndicator(progress = { completed.toFloat() / total }, modifier = Modifier.fillMaxWidth())
                 SetupCard(1, "Profile", name.isNotBlank(), name.isBlank()) {
                     if (editing) {
-                        OutlinedTextField(draft, { draft = it.take(60) }, label = { Text("Display name") },
+                        OutlinedTextField(draft, { draft = it.take(60) }, label = { Text("Display Name") },
                             enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
                         Button(onClick = { saving = saveName(draft) { editing = false } },
                             enabled = !busy && draft.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-                            Text(if (name.isBlank()) "Continue" else "Save display name")
+                            Text(if (name.isBlank()) "Continue" else "Save Display Name")
                         }
                         if (name.isBlank() && restoreBackup != null) {
-                            P2pTextButton(onClick = restoreBackup, enabled = !busy) { Text("Restore Chatmail backup") }
+                            P2pTextButton(onClick = restoreBackup, enabled = !busy) { Text("Restore Chatmail Backup") }
                             receiveProfile?.let { action ->
-                                P2pTextButton(onClick = action, enabled = !busy) { Text("Add as second device") }
+                                P2pTextButton(onClick = action, enabled = !busy) { Text("Add as Second Device") }
                             }
                             if (restoringBackup) LinearProgressIndicator(Modifier.fillMaxWidth())
                         }
                     } else {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(name, Modifier.weight(1f))
-                            P2pTextButton(onClick = { draft = name; editing = true }) { Text("Edit name") }
+                            P2pTextButton(onClick = { draft = name; editing = true }) { Text("Edit Name") }
                         }
                     }
                 }
@@ -179,7 +179,7 @@ internal fun FirstRunSetup(
                         P2pOutlinedButton(onClick = {
                             specialAccessError = runCatching { settings.launch(CallAlertAccess.settingsIntent(context)) }
                                 .exceptionOrNull()?.let { "Open Android settings → Apps → Relay Lab → Full-screen notifications." }
-                        }, modifier = Modifier.fillMaxWidth()) { Text("Allow call screen") }
+                        }, modifier = Modifier.fillMaxWidth()) { Text("Allow Call Screen") }
                     }
                     specialAccessError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
@@ -193,7 +193,7 @@ internal fun FirstRunSetup(
                             }.recoverCatching {
                                 batterySettings.launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                             }.isFailure
-                        }, modifier = Modifier.fillMaxWidth()) { Text("Allow background connection") }
+                        }, modifier = Modifier.fillMaxWidth()) { Text("Allow Background Connection") }
                     }
                     if (backgroundError || batterySettingsError) {
                         Text(if (batterySettingsError) "Open Android battery settings and allow unrestricted use for Relay Lab."
@@ -206,7 +206,7 @@ internal fun FirstRunSetup(
             if (name.isNotBlank() && !editing) {
                 Button(onClick = finish, modifier = Modifier.widthIn(max = 560.dp).fillMaxWidth()
                     .padding(vertical = 10.dp).heightIn(min = 52.dp), shape = RoundedCornerShape(12.dp)) {
-                    Text(if (back != null) "Done" else if (completed == total) "Start chatting" else "Continue with current permissions")
+                    Text(if (back != null) "Done" else if (completed == total) "Start Chatting" else "Continue with Current Permissions")
                 }
             }
         }
