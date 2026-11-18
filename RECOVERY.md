@@ -4,9 +4,9 @@ Updated November 17, 2026. This GitHub repository is **public**.
 
 ## Current source
 
-Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc66.
+Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc67.
 
-RC66 (102) enables daily update checks by default; release candidates are also included by default. Explicitly saved user choices remain respected. Settings now uses rounded neutral tiles with individual theme-aware icons, readable wrapping labels, and adaptive columns. All settings destinations and existing navigation are retained. Includes the RC65 Apps/Saved fixes and the established RC58 signing identity.
+RC67 (103) fixes the bottom navigation label width so Channels is fully visible, balances the Groups and Channels icon sizes, and uses stars consistently for Saved across the toolbar, messages, and channel posts. Navigation destinations, unread indicators, saving behavior, and existing data are preserved. Includes the RC66 default-on daily update checks and release candidates, and the established RC58 signing identity.
 
 ## Persistent signing identity
 
@@ -44,4 +44,4 @@ python3 scripts/check-call-apk.py app/build/outputs/apk/preview/app-preview.apk
 python3 scripts/check-release-signature.py app/build/outputs/apk/preview/app-preview.apk --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner"
 ```
 
-Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc66-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
+Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc67-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
