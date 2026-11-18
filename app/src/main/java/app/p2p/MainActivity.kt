@@ -2328,7 +2328,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                     if (target.second != null) { goArea(Area.Social); channelId = target.second }
                     else { goArea(Area.Chats); goThread(requireNotNull(target.first)) }
                 } }, note = { runNativeAction(done = {}) { goArea(Area.Chats); goThread(model.savedMessagesThread()) } },
-                localFile = model::galleryFile, conversationName = { name(it) })
+                localFile = model::galleryFile, conversationName = { name(it) },
+                resolveSourceLabel = { model.savedOriginalLabel(it.key) })
             "saved-detail" -> records.firstOrNull { it.key == selected }?.let { item ->
                 Sheet("Saved item", { modal = "saved" }) {
                     androidx.compose.foundation.text.selection.SelectionContainer { Text(item.data().optString("text").ifBlank { item.data().optString("caption") }) }

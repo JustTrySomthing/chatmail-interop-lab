@@ -79,12 +79,19 @@ internal fun savedCollectionItems(records: List<Record>, selfThread: String?): L
             (!d.optBoolean("webxdc") || d.optInt("nativeOriginalId") > 9)) || d.optBoolean("star"))
 }.sortedByDescending { it.created }
 
+internal fun savedSourceLabel(channel: Boolean, group: Boolean): String = when {
+    channel -> "Go to Channel"
+    group -> "Go to Group"
+    else -> "Go to Chat"
+}
+
 @Composable
 internal fun SavedCollection(
     records: List<Record>, selfThread: String?, loading: Boolean, error: String?,
     close: () -> Unit, retry: () -> Unit, open: (Record) -> Unit, remove: (Record) -> Unit,
     source: (Record) -> Unit, note: () -> Unit,
-    localFile: (Record) -> java.io.File? = { null }, conversationName: (String) -> String = { "Conversation" }
+    localFile: (Record) -> java.io.File? = { null }, conversationName: (String) -> String = { "Conversation" },
+    resolveSourceLabel: (suspend (Record) -> String?)? = null
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf("All") }
@@ -136,7 +143,17 @@ internal fun SavedCollection(
                 val original = records.firstOrNull { it.key == nativeMessageKey(item.data().optInt("nativeOriginalId")) }
                 val origin = original?.data()?.optString("thread")?.takeIf { it.isNotBlank() }?.let(conversationName)
                     ?: if (item.data().optInt("nativeOriginalId") > 9) "Saved from a conversation" else "Personal saved item"
-                SavedItemCard(item, origin, localFile(item), { open(item) },
+                val sourceLabel by produceState<String?>(null, item.key, item.data().optInt("nativeOriginalId")) {
+                    if (item.data().optInt("nativeOriginalId") > 9 && resolveSourceLabel != null) {
+                        value = try { resolveSourceLabel(item) }
+                        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (_: Exception) { null }
+                    }
+                }
+                val cachedThread = records.firstOrNull { it.key == original?.data()?.optString("thread") }
+                val label = sourceLabel ?: if (resolveSourceLabel == null && original != null) savedSourceLabel(false,
+                    cachedThread?.kind == "group" || original.data().optString("group").isNotBlank()) else "Go to Source"
+                SavedItemCard(item, origin, localFile(item), label, { open(item) },
                     if (item.data().optInt("nativeOriginalId") > 9) ({ source(item) }) else null,
                     if (selfThread != null && item.data().optString("thread") == selfThread) ({ removing = item }) else null)
             }
@@ -151,7 +168,7 @@ internal fun SavedCollection(
 }
 
 @Composable
-private fun SavedItemCard(item: Record, origin: String, file: java.io.File?, open: () -> Unit, source: (() -> Unit)?, remove: (() -> Unit)?) {
+private fun SavedItemCard(item: Record, origin: String, file: java.io.File?, sourceLabel: String, open: () -> Unit, source: (() -> Unit)?, remove: (() -> Unit)?) {
     val colors = MaterialTheme.colorScheme
     val d = item.data()
     val kind = savedKind(item)
@@ -180,9 +197,9 @@ private fun SavedItemCard(item: Record, origin: String, file: java.io.File?, ope
                     Box {
                         IconButton(onClick = { menu = true }) { Icon(Icons.Outlined.MoreVert, "Options for $title") }
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = colors.surface) {
-                            DropdownMenuItem(text = { Text("Open") }, leadingIcon = { Icon(Icons.Outlined.OpenInNew, null) }, onClick = { menu = false; open() })
-                            if (source != null) DropdownMenuItem(text = { Text("Original conversation") }, leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) }, onClick = { menu = false; source() })
-                            if (remove != null) DropdownMenuItem(text = { Text("Remove saved copy") }, leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null) }, onClick = { menu = false; remove() })
+                            DropdownMenuItem(text = { Text("Open Saved Item") }, leadingIcon = { Icon(Icons.Outlined.OpenInNew, null) }, onClick = { menu = false; open() })
+                            if (source != null) DropdownMenuItem(text = { Text(sourceLabel) }, leadingIcon = { Icon(Icons.AutoMirrored.Outlined.Chat, null) }, onClick = { menu = false; source() })
+                            if (remove != null) DropdownMenuItem(text = { Text("Remove From Saved") }, leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null) }, onClick = { menu = false; remove() })
                         }
                     }
                 }

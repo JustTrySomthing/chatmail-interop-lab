@@ -2571,6 +2571,15 @@ class P2pModel internal constructor(application: Application, internal val profi
 
     internal fun saveNativeMessage(key: String) = work { saveToCollection(key) }
 
+    internal suspend fun savedOriginalLabel(key: String): String? = withChatmail { core ->
+        val id = records.get(key)?.data()?.optInt("nativeOriginalId") ?: return@withChatmail null
+        if (id <= 9) return@withChatmail null
+        val chatId = core.message(id).optInt("chatId")
+        if (core.channel(chatId) != null) return@withChatmail savedSourceLabel(true, false)
+        val chat = core.nativeThread(chatId) ?: return@withChatmail null
+        savedSourceLabel(false, chat.group)
+    }
+
     internal suspend fun savedOriginalThread(key: String): Pair<String?, Int?> = withChatmail { core ->
         val item = requireNotNull(records.get(key))
         val id = item.data().optInt("nativeOriginalId")

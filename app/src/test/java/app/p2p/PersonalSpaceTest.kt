@@ -13,6 +13,12 @@ class PersonalSpaceTest {
         nativeMessageKey(id), "file-sent", obj("nativeMessage" to id, "thread" to thread,
             "webxdc" to true, "nativeOriginalId" to original, "locallyDeleted" to deleted).toString(), id.toLong())
 
+    @Test fun savedSourceLabelsMatchActualDestinations() {
+        assertEquals("Go to Chat", savedSourceLabel(false, false))
+        assertEquals("Go to Group", savedSourceLabel(false, true))
+        assertEquals("Go to Channel", savedSourceLabel(true, true))
+    }
+
     @Test fun savedCollectionClassifiesAttachmentsAndSortsWithoutLeakingOtherChats() {
         fun row(id: Int, name: String, mime: String) = Record("item-$id", "file-sent", obj("thread" to "self", "name" to name, "mime" to mime).toString(), id.toLong())
         val rows = listOf(row(1, "photo.jpg", "image/jpeg"), row(2, "movie.mp4", "video/mp4"), row(3, "song.mp3", "audio/mpeg"),
