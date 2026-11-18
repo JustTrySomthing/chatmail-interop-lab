@@ -8,12 +8,12 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc69**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc69/P2P-0.7.23-rc69-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc70**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc70/P2P-0.7.23-rc70-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC69 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC70 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
-RC69 (105) preserves empty desktop grid positions, supports dragging back and forth across page edges with animated transitions, and keeps the bottom navigation at a fixed height with equal-width tabs and single-line labels. Includes the RC68 folders, long-press menus, and compact Settings. Uses the established RC58 signing identity.
+RC70 (106) makes page dragging easier with wider highlighted edge zones and a shorter delay, polishes app and folder menus, adds confirmed deletion of individual personal apps and their data, and removes Android home-screen shortcut creation. Uses the established RC58 signing identity.
 
 ### Update from the app
 
@@ -31,7 +31,7 @@ Relay Lab uses Chatmail Core for interoperability. Cross-app support varies by c
 
 ## Build a debug APK
 
-Check out the [RC69 release source](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc69) or the `securejoin-invites` development branch before building. Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
+Check out the [RC70 release source](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc70) or the `securejoin-invites` development branch before building. Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
 
 ```sh
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
@@ -41,7 +41,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 
 
 Download signed Android builds from the Releases page.
 
-The downloadable APK's source is at the [RC69 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc69). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
+The downloadable APK's source is at the [RC70 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc70). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
 
 ### Release publishing
 
@@ -122,7 +122,7 @@ Use fresh profiles and record the client versions and networks used. SecureJoin 
 
 The bottom-right button jumps to the newest messages when you are reading older history. Near the bottom it opens **Apps** in writable Chatmail chats and groups. Search **Home**, **Tools**, or **Games**, open an app's details, and use **Add to chat** to attach it to the composer. Send the draft to share an app instance. Use **Open app** on its message to run it.
 
-Use the back arrow to return to the chat. The **Apps** button lists open mini-apps and app messages in the current chat. Each shared message is its own instance, so two copies of the same app can have different data. There is no Relay Lab-imposed limit on the number of open sessions. Available device resources still apply. If WebView needs to run one at a time to preserve isolation, reopening a minimized app reloads its page. Use **App options → Add to home screen** to pin a shortcut to that exact shared instance on a supported Android launcher.
+Use the back arrow to return to the chat. The **Apps** button lists open mini-apps and app messages in the current chat. Each shared message is its own instance, so two copies of the same app can have different data. There is no Relay Lab-imposed limit on the number of open sessions. Available device resources still apply. If WebView needs to run one at a time to preserve isolation, reopening a minimized app reloads its page. Android home-screen shortcut creation has been removed; use Relay Lab’s Apps desktop or open shared apps from their chats. Existing Android shortcuts can be removed through the launcher.
 
 The catalog is the same index used by Delta Chat's default Webxdc Store. Relay Lab ships Delta Chat Android v2.69.0's JavaScript API and WebRTC isolation assets and uses Chatmail Core for native Webxdc messages, status updates, and realtime data. Relay Lab hosts each message in its own isolated WebView origin. A mini-app can request camera, microphone, location, or motion access while open. Relay Lab asks for consent for that mini-app and checks Android permissions for camera, microphone, and location. Android's approximate location setting is supported. Allowing motion reloads the mini-app so its page can use the sensors. Minimizing the mini-app or leaving Relay Lab closes an instance that has been granted any of these permissions. Permission use still needs Android device testing. Seven catalog apps, including Pixel and Connect4, passed offline Core tests. Catalog downloads are validated against the actual response and archive. For native Chatmail attachments, Relay Lab uses the same 1 GiB local ceiling as Delta Chat and ArcaneChat Android. The mail relay determines which messages it will deliver. Android WebView isolation, game interaction, and multiplayer sync across installed clients still need device testing.
 
@@ -130,7 +130,7 @@ The catalog is the same index used by Delta Chat's default Webxdc Store. Relay L
 
 **Apps** in bottom navigation opens your personal desktop. Tap **+ Add apps** in the top bar or the empty desktop to browse the catalog, then **Add to my apps**. Each install creates a separate standard Webxdc message in your self-chat. Chat-shared instances keep their own data and recipients. App titles identify **Only you** or the owning chat.
 
-Hold and drag the whole icon tile into any grid cell, leaving empty spaces wherever you want. Hold at either page edge to move between pages. Release a long press without dragging to open the themed options menu. Drop an app onto another to create a folder; folders can be named, renamed, and dissolved. Swipe between pages or use the page indicators. More pages are added as needed. **Remove icon** hides the shortcut without deleting the message or app data; **Manage app icons** restores hidden icons. Layout is per Relay Lab profile and is not a cross-client desktop layout format.
+Hold and drag the whole icon tile into any grid cell, leaving empty spaces wherever you want. Hold at either page edge to move between pages. Release a long press without dragging to open the themed options menu. Drop an app onto another to create a folder; folders can be named, renamed, and dissolved. Swipe between pages or use the page indicators. More pages are added as needed. **Remove icon** hides the shortcut without deleting the message or app data; **Manage app icons** restores hidden icons. **Delete app and data** permanently deletes the selected personal instance after confirmation; other copies and chat-shared apps remain. Complete storage cleanup requires a current Android System WebView; unsupported versions prompt for an update before deletion. Layout is per Relay Lab profile and is not a cross-client desktop layout format.
 
 The top-bar star opens **Saved**, including messages, notes, files and saved app copies from all conversations. Chat and channel save actions use Core `save_msgs`; old non-Core items are copied into the self-chat using normal messages. A filled star means already saved. **Remove saved copy** requires confirmation and only targets a message in the self-chat. Personal app installations are shown on Apps, while saved copies of shared apps stay in Saved. Saving a shared app uses Core copy semantics; it is not a shortcut to the original live shared instance.
 
