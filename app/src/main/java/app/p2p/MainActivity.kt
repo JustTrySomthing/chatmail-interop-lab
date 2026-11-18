@@ -852,12 +852,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
             if (index >= 0) {
                 if (href.isNotEmpty()) webxdcSessions[index] = webxdcSessions[index].copy(href = href)
             } else {
-                if (webxdcSessions.size >= MAX_OPEN_WEBXDC_APPS) {
-                    modal = "webxdc-sessions"
-                    android.widget.Toast.makeText(context, "Close an open app before opening another.",
-                        android.widget.Toast.LENGTH_SHORT).show()
-                    return
-                }
                 val title = data.optString("name").substringBeforeLast('.').ifBlank { "App" }
                 webxdcSessions.add(WebxdcSession(target, appId, local, href, title))
             }

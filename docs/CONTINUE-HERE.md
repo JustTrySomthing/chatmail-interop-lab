@@ -1,5 +1,17 @@
 # Continue Relay Lab development
 
+## RC63 open-app parity checkpoint
+
+The user requested removal of artificial restrictions and parity with Delta Chat/ArcaneChat. Removed MAX_OPEN_WEBXDC_APPS=3 and the launch rejection/toast. The existing Compose app switcher and session identity are preserved; opening more apps does not evict existing ones. This aligns the absence of a product-level three-app cap; it does not claim identical Android activity architecture.
+
+Compared current upstream WebxdcActivity.java on November 17, 2026: Delta Chat starts a standard WebxdcActivity; ArcaneChat uses a per-account/message document URI and FLAG_ACTIVITY_NEW_DOCUMENT. Neither launcher imposes our three-app quota. Both clean up their viewers via lifecycle destruction. Relay Lab already pauses hidden viewers and destroys them when their session is closed. Do not add a replacement fixed quota or promise that finite phone memory can hold unlimited live viewers.
+
+Sources: https://github.com/deltachat/deltachat-android/blob/main/src/main/java/org/thoughtcrime/securesms/WebxdcActivity.java and https://github.com/ArcaneChat/android/blob/main/src/main/java/org/thoughtcrime/securesms/WebxdcActivity.java .
+
+User-reported RC62 phone checks (Android 36, WebView 157): Checklist preparation 37 ms / guard wait 25 ms / frame 171 ms; Pixel first opening 53 / 38 / 559 ms; Pong 33 / 20 / 171 ms. All reported loaded=true, API=true, no startup/renderer error, and successful status update retrieval. User confirms repeat opens are quicker. These are user diagnostics, not our emulator measurements; pre-runner latency and cross-phone synchronization were not measured.
+
+RC63 device checklist: open four or more distinct shared apps, switch back to the first, close one and reopen it, and confirm each retains its own saved data. No successful emulator run is claimed.
+
 ## RC62 startup checkpoint
 
 RC61 (97) is user-confirmed to open shared apps, with a positive frame height. The user reports 5–10 second opening latency on Android 36 / WebView 157. RC62 (98) keeps the guard alive for the lifetime of P2pApp and prewarms it from app browsing and chats with Webxdc messages. Previously closing the last session destroyed the 500-peer guard and the next open rebuilt it. Delta Chat retains its guard. Renderer loss still clears sessions and replaces the guard; each app still checks isolation before loading.

@@ -1,10 +1,10 @@
 {
-  "version": "0.7.23-rc62",
-  "version_code": 98,
+  "version": "0.7.23-rc63",
+  "version_code": 99,
   "sha256": {
     ".gitignore": "57752bc83258c3f60383f01be18a07066ff22025f89f995f19878ee0664e740b",
-    "README.md": "7b3a298425083256c4cf5feb0b7527b6b84aaa99f46811153ed02dd9ab786651",
-    "app/build.gradle.kts": "b385fdf8aaf906b8f2963c6a35e7361c3154994b87c05c3a15a4b8a5a3979074",
+    "README.md": "c1117d73388822a4d61f238b5c0284381075e2f8b252cc303a5654c18d3b8119",
+    "app/build.gradle.kts": "2432aa479e0904414bd8014298da90fa511505369c577d0ce9f95f9fecc6d0e8",
     "app/proguard-rules.pro": "5c4bb565ceea112dfd25a087e5dbac2d4dcc1cd2f3a724d5b9031c836b39818b",
     "app/src/main/AndroidManifest.xml": "5c095e13ddb5babe513ff0d20c1c2d3cb2ffc1e2bf59e637e63773127e1d1e30",
     "app/src/main/assets/emoji.json": "513c7f8a8e07661e0aa16d27eea8a36dd813258f832e71d6f86f9411ff81dd94",
@@ -46,7 +46,7 @@
     "app/src/main/java/app/p2p/InviteScanner.kt": "f68c67893262b25c6671319de0eeb6b10e1ab841ca3c4851d6b8cc69d24abb1d",
     "app/src/main/java/app/p2p/LinkPreviews.kt": "51122bdbdf48325fa9a0848f131c2f5d9696046ec4ca0d29e0d695df275b86ee",
     "app/src/main/java/app/p2p/LocalAlerts.kt": "28ed9167f7226f261c7008438b15e00698a1bfcbe64db0f36b5451983ceb552e",
-    "app/src/main/java/app/p2p/MainActivity.kt": "c62f1854049502131532e26dbf4a6893a1ef052292027fcbd8071a0defb1df22",
+    "app/src/main/java/app/p2p/MainActivity.kt": "33aba6a40593b8f2e72615e213ab6b321dddf12929c9e97182587640e1065f28",
     "app/src/main/java/app/p2p/MediaDownloads.kt": "4224adad4acbaeed08be4dbed1607b60f47e5f5b1926e4f51c75f6e1b2079e30",
     "app/src/main/java/app/p2p/MessageMedia.kt": "d05417601b4197030882e7672a65ee7359862b5efe731c8978ba631d97046570",
     "app/src/main/java/app/p2p/NativeContacts.kt": "91f67c659b471e01695e78f0d3967ff66f58bb6fffa3889dd0ff2fcc22e78bea",
@@ -79,7 +79,7 @@
     "app/src/main/java/app/p2p/WebxdcCatalog.kt": "251a06e496ad82719e9616d4ec9decda12649526621d7678fe967370f0b3c73e",
     "app/src/main/java/app/p2p/WebxdcNetworkGuard.kt": "85aed9f8aa551135492540509de252adde62e6e893ccf1ef15611fc6a879477b",
     "app/src/main/java/app/p2p/WebxdcPermissions.kt": "d42eca028ec93be4eeafeda27c63e601fe7371421a85b1a302523765648df84a",
-    "app/src/main/java/app/p2p/WebxdcRuntime.kt": "490f71c977e041d8c9c34eaca8ed71d781ad2b14fb6441825fe08ba9146121e2",
+    "app/src/main/java/app/p2p/WebxdcRuntime.kt": "40e560fd0a188af4950963c8bd98b6026c63787a00d2723a2fc0212bb6fdbbeb",
     "app/src/main/java/org/thoughtcrime/securesms/EglUtils.java": "e6011bb17bdea7d8d2c1b4bdcce65d6bc5c4fc4312508e41b94ad53316d2e624",
     "app/src/main/java/org/thoughtcrime/securesms/calls/MediaStreamManager.java": "5a581e0fb169cb2a80d80ac19b737f0971fea0953bf74e8bee320cff8f0d5028",
     "app/src/main/java/org/thoughtcrime/securesms/webrtc/WebRTCClient.java": "e46e9b2a9511bd6bc8462591f61c2dc30897c7b0cb025862f8b1b5088eb33ed9",
@@ -190,8 +190,8 @@
     "third_party/webxdc/LICENSE": "c61f12da7cdad526bdcbed47a4c0a603e60dbbfdaf8b66933cd088e9132c303f",
     "third_party/webxdc/NOTICE.md": "da6aae6d1f7f768d8e32ecd4a5146a0ef1ff864946e71f32633781fb35093bb3",
     "AGENTS.md": "86444e4009890228fcf41eb7cca7b19fd3ccbe459dc02765dd94650e4e2f8d96",
-    "RECOVERY.md": "ee348c9bbe5c23cf0542e8613dfbe94199a0c1885806938ef25810f8e0f69f04",
-    "docs/CONTINUE-HERE.md": "01f23ca83afd9ee2774ee8f63b5cb7edd920e4ca1b6ff9ffa09e5aa66a7187f5",
+    "RECOVERY.md": "f8ee7dbde0fb4ae7aae47de35c51e7473c3c55ce27f2bbe379755a833dc8e352",
+    "docs/CONTINUE-HERE.md": "c632d5f5154fb8fc1fa0588f845144aa53fcb1e6f548e980eed4779a2041f870",
     "scripts/check-release-signature.py": "0e0d2f2a1c229ed544a78b5837ae62db072dfc330cc11c563f9b01f65f7daab1",
     "recovery/relay-lab-signing.enc.base64": "7fa780a06b75ed0c592e479169f381e10b610a4aeb7bf8d550a07ed924dbb601"
   }

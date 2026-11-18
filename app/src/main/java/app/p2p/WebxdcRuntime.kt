@@ -195,7 +195,6 @@ internal data class WebxdcSession(val thread: String, val id: Int, val file: Fil
     fun matches(record: Record?, local: File?): Boolean =
         record?.webxdcMessageId(thread) == id && local == file
 }
-internal const val MAX_OPEN_WEBXDC_APPS = 3
 
 internal fun Record.webxdcMessageId(thread: String): Int? {
     val data = data()
