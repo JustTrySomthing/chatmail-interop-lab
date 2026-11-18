@@ -1,0 +1,72 @@
+package app.p2p
+
+import android.graphics.Bitmap
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ActivityScenario
+import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.*
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import java.io.File
+
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "w360dp-h900dp")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+class SettingsTilesTest {
+    @get:Rule val compose = createEmptyComposeRule()
+    @Test fun darkTilesKeepEveryRouteAndSearchWorking() = verify(ThemeMode.DARK)
+    @Test fun lightTilesKeepEveryRouteAndSearchWorking() = verify(ThemeMode.LIGHT)
+
+    @Test @Config(qualifiers = "w320dp-h900dp")
+    fun narrowScreenUsesReadableSingleColumnTiles() = verify(ThemeMode.DARK, twoColumns = false)
+
+    private fun verify(mode: ThemeMode, twoColumns: Boolean = true) {
+        seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
+        val query = mutableStateOf("")
+        var opened: String? = null
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity -> activity.setContent { P2pTheme(Appearance(mode = mode)) {
+                Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+                    .verticalScroll(rememberScrollState()).padding(16.dp)) {
+                    SettingsGrid(query.value) { opened = it }
+                }
+            } } }
+            assertEquals(16, settingsDestinations.size)
+            assertEquals(16, settingsDestinations.map { it.route }.distinct().size)
+            val first = compose.onNodeWithText("Profile").fetchSemanticsNode().boundsInRoot
+            val second = compose.onNodeWithText("Profiles").fetchSemanticsNode().boundsInRoot
+            if (twoColumns) assertTrue(second.left > first.right) else assertTrue(second.top > first.bottom)
+            scenario.onActivity { activity ->
+                val view = activity.window.decorView
+                val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+                view.draw(android.graphics.Canvas(bitmap))
+                File("build/ui-checks/settings-${mode.name.lowercase()}-${if (twoColumns) "two-columns" else "narrow"}.png").apply { parentFile?.mkdirs() }
+                    .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
+            for (item in settingsDestinations) {
+                compose.onNodeWithText(item.label, substring = false).performScrollTo().performClick()
+                assertEquals(item.route, opened)
+            }
+            compose.runOnIdle { query.value = "updates" }
+            compose.onNodeWithText("Updates").performScrollTo().assertIsDisplayed().performClick()
+            assertEquals("updates", opened)
+            compose.onNodeWithText("Profile").assertDoesNotExist()
+            compose.runOnIdle { query.value = "no_such_setting" }
+            compose.onNodeWithText("No matching settings").assertExists()
+        }
+    }
+}

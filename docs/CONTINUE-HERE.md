@@ -1,5 +1,9 @@
 # Continue Relay Lab development
 
+## RC66 update defaults and Settings polish
+
+User requested daily checks and release candidates enabled by default, plus a more polished Settings design inspired by their OnKlav screenshot. Automatic checks now default true (previews already defaulted true), respecting explicitly stored opt-outs. Settings retains the same 16 destinations and routes, with neutral rounded tiles, distinct accent-colored outline icons, wrapping labels, equal row heights, and adaptive columns for narrow screens/font scaling. No screenshot wallpaper or extra destinations were copied. Automated verification: 187 tests passed (0 failures/errors/skips), including every Settings route/search in dark and light themes at 360dp and the single-column layout at 320dp. Required debug tests/build and signed preview build, APK signature and WebRTC packaging checks passed. Rendered screenshots inspected for spacing, icons and text contrast. Actual phone checks remain pending. APK SHA-256: `1c5e68aedee01e38ea5b2a68bfb307d57325f9c49b11fc57dd0edbc6500fe475`.
+
 ## RC65 review checkpoint
 
 The user clarified that Relay Lab is used only by them and a couple of demo testers. Prioritize current behavior; do not add backward-compatibility machinery for obsolete features. Preserve existing test data and the signer when updating.

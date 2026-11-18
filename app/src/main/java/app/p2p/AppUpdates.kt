@@ -49,7 +49,7 @@ internal object UpdateChecks {
         Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1)
     }.getOrDefault(-1)
 
-    fun automatic(prefs: SharedPreferences) = prefs.getBoolean("automatic", false)
+    fun automatic(prefs: SharedPreferences) = prefs.getBoolean("automatic", true)
 
     fun previews(prefs: SharedPreferences) = prefs.getBoolean("previews", true)
 

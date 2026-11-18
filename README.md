@@ -8,16 +8,16 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc65**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc65/P2P-0.7.23-rc65-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc66**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc66/P2P-0.7.23-rc66-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC65 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC66 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
-RC65 (101) reviews and fixes the personal Apps/Saved implementation: moves onto full desktop pages now work and persist atomically; hidden icons no longer change explicit page placement; drag targets refresh after layout changes; deleted legacy stars are excluded from migration; caption search and existing-Saved attachment navigation work; notes have an accurate removal warning; catalog/Saved errors appear inside their dialogs. All RC64 features and earlier Webxdc fixes remain included. Uses the established RC58 signer. Device and cross-client checks remain separate from automated verification.
+RC66 (102) enables daily update checks by default; release candidates are also included by default. Explicitly saved user choices remain respected. Settings now uses rounded neutral tiles with individual theme-aware icons, readable wrapping labels, and adaptive columns. All settings destinations and existing navigation are retained. Includes the RC65 Apps/Saved fixes and the established RC58 signing identity.
 
 ### Update from the app
 
-Open **Settings → Updates**, enable **Include release candidates**, and tap **Check now**. RC58 starts a new persistent signing identity. **RC56 and earlier cannot update in place: export a Chatmail backup before uninstalling, then install RC58 and restore it.** Subsequent builds must use the saved RC58 key. You can turn on automatic checks in the same menu.
+Open **Settings → Updates** and tap **Check now**. **Check daily** and **Include release candidates** are enabled by default; either can be turned off. RC58 starts a new persistent signing identity. **RC56 and earlier cannot update in place: export a Chatmail backup before uninstalling, then install RC58 and restore it.** Subsequent builds must use the saved RC58 key. Your saved update preferences are respected when upgrading.
 
 ## Features
 
@@ -41,7 +41,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 
 
 For a non-debuggable development APK, run `./gradlew :app:assemblePreview`. The output is `app/build/outputs/apk/preview/app-preview.apk`. This variant uses the dedicated Relay Lab signing configuration. Set both signing environment variables using the restored backup described in RECOVERY.md. Do not distribute a debug-signed replacement.
 
-The downloadable APK's source is at the [RC65 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc65). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and automatic update checks off by default.
+The downloadable APK's source is at the [RC66 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc66). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
 
 ### Release publishing
 

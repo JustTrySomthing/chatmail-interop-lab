@@ -2826,36 +2826,55 @@ internal fun PageActionButton(
     }
 }
 
+internal data class SettingsDestination(val label: String, val route: String, val icon: ImageVector)
+
+internal val settingsDestinations = listOf(
+    SettingsDestination("Profile", "profile", Icons.Outlined.PersonOutline),
+    SettingsDestination("Profiles", "profiles", Icons.Outlined.PeopleOutline),
+    SettingsDestination("Setup", "setup", Icons.Outlined.Tune),
+    SettingsDestination("Appearance", "appearance", Icons.Outlined.Palette),
+    SettingsDestination("Read aloud", "text-to-speech", Icons.AutoMirrored.Outlined.VolumeUp),
+    SettingsDestination("Privacy", "privacy", Icons.Outlined.Shield),
+    SettingsDestination("Notifications", "notifications", Icons.Outlined.NotificationsNone),
+    SettingsDestination("Quiet Hours", "quiet-hours", Icons.Outlined.DarkMode),
+    SettingsDestination("P2P address", "p2p-address", Icons.Outlined.QrCode),
+    SettingsDestination("Backup", "backup", Icons.Outlined.Inventory2),
+    SettingsDestination("Block list", "block-list", Icons.Outlined.Block),
+    SettingsDestination("Connections", "connection-details", Icons.Outlined.Wifi),
+    SettingsDestination("Updates", "updates", Icons.Outlined.SystemUpdate),
+    SettingsDestination("App log", "app-log", Icons.Outlined.ReceiptLong),
+    SettingsDestination("Compression", "compression", Icons.Outlined.Compress),
+    SettingsDestination("Help", "help", Icons.Outlined.HelpOutline)
+)
+
 @Composable
-private fun SettingsGrid(query: String, open: (String) -> Unit) {
-    val settings = listOf("Profile" to "profile", "Profiles" to "profiles", "Setup" to "setup", "Appearance" to "appearance",
-        "Read aloud" to "text-to-speech", "Privacy" to "privacy", "Notifications" to "notifications", "Quiet Hours" to "quiet-hours",
-        "P2P address" to "p2p-address", "Backup" to "backup", "Block list" to "block-list",
-        "Connections" to "connection-details", "Updates" to "updates", "App log" to "app-log",
-        "Compression" to "compression", "Help" to "help")
-    val matches = settings.filter { (label, _) -> threadSearchMatches(query, label, emptyList()) }
+internal fun SettingsGrid(query: String, open: (String) -> Unit) {
+    val matches = settingsDestinations.filter { threadSearchMatches(query, it.label, emptyList()) }
     if (matches.isEmpty()) {
         EmptyTabMessage("No matching settings")
         return
     }
-    val measurer = rememberTextMeasurer()
-    val minimumLabelStyle = MaterialTheme.typography.labelLarge.copy(
-        fontSize = FittedLabelMinimum, fontWeight = FontWeight.SemiBold)
-    val widestLabel = remember(measurer, minimumLabelStyle) {
-        settings.maxOf { (label, _) ->
-            measurer.measure(label, minimumLabelStyle, softWrap = false, maxLines = 1).size.width
-        }
-    }
-    val gap = 10.dp
-    val minimumButtonWidth = with(LocalDensity.current) { widestLabel.toDp() } + PageActionHorizontalPadding * 2
+    val gap = 12.dp
+    val fontScale = LocalDensity.current.fontScale
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val columns = if (maxWidth >= minimumButtonWidth * 2 + gap) 2 else 1
+        val columns = if (maxWidth >= 148.dp * fontScale.coerceAtLeast(1f) * 2 + gap) 2 else 1
         Column(verticalArrangement = Arrangement.spacedBy(gap)) {
             matches.chunked(columns).forEach { row ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    row.forEach { (label, destination) ->
-                        PageActionButton(label, { open(destination) }, Modifier.weight(1f))
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    row.forEach { item ->
+                        Surface(onClick = { open(item.route) }, modifier = Modifier.weight(1f).fillMaxHeight(),
+                            shape = RoundedCornerShape(20.dp), color = Panel, contentColor = Ink,
+                            tonalElevation = 0.dp, shadowElevation = 1.dp,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .16f))) {
+                            Row(Modifier.heightIn(min = 80.dp).padding(horizontal = 10.dp, vertical = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(item.icon, null, Modifier.size(22.dp), tint = readableAccent(Panel, Ink))
+                                Text(item.label, Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                                    lineHeight = 21.sp)
+                            }
+                        }
                     }
+                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }

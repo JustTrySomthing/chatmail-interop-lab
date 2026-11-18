@@ -42,10 +42,16 @@ class AppUpdatesTest {
     }
 
     @Test
-    fun freshRelayLabInstallKeepsAutomaticUpdatesOff() {
+    fun freshRelayLabInstallEnablesDailyChecksAndReleaseCandidates() {
         val prefs = UpdateChecks.prefs(RuntimeEnvironment.getApplication())
+        assertTrue(UpdateChecks.automatic(prefs))
+        assertTrue(UpdateChecks.previews(prefs))
+        assertTrue(UpdateChecks.due(prefs, 1, true, now))
+        assertTrue(UpdateChecks.shouldPrompt(prefs, release("9.0.0"), now))
+        prefs.edit { putBoolean("automatic", false); putBoolean("previews", false) }
+        assertFalse(UpdateChecks.automatic(prefs))
+        assertFalse(UpdateChecks.previews(prefs))
         assertFalse(UpdateChecks.due(prefs, 1, true, now))
-        assertFalse(UpdateChecks.shouldPrompt(prefs, release("9.0.0"), now))
     }
 
     @Test
