@@ -4,9 +4,9 @@ Updated November 17, 2026. This GitHub repository is **public**.
 
 ## Current source
 
-Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc63.
+Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc64.
 
-RC63 (99) removes the Relay Lab-only three-open-app limit and its forced close prompt. Opening a fourth or later shared app follows the same launch path as the first; existing sessions remain available in the app switcher. No replacement numeric cap or automatic session eviction was added. Existing pause/resume, isolation checks, saved data and the RC62 warm guard remain intact. Install over RC58–RC62 using the saved signing identity. Multi-app phone verification for RC63 remains pending.
+RC64 (100) adds an Apps bottom tab with a personal Webxdc desktop, catalog installation, icon ordering and pages. Saved is now a global collection backed by standard Chatmail saved copies, with bookmark actions and migration of old stars. Chat app instances remain separate. The RC62 startup improvements and RC63 removal of the three-app cap remain included. Install over RC58–RC63 using the established signing identity. Phone interaction and cross-client verification of the new navigation remain pending.
 
 ## Persistent signing identity
 
@@ -44,4 +44,4 @@ python3 scripts/check-call-apk.py app/build/outputs/apk/preview/app-preview.apk
 python3 scripts/check-release-signature.py app/build/outputs/apk/preview/app-preview.apk --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner"
 ```
 
-Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc63-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
+Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc64-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
