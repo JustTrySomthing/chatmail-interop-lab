@@ -8,12 +8,12 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc74**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc74/P2P-0.7.23-rc74-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc75**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc75/P2P-0.7.23-rc75-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC74 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC75 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
-RC74 (110) combines profile controls, refines message-field spacing, makes Saved stars use the theme accent and toggle saved copies off, and supports Webxdc fullscreen requests with Back and lifecycle cleanup. Includes all RC73 fixes and preserves the established RC58 signing identity.
+RC75 (111) includes the unified attachment menu with compression preserved, clearer button labels, group leaving and channel management, mute/archive fixes, confirmed profile deletion, optional local storage cleanup, unread Channels indicators, and a more prominent in-call video control. Includes all RC74 fixes and keeps the established RC58+ signing identity.
 
 ### Update from the app
 
@@ -31,8 +31,6 @@ Relay Lab uses Chatmail Core for interoperability. Cross-app support varies by c
 
 ## Build a debug APK
 
-First check out tag `v0.7.23-rc74` for this release, or branch `securejoin-invites` for current development. Main retains older application source; follow [RECOVERY.md](RECOVERY.md).
-
 Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
 
 ```sh
@@ -43,7 +41,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 
 
 Download signed Android builds from the Releases page.
 
-The downloadable APK's source is at the [RC74 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc74). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
+The downloadable APK's source is at the [RC75 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc75). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
 
 ### Release publishing
 
@@ -69,7 +67,7 @@ Use the shared Chatmail Core adapter for both Delta Chat and ArcaneChat. Chats, 
 
 ## Help, compression, and notifications
 
-Open **Settings → Help** to search the in-app guide. **Settings → Compression** sets outgoing media quality for the selected Chatmail profile. **Balanced** is the default. **Data saver** uses the same stronger Core quality setting as Delta Chat. Use **Other File Type** to share a photo or video at original quality. An explicit trim creates a new clip. Earlier signed P2P image transfers preserve the original file bytes.
+Open **Settings → Help** to search the in-app guide. **Settings → Compression** sets outgoing media quality for the selected Chatmail profile. **Balanced** is the default. **Data saver** uses the same stronger Core quality setting as Delta Chat. The next-build attachment chooser applies these settings to media selected through **Attach File**, as well as captured media. An explicit trim creates a new clip. Earlier signed P2P image transfers preserve the original file bytes.
 
 **Settings → Notifications** controls alert previews, sounds while a chat is open, replies in muted groups, and incoming calls. Android’s category settings control sound, vibration, and priority for chat, group, and call notifications. Background delivery uses the existing Chatmail connection and scheduled checks. Turn on **Reliable background connection** if you want an ongoing Android notification for a continuous connection.
 
@@ -96,7 +94,7 @@ The Android comparison uses Delta Chat and ArcaneChat 2.69.0. This list tracks t
 | Feature | Development status |
 | --- | --- |
 | Native message forwarding | Implemented. Long-press a Chatmail message and choose **Forward**. |
-| Chatmail contact cards | Implemented. Attach from **Contact card** in a Chatmail conversation. Open a received card and choose **Add to Chatmail contacts**. |
+| Chatmail contact cards | Implemented. In the next build, use **Contacts → contact options → Share contact** and choose a destination. Open a received card and choose **Add to Chatmail contacts**. |
 | Message Info | Implemented. Long-press a Chatmail message to see its status, timestamps, and recorded read receipts. |
 | Per-profile read receipts | Implemented under **Settings → Privacy**. Fresh Relay Lab profiles start with receipts off. |
 | Voice-message playback speed | Implemented in the audio player. Tap the speed to cycle 1×, 1.5×, and 2×. |
@@ -138,7 +136,7 @@ The top-bar star opens **Saved**, including messages, notes, files and saved app
 
 ## Channels and Read Aloud
 
-**Channels → Feed** shows recent posts from joined channels, newest first. **Following** opens an individual channel or joins a standard Chatmail broadcast from a QR code, an image, or an invite link. **My Channels** lists the channels owned by your profile, with pinned channels first. Use **Create a Channel** to add another. Open a channel to see its posts and share its invite, or use the pencil to edit its name and description. Open **Write a post** to compose in the bottom sheet. **Add media** attaches images, audio, or video with an optional caption, and the shared emoji picker inserts standard Unicode text. Relay Lab uses standard Chatmail posts and sends each selected attachment as its own post, with the caption on the first. Images and video show previews, links show cards, and audio plays directly in the channel, chat, or group. Existing Social content is reachable through **Previous Social posts**.
+**Channels → Feed** shows recent posts from joined channels, newest first. **Following** opens an individual channel or joins a standard Chatmail broadcast from a QR code, an image, or an invite link. **My Channels** lists the channels owned by your profile, with pinned channels first. Use **Create a Channel** to add another. Open a channel to see its posts and share its invite, or use the pencil to edit its name and description. Open **Write a post** to compose in the bottom sheet. The next build uses **Add attachment** with **Take Photo**, **Record Video**, **Record Audio**, and **Attach File**, including existing documents and media with an optional caption, and the shared emoji picker inserts standard Unicode text. Relay Lab uses standard Chatmail posts and sends each selected attachment as its own post, with the caption on the first. Images and video show previews, links show cards, and audio plays directly in the channel, chat, or group. Existing Social content is reachable through **Previous Social posts**.
 
 Read Aloud uses the included offline voices and existing speech animation for messages, previous Social posts, and channel posts.
 
