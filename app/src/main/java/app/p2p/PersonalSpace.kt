@@ -87,3 +87,9 @@ internal fun canDeletePersonalApp(item: Record, native: org.json.JSONObject, sel
         native.optInt("chatId") == selfChat && native.optString("viewType") == "Webxdc" &&
         native.optInt("originalMsgId") <= 9
 }
+
+internal fun conversationMedia(records: List<Record>, thread: String): List<Record> = records.filter { item ->
+    val data = item.data()
+    item.isThreadMessage() && data.optString("thread") == thread && data.optInt("webxdcParent") <= 9 &&
+        (item.kind.startsWith("file-") || data.optBoolean("webxdc") || data.optBoolean("nativeVcard"))
+}

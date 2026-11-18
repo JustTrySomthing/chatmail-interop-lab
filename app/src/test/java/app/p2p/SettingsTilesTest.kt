@@ -8,6 +8,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
@@ -35,9 +40,12 @@ class SettingsTilesTest {
     fun compactPhoneKeepsTwoColumns() = verify(ThemeMode.DARK)
 
     @Test @Config(qualifiers = "w280dp-h900dp")
-    fun veryNarrowScreenUsesReadableSingleColumnTiles() = verify(ThemeMode.DARK, twoColumns = false)
+    fun veryNarrowScreenKeepsTwoColumns() = verify(ThemeMode.DARK)
 
-    private fun verify(mode: ThemeMode, twoColumns: Boolean = true) {
+    @Test @Config(qualifiers = "w320dp-h900dp")
+    fun largerSystemFontsKeepTwoColumnsAndCompleteLabels() = verify(ThemeMode.DARK, fontScale = 1.6f)
+
+    private fun verify(mode: ThemeMode, fontScale: Float = 1f) {
         seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
         val query = mutableStateOf("")
         var opened: String? = null
@@ -45,24 +53,33 @@ class SettingsTilesTest {
             scenario.onActivity { activity -> activity.setContent { P2pTheme(Appearance(mode = mode)) {
                 Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
                     .verticalScroll(rememberScrollState()).padding(16.dp)) {
-                    SettingsGrid(query.value) { opened = it }
+                    val density = LocalDensity.current
+                    CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                        SettingsGrid(query.value) { opened = it }
+                    }
                 }
             } } }
             assertEquals(16, settingsDestinations.size)
             assertEquals(16, settingsDestinations.map { it.route }.distinct().size)
             val first = compose.onNodeWithText("Profile").fetchSemanticsNode().boundsInRoot
             val second = compose.onNodeWithText("Profiles").fetchSemanticsNode().boundsInRoot
-            if (twoColumns) assertTrue(second.left > first.right) else assertTrue(second.top > first.bottom)
+            assertTrue(second.left > first.right)
+            assertEquals(first.top, second.top, 0.5f)
             scenario.onActivity { activity ->
                 val view = activity.window.decorView
                 val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
                 view.draw(android.graphics.Canvas(bitmap))
-                File("build/ui-checks/settings-${mode.name.lowercase()}-${if (twoColumns) "two-columns" else "narrow"}.png").apply { parentFile?.mkdirs() }
+                File("build/ui-checks/settings-${mode.name.lowercase()}-${first.width.toInt()}-$fontScale-two-columns.png").apply { parentFile?.mkdirs() }
                     .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             }
             for (item in settingsDestinations) {
                 compose.onNodeWithText(item.label, substring = false).performScrollTo().performClick()
                 assertEquals(item.route, opened)
+                val layouts = mutableListOf<TextLayoutResult>()
+                compose.onNodeWithText(item.label, useUnmergedTree = true)
+                    .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                assertFalse(item.label, layouts.single().hasVisualOverflow)
+                assertEquals(1, layouts.single().lineCount)
             }
             compose.runOnIdle { query.value = "updates" }
             compose.onNodeWithText("Updates").performScrollTo().assertIsDisplayed().performClick()

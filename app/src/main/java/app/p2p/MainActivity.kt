@@ -1420,7 +1420,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                         ThreadView(
                             id = id, view = threadView, records = records, peer = peer,
                             find = threadQuery, searchOpen = modal == "thread-search",
-                            name = ::name, photo = ::photo, onView = { if (it == "Saved") modal = "saved" else threadView = it },
+                            name = ::name, photo = ::photo, onView = { threadView = it },
                             quote = records.firstOrNull { it.key == quote && it.kind == "message" },
                             clearQuote = { quote = null },
                             attachments = mediaDrafts[id].orEmpty(), preparing = submitting || sendingDraft,
@@ -1445,7 +1445,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             attach = { modal = "attach" },
                             messageMenu = ::showItemActions,
                             react = { selected = it; modal = "message-reactions" },
-                            star = { key -> if (records.firstOrNull { it.key == key }?.isSavedItem() == true) modal = "saved" else model.star(key) },
+                            star = { key -> model.star(key) },
                             galleryFile = model::galleryFile,
                             requestAttachment = { model.requestDownload(it) },
                             file = ::showAttachment,
@@ -1836,8 +1836,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                     }
                     val actions = buildList {
                         if (!conversation && item.kind in setOf("message", "file-sent", "file-received", "post") && data.optInt("webxdcParent") <= 9) {
-                            add(ItemAction(if (item.isSavedItem()) "View Saved" else "Save", Icons.Outlined.StarBorder) {
-                                if (item.isSavedItem()) modal = "saved" else { model.star(item.key); modal = null }
+                            if (!item.isSavedItem()) add(ItemAction("Save", Icons.Outlined.StarBorder) {
+                                model.star(item.key); modal = null
                             })
                         }
                         if (text.isNotBlank() && !conversation) add(ItemAction("Copy text", Icons.Outlined.ContentCopy) {
@@ -2304,10 +2304,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                 Button(onClick = { modal = "add-contact" }) { Text(if (channelInviteOnly) "Back to join channel" else "Back to accept invite") }
             }
             "chat-new" -> Sheet("New chat", { modal = null }) {
-                P2pRow("Saved", "Your saved items from every conversation", Icons.Outlined.StarBorder,
-                    enabled = !nativeActionBusy) {
-                    modal = "saved"
-                }
                 val available = contacts.filterNot { blocked(it.key) || it.data().has("nativeContact") }
                 NativeContactRows(model, "", showEmpty = available.isEmpty()) { id ->
                     messageContact(nativeThreadKey(id))
@@ -2736,8 +2732,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             P2pTextButton(onClick = { model.cancelQueuedOffer(file.key); modal = null }) { Text("Cancel queued offer") }
                         }
                         if (!data.optBoolean("listed")) P2pOutlinedButton(onClick = { model.saveToFiles(file.key); modal = null }) { Text("Save to Files") }
-                        P2pTextButton(onClick = { if (file.isSavedItem()) modal = "saved" else { model.star(file.key); modal = null } }) {
-                            Text(if (file.isSavedItem()) "Saved" else "Save attachment")
+                        if (!file.isSavedItem()) P2pTextButton(onClick = { model.star(file.key); modal = null }) {
+                            Text("Save attachment")
                         }
                     }
                 }
@@ -2891,41 +2887,44 @@ internal fun SettingsGrid(query: String, open: (String) -> Unit) {
         EmptyTabMessage("No matching settings")
         return
     }
-    val gap = 12.dp
     val fontScale = LocalDensity.current.fontScale
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val compactGrid = maxWidth >= 272.dp && fontScale <= 1.45f
-        val wideGrid = maxWidth >= 148.dp * fontScale.coerceAtLeast(1f) * 2 + gap
-        val columns = if (compactGrid || wideGrid) 2 else 1
-        val stackIcon = columns == 2 && !wideGrid
+        val gap = if (maxWidth < 300.dp) 8.dp else 12.dp
+        val stackIcon = maxWidth < 400.dp
+        val iconSize = if (maxWidth < 260.dp) 22.dp else 26.dp
         Column(verticalArrangement = Arrangement.spacedBy(gap)) {
-            matches.chunked(columns).forEach { row ->
+            matches.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
                     row.forEach { item ->
-                        Surface(onClick = { open(item.route) }, modifier = Modifier.weight(1f),
+                        Surface(onClick = { open(item.route) }, modifier = Modifier.weight(1f).height(88.dp),
                             shape = RoundedCornerShape(20.dp), color = Panel, contentColor = Ink,
                             tonalElevation = 0.dp, shadowElevation = 1.dp,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .16f))) {
                             val tint = readableAccent(Panel, Ink)
+                            val label: @Composable (Modifier) -> Unit = { modifier ->
+                                BasicText(item.label, modifier, maxLines = 1, softWrap = false,
+                                    style = LocalTextStyle.current.copy(color = Ink, fontWeight = FontWeight.Medium,
+                                        textAlign = if (stackIcon) TextAlign.Center else TextAlign.Start, lineHeight = 20.sp / fontScale),
+                                    autoSize = TextAutoSize.StepBased(minFontSize = 10.sp / fontScale,
+                                        maxFontSize = 15.sp / fontScale, stepSize = .25.sp / fontScale))
+                            }
                             if (stackIcon) {
-                                Column(Modifier.fillMaxWidth().heightIn(min = 80.dp).padding(horizontal = 8.dp, vertical = 10.dp),
-                                    verticalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterVertically),
+                                Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterVertically),
                                     horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(item.icon, null, Modifier.size(22.dp), tint = tint)
-                                    Text(item.label, Modifier.fillMaxWidth(), fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                                        lineHeight = 20.sp, textAlign = TextAlign.Center)
+                                    Icon(item.icon, null, Modifier.size(iconSize), tint = tint)
+                                    label(Modifier.fillMaxWidth())
                                 }
                             } else {
-                                Row(Modifier.heightIn(min = 80.dp).padding(horizontal = 10.dp, vertical = 16.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(item.icon, null, Modifier.size(22.dp), tint = tint)
-                                    Text(item.label, Modifier.weight(1f), fontSize = 15.sp, fontWeight = FontWeight.Medium,
-                                        lineHeight = 21.sp)
+                                Row(Modifier.fillMaxSize().padding(horizontal = 12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(item.icon, null, Modifier.size(iconSize), tint = tint)
+                                    label(Modifier.weight(1f))
                                 }
                             }
                         }
                     }
-                    repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+                    repeat(2 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
@@ -3446,6 +3445,7 @@ internal fun ColumnScope.ThreadView(
     draftText: String? = null,
     consumeDraftText: () -> Unit = {}
 ) {
+    LaunchedEffect(view) { if (view == "Saved") onView(Feed) }
     val messages = remember(records, id) {
         records.filter { it.isThreadMessage() && !it.data().optBoolean("locallyDeleted") && !it.data().optBoolean("voicemail") && it.data().optString("thread") == id }
     }
@@ -3461,10 +3461,7 @@ internal fun ColumnScope.ThreadView(
     val seenReactions = remember(id) { reactionsByMessage.toMutableMap() }
     val visible = remember(messages, view, find) {
         val filtered = when (view) {
-            "Saved" -> messages.filter { it.isSavedItem() }
-            "Gallery" -> messages.filter { it.kind.startsWith("file-") && it.data().let { data ->
-                mediaKind(data.optString("mime"), data.optString("name")) != null
-            } }
+            "Media", "Gallery" -> conversationMedia(messages, id)
             else -> messages
         }
         if (find.isBlank()) filtered else filtered.filter { threadSearchMatches(find, "", listOf(it.searchText())) }
@@ -3487,7 +3484,7 @@ internal fun ColumnScope.ThreadView(
     val showEmoji = canCompose && view == Feed && !searchOpen && emojiPicker && !keyboardVisible
     BackHandler(showEmoji) { emojiPicker = false }
     if (!keyboardVisible || LocalConfiguration.current.screenHeightDp >= 480 || view != Feed) {
-        Segments(listOf(Feed, "Gallery", "Saved"), view, prominent = true) { next ->
+        Segments(listOf(Feed, "Media"), if (view == "Gallery") "Media" else view, prominent = true) { next ->
             emojiPicker = false
             focus.clearFocus()
             onView(next)
@@ -3518,16 +3515,19 @@ internal fun ColumnScope.ThreadView(
         }
         val showActions = view == Feed && find.isBlank() && !searchOpen
         Box(Modifier.fillMaxWidth().weight(1f)) {
-            if (visible.isEmpty()) {
+            if (view == "Media" || view == "Gallery") {
+                MediaGallery(visible, galleryFile, { key ->
+                    val app = visible.firstOrNull { it.key == key }
+                    if (app != null && app.data().optBoolean("webxdc") && galleryFile(app) != null && openWebxdc != null)
+                        openWebxdc(app)
+                    else file(key)
+                }, star, loadOlder, find.isNotBlank())
+            } else if (visible.isEmpty()) {
                 val message = when {
                     find.isNotBlank() -> "No matching messages"
-                    view == "Saved" -> "No saved messages"
-                    view == "Gallery" -> "No shared media"
                     else -> "No messages"
                 }
                 EmptyTabMessage(message, Modifier.fillMaxSize())
-            } else if (view == "Gallery") {
-                MediaGallery(visible, galleryFile, file, star)
             } else {
                 LazyColumn(
                     state = listState,
@@ -3821,7 +3821,7 @@ private fun QuotedMessage(author: String, text: String) {
 
 @Composable
 private fun StarButton(starred: Boolean, item: String, toggle: () -> Unit) {
-    IconButton(onClick = toggle) {
+    IconButton(onClick = toggle, enabled = !starred) {
         Icon(if (starred) Icons.Outlined.Star else Icons.Outlined.StarBorder,
             if (starred) "Saved " + item else "Save " + item,
             Modifier.size(25.dp), tint = LocalContentColor.current)
@@ -3830,7 +3830,8 @@ private fun StarButton(starred: Boolean, item: String, toggle: () -> Unit) {
 
 @Composable
 private fun MediaGallery(
-    records: List<Record>, localFile: (Record) -> File?, open: (String) -> Unit, star: (String) -> Unit
+    records: List<Record>, localFile: (Record) -> File?, open: (String) -> Unit, star: (String) -> Unit,
+    loadOlder: (() -> Unit)? = null, searching: Boolean = false
 ) {
     val saveMedia = LocalMediaDownload.current
     LazyVerticalGrid(
@@ -3839,10 +3840,16 @@ private fun MediaGallery(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
+        if (loadOlder != null) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+            P2pOutlinedButton(onClick = loadOlder, modifier = Modifier.fillMaxWidth()) { Text("Load earlier attachments") }
+        }
+        if (records.isEmpty()) item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+            EmptyTabMessage(if (searching) "No matching media" else "No shared media or files")
+        }
         items(records, key = { it.key }) { record ->
             val data = record.data()
             val path = localFile(record)
-            val label = data.optString("name", "Media")
+            val label = data.optString("name").ifBlank { data.optString("text").ifBlank { "Attachment" } }
             val kind = mediaKind(data.optString("mime"), label)
             val download = saveMedia?.let { save -> { save(MediaDownload.attachment(record)) } }
             val isVideo = kind == MediaKind.Video
@@ -3854,18 +3861,21 @@ private fun MediaGallery(
                             onLongClickLabel = "Download media", onLongClick = download), contentAlignment = Alignment.Center) {
                         val image = thumbnail
                         if (image != null) Image(image.asImageBitmap(), label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        else Icon(when (kind) {
-                            MediaKind.Audio -> Icons.Outlined.AudioFile
-                            MediaKind.Video -> Icons.Outlined.VideoFile
-                            else -> Icons.Outlined.Image
-                        }, null, tint = readableAccent(Panel, Ink))
+                        else Icon(when {
+                            data.optBoolean("webxdc") -> Icons.Outlined.Apps
+                            data.optBoolean("nativeVcard") || label.endsWith(".vcf", true) -> Icons.Outlined.ContactPage
+                            kind == MediaKind.Audio -> Icons.Outlined.AudioFile
+                            kind == MediaKind.Video -> Icons.Outlined.VideoFile
+                            kind != null -> Icons.Outlined.Image
+                            else -> Icons.Outlined.InsertDriveFile
+                        }, null, Modifier.size(36.dp), tint = readableAccent(Edge, Ink))
                         if (isVideo && image != null) Icon(Icons.Outlined.PlayCircle, "Video", tint = Color.White)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.weight(1f).heightIn(min = 48.dp).combinedClickable(onClick = { open(record.key) },
                             onLongClickLabel = "Download media", onLongClick = download)
                             .padding(horizontal = 9.dp), contentAlignment = Alignment.CenterStart) {
-                            Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
+                            Text(label, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
                         }
                         StarButton(record.isSavedItem(), "attachment") { star(record.key) }
                     }

@@ -13,6 +13,16 @@ class PersonalSpaceTest {
         nativeMessageKey(id), "file-sent", obj("nativeMessage" to id, "thread" to thread,
             "webxdc" to true, "nativeOriginalId" to original, "locallyDeleted" to deleted).toString(), id.toLong())
 
+    @Test fun conversationMediaNeverLeaksOtherThreadsOrDeletedItems() {
+        fun row(key: String, kind: String = "file-sent", thread: String = "chat-a", deleted: Boolean = false) =
+            Record(key, kind, obj("thread" to thread, "name" to "$key.bin", "locallyDeleted" to deleted).toString())
+        val rows = listOf(row("file"), row("contact").copy(payload = obj("thread" to "chat-a", "nativeVcard" to true).toString()),
+            row("app").copy(payload = obj("thread" to "chat-a", "webxdc" to true).toString()),
+            row("other", thread = "chat-b"), row("deleted", deleted = true), row("text", kind = "message"))
+        assertEquals(listOf("file", "contact", "app"), conversationMedia(rows, "chat-a").map { it.key })
+        assertEquals(listOf("other"), conversationMedia(rows, "chat-b").map { it.key })
+    }
+
     @Test fun personalDeletionRejectsChatAppsAndSavedCopiesAndIsolatesStorage() {
         val item = Record(nativeMessageKey(20), "file-sent", obj("nativeMessage" to 20, "webxdc" to true).toString())
         val native = obj("chatId" to 12, "viewType" to "Webxdc")

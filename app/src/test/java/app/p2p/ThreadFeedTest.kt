@@ -64,7 +64,7 @@ class ThreadFeedTest {
     }
 
     @Test
-    fun feedAndGalleryExposeSavedActionsReactionsAndAttachmentPlayback() {
+    fun feedAndMediaKeepSaveActionsWithoutASavedTab() {
         val audio = Record("audio", "file-sent", obj("thread" to "test-thread", "name" to "Recording.wav",
             "mime" to "audio/wav").toString())
         val video = Record("video", "file-sent", obj("thread" to "test-thread", "name" to "Clip.mp4",
@@ -82,13 +82,13 @@ class ThreadFeedTest {
             compose.onNodeWithContentDescription("React to message").performClick()
             assertEquals(listOf(video.key, message(1).key), reacted)
             compose.onNodeWithContentDescription("Save message").performClick()
-            compose.onNodeWithText("Gallery").performClick()
+            compose.onNodeWithText("Media").performClick()
             compose.onAllNodesWithContentDescription("Save attachment")[1].performClick()
             compose.onNodeWithContentDescription("Saved attachment").assertIsDisplayed()
             assertEquals(listOf(video.key), opened)
-            compose.onNodeWithText("Saved").performClick()
+            compose.onNodeWithText("Saved").assertDoesNotExist()
             compose.onNodeWithText("Recording.wav").assertIsDisplayed()
-            compose.onNodeWithText("Message 1").assertIsDisplayed()
+            compose.onNodeWithText("Message 1").assertDoesNotExist()
         }
     }
 
@@ -136,12 +136,39 @@ class ThreadFeedTest {
         }
     }
 
+    @Test fun mediaIncludesAllAttachmentTypesAndOpensTheExactApp() {
+        val names = listOf("Photo.jpg", "Audio.wav", "Video.mp4", "Document.pdf", "Contact.vcf", "Calculator.xdc", "Package.apk")
+        val rows = names.mapIndexed { i, name -> Record("item$i", "file-sent", obj("thread" to "test-thread", "name" to name,
+            "mime" to listOf("image/jpeg", "audio/wav", "video/mp4", "application/pdf", "text/vcard", "application/octet-stream", "application/vnd.android.package-archive")[i],
+            "webxdc" to (i == 5), "nativeVcard" to (i == 4)).toString()) }
+        var appOpened: String? = null
+        val opened = mutableListOf<String>()
+        showFeed(mutableStateOf(rows + message(1)), file = { opened.add(it) }, openApp = { appOpened = it.key }).use { scenario ->
+            compose.onNodeWithText("Media").performClick()
+            compose.onNodeWithText("Gallery").assertDoesNotExist()
+            compose.onNodeWithText("Saved").assertDoesNotExist()
+            names.forEachIndexed { i, name ->
+                compose.onNode(hasScrollToIndexAction()).performScrollToIndex(i)
+                compose.onNodeWithText(name).assertIsDisplayed().performClick()
+            }
+            assertEquals("item5", appOpened)
+            assertEquals(listOf("item0", "item1", "item2", "item3", "item4", "item6"), opened)
+            scenario.onActivity { activity ->
+                val view = activity.window.decorView
+                val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+                view.draw(android.graphics.Canvas(bitmap))
+                File("build/ui-checks/conversation-media.png").outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
+        }
+    }
+
     private fun showFeed(
         records: MutableState<List<Record>>,
         file: (String) -> Unit = {},
         react: (String) -> Unit = {},
         appearance: Appearance = Appearance(),
-        apps: (() -> Unit)? = null
+        apps: (() -> Unit)? = null,
+        openApp: ((Record) -> Unit)? = null
     ): ActivityScenario<MainActivity> {
         seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
         val view = mutableStateOf("Feed")
@@ -162,7 +189,7 @@ class ThreadFeedTest {
                                     }.toString())
                                 }
                             },
-                            galleryFile = { if (it.kind == "file-sent") File(mediaDir, it.data().getString("name")) else null }, file = file, openApps = apps)
+                            galleryFile = { if (it.kind == "file-sent") File(mediaDir, it.data().getString("name")) else null }, file = file, openApps = apps, openWebxdc = openApp)
                     }
                 }
             }
