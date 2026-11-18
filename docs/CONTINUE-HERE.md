@@ -1,5 +1,9 @@
 # Continue Relay Lab development
 
+## Delta Chat help review — November 18, 2026
+
+See [DELTA-HELP-PARITY-REVIEW.md](DELTA-HELP-PARITY-REVIEW.md) for the source-based comparison against the current Delta Chat FAQ. It records missing/partial controls, the local-mute/Core-archive mismatch, pending-source original-quality selection gap, intentional product differences, and device checks still required. Review only: no application behavior changed or new APK published. Do not treat the earlier completed parity countdown as exhaustive.
+
 ## Pending after RC74: button label consistency
 
 Talk’s primary action now reads Make a Call. My Channels retains Create a Channel with no leading plus icon. Audited static button/action labels across composers, settings, setup, media, app menus, profiles, invites and calls for Title Case, preserving acronyms and short connecting words (for example, Create a Channel). Updated existing UI-test selectors. No routes, compression behavior, user-supplied names or message content were changed. Published APK remains RC74; these changes and the attachment chooser are pending the next release.
