@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun ProfileChooser(
     profiles: RelayProfiles, current: String, alertProfile: String?, error: String?,
-    select: (String?) -> Unit, close: () -> Unit
+    select: (String?) -> Unit, close: () -> Unit, edit: () -> Unit = {}
 ) {
     var options by remember { mutableStateOf<List<RelayProfileOption>?>(null) }
     var loadFailed by remember { mutableStateOf(false) }
@@ -45,6 +45,7 @@ internal fun ProfileChooser(
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (alertProfile != null) Text("Choose the profile that received this alert to open it.")
                 Text("Enabled profiles can receive background messages. Calls ring for the active profile.")
+                PageActionButton("Edit active profile", edit, Modifier.fillMaxWidth(), enabled = !saving)
                 if (options == null) Text("Loading profiles…")
                 if (loadFailed) Text("Couldn’t load profiles.", color = MaterialTheme.colorScheme.error)
                 options.orEmpty().forEach { profile ->

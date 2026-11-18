@@ -59,7 +59,7 @@ Chatmail Core handles message delivery, offline queuing, encrypted attachments, 
 
 Verified Chatmail mappings let earlier one-to-one conversations use Core while retaining their local history. Groups created with the earlier P2P protocol keep their original transport and history. Create a group in the current **Groups** screen to use it across clients.
 
-**Settings → Your profile** updates the name, photo, and bio in Chatmail Core. A first-run contact link can supply relay candidates, and an active profile can add a relay or login link. The P2P backup preserves earlier P2P data. Its restore leaves the Chatmail database in place.
+**Settings → Profiles → Edit active profile** updates the name, photo, and bio in Chatmail Core. A first-run contact link can supply relay candidates, and an active profile can add a relay or login link. The P2P backup preserves earlier P2P data. Its restore leaves the Chatmail database in place.
 
 ## Interoperability code
 
@@ -83,7 +83,7 @@ In **Settings → Backup**, export a standard Chatmail archive that includes the
 
 ### Multiple profiles
 
-Open **Settings → Profiles** to switch profiles or add a profile. A new profile opens Setup, where you can create a Chatmail identity, restore a standard backup, or scan an Add Second Device QR code. Setup's **Switch profile** button lets you return to your original profile even before finishing setup. The original profile keeps its existing conversations, identity, and files. Other profiles have their own Chatmail database, local history, attachments, and Webxdc storage.
+Open **Settings → Profiles** to edit the active profile, switch profiles, or add a profile. A new profile opens Setup, where you can create a Chatmail identity, restore a standard backup, or scan an Add Second Device QR code. Setup's **Switch profile** button lets you return to your original profile even before finishing setup. The original profile keeps its existing conversations, identity, and files. Other profiles have their own Chatmail database, local history, attachments, and Webxdc storage.
 
 Enabled profiles receive messages and incoming calls through the existing background connection or scheduled synchronization. An incoming call notification identifies the receiving profile. Opening or answering it switches to that profile if there is no call or other protected operation in progress. Declining keeps the current profile selected. In **Settings → Profiles**, disable an inactive profile to stop its background connection and alerts, or enable it to resume. Finish a call, a backup or device transfer, or a message that's currently sending before switching. Android permissions and the app's updater apply to the whole installation. Creating, switching, and restoring profiles on Android still need device testing.
 
@@ -101,7 +101,7 @@ The Android comparison uses Delta Chat and ArcaneChat 2.69.0. This list tracks t
 | Background delivery for multiple profiles | Implemented. Enabled profiles receive messages and incoming-call alerts. Notification actions route to the receiving profile. Android background timing and cross-profile calls still need phone testing. |
 | Explicitly disable and re-enable a profile | Implemented under **Settings → Profiles** for inactive profiles. |
 | Compare encryption fingerprints | Implemented under **Chat options → Encryption info** for one-to-one Chatmail conversations. |
-| List and remove relays | Implemented under **Settings → Profile → Manage Chatmail relays**. The final relay is protected. |
+| List and remove relays | Implemented under **Settings → Profiles → Edit active profile → Manage Chatmail relays**. The final relay is protected. |
 | Set channel photos | Implemented in **Edit channel** using the standard Chatmail channel image. |
 | Show channel post view counts | Implemented for channel owners using Core read receipts. |
 | Clone a Chatmail group | Implemented in **Group info**. Review the name, description, and members before creating the new group. |

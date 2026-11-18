@@ -55,7 +55,9 @@ class SaveAndViewerUiTest {
             compose.onNodeWithContentDescription("Save message").performClick()
             assertEquals(2, clicks)
             compose.runOnIdle { saving.value = false; saved.value = true }
-            compose.onNodeWithContentDescription("Saved message").assertExists()
+            compose.onNodeWithContentDescription("Remove message from Saved").performClick()
+            assertEquals(3, clicks)
+            compose.onNodeWithContentDescription("Removing saved message").assertExists()
             compose.onNodeWithContentDescription("Save message").assertDoesNotExist()
             compose.runOnIdle { controller.get().setContent {} }
             compose.waitForIdle()

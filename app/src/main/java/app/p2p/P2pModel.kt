@@ -645,12 +645,16 @@ class P2pModel internal constructor(application: Application, internal val profi
     internal suspend fun saveChannelPost(id: Int) = collectionMutex.withLock {
         withChatmail { core ->
             requireNotNull(core.channelPost(id)) { "This post is unavailable." }
-            if (core.message(id).optInt("savedMessageId") <= 9) core.saveMessage(id)
+            val savedId = core.message(id).optInt("savedMessageId")
+            if (savedId > 9) removeSavedId(core, savedId) else {
+                core.saveMessage(id)
+                check(core.message(id).optInt("savedMessageId") > 9) { "The post could not be saved. Please try again." }
+            }
+            notice.value = if (savedId > 9) "Removed from Saved." else "Saved."
             val chat = requireNotNull(core.nativeThread(core.savedMessagesChat()))
             cacheNativeThread(chat)
             refreshAfterNativeSend(core, chat.id, nativeThreadKey(chat.id))
         }
-        notice.value = "Saved."
     }
 
     internal suspend fun requestChannelAttachment(id: Int) = withChatmail { core ->
@@ -2250,15 +2254,16 @@ class P2pModel internal constructor(application: Application, internal val profi
     }
 
     // The historical star entry points now use standard Chatmail saved copies.
-    fun star(key: String) = work { saveToCollection(key) }
+    fun star(key: String) = work { saveToCollection(key, toggle = true) }
 
     internal val savingItems = MutableStateFlow<Set<String>>(emptySet())
     private val collectionMutex = Mutex()
 
-    internal suspend fun saveToCollection(key: String) = collectionMutex.withLock {
+    internal suspend fun saveToCollection(key: String, toggle: Boolean = false) = collectionMutex.withLock {
         val record = requireNotNull(records.get(key)) { "This item is unavailable." }
         val data = record.data()
         savingItems.value = setOf(key)
+        var removed = false
         try {
             withChatmail { core ->
                 val chat = requireNotNull(core.nativeThread(core.savedMessagesChat()))
@@ -2268,12 +2273,28 @@ class P2pModel internal constructor(application: Application, internal val profi
                 val native = data.optInt("nativeMessage")
                 if (native > 9) {
                     val original = core.message(native)
+                    if (toggle && original.optInt("savedMessageId") > 9) {
+                        removeSavedId(core, original.optInt("savedMessageId"))
+                        refreshAfterNativeSend(core, chat.id, target)
+                        removed = true
+                        return@withChatmail
+                    }
                     if (original.optInt("savedMessageId") <= 9 && original.optInt("originalMsgId") <= 9) core.saveMessage(native)
                     val savedId = core.message(native).optInt("savedMessageId")
                     check(savedId > 9) { "The item could not be saved. Please try again." }
                     change(key) { put("nativeSavedId", savedId); remove("star") }
                 } else {
                     val parts = legacySavedParts(record, records.threadItems())
+                    if (toggle && record.isSavedItem()) {
+                        for (part in parts) {
+                            val id = part.data().optInt("savedCopyId")
+                            if (id > 9) removeSavedId(core, id)
+                            change(part.key) { remove("star"); remove("savedCopyId") }
+                        }
+                        refreshAfterNativeSend(core, chat.id, target)
+                        removed = true
+                        return@withChatmail
+                    }
                     val files = parts.associate { part -> part.key to galleryFile(part) }
                     check(parts.none { it.kind.startsWith("file-") && files[it.key] == null }) {
                         "Download all attachments before saving this item."
@@ -2297,7 +2318,7 @@ class P2pModel internal constructor(application: Application, internal val profi
                 }
                 refreshAfterNativeSend(core, chat.id, target)
             }
-            notice.value = "Saved."
+            notice.value = if (removed) "Removed from Saved." else "Saved."
         } finally {
             savingItems.value = emptySet()
         }
@@ -2336,12 +2357,19 @@ class P2pModel internal constructor(application: Application, internal val profi
             val id = item.data().optInt("nativeMessage")
             val chat = core.savedMessagesChat()
             check(id > 9 && core.message(id).optInt("chatId") == chat) { "Only a saved copy can be removed here." }
-            core.deleteSavedMessage(id)
-            change(key) { put("locallyDeleted", true) }
-            for (source in records.threadItems() + records.all("post")) {
-                if (source.data().optInt("nativeSavedId") == id || source.data().optInt("savedCopyId") == id)
-                    change(source.key) { remove("nativeSavedId"); remove("savedCopyId"); remove("star") }
-            }
+            removeSavedId(core, id)
+        }
+    }
+
+    // Only delete the self-chat copy; never delete the source conversation message.
+    private suspend fun removeSavedId(core: Chatmail, id: Int) {
+        check(core.message(id).optInt("chatId") == core.savedMessagesChat()) { "Only a saved copy can be removed here." }
+        core.deleteSavedMessage(id)
+        for (source in records.threadItems() + records.all("post")) {
+            val data = source.data()
+            if (data.optInt("nativeMessage") == id) change(source.key) { put("locallyDeleted", true) }
+            if (data.optInt("nativeSavedId") == id || data.optInt("savedCopyId") == id)
+                change(source.key) { remove("nativeSavedId"); remove("savedCopyId"); remove("star") }
         }
     }
 

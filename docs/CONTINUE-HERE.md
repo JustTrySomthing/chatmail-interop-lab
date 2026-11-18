@@ -1,5 +1,15 @@
 # Continue Relay Lab development
 
+## Pending next APK: Profiles, composer spacing and saved-star toggles
+
+User deferred scheduled sending; no scheduling controls or behavior were added. Settings now has one Profiles entry. Its existing management dialog adds Edit active profile, which opens the existing name/photo/bio/relay editor; switching, adding, and enabling/disabling inactive profiles retain their existing behavior. No profile deletion or data migration was added.
+
+The conversation composer uses a 48dp-minimum outlined BasicTextField with 10dp vertical internal padding, 12dp top outer spacing and 10dp bottom spacing. Multiline entry, draft state, emoji/focus behavior, attachments, and send routes are retained. Saved stars use MaterialTheme primary instead of hard-coded gold and remain actionable after saving. Chat/group message and Media stars toggle native saved copies; channel post/feed stars use the same save/remove behavior. The shared deletion helper verifies the copy belongs to self-chat before deletion and clears cached saved references without deleting source messages. Migration still uses idempotent save behavior rather than toggling. Save and remove show progress, with retries available on failure.
+
+Verification: all 214 automated tests passed with zero failures/errors/skips; debug APK assembly passed. Added navigation coverage for the single Profiles entry and edit route; checked saved-star progress/removal and real Media save/unsave gestures, composer typing/draft retention, and two-column Settings at narrow widths and enlarged fonts. Inspected the 320dp Settings render. Initial checks caught and corrected a nested-scroll conflict in Profiles and updated the old saved-star accessibility label assertion. Core-backed save/delete and profile switching still need phone verification.
+
+Published APK remains RC73 (109). These changes need the next signed APK and physical-phone checks; do not claim RC73 already includes them.
+
 ## RC73 release checkpoint — November 18, 2026
 
 The user requested the next APK, lifting the earlier hold. RC73 (109) includes every source change since RC72: clearer Saved actions, visible save progress/success/retry, readable two-column Settings, immersive landscape Webxdc apps with portrait restoration, Media filename space/file sizes, Apps button contrast, simplified automatic background setup and incoming-call permissions, and native Chatmail reply reminder/video-call Activity fixes. Detailed implementation notes follow.

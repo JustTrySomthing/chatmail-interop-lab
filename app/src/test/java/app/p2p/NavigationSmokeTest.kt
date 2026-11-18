@@ -40,6 +40,18 @@ class NavigationSmokeTest {
     @get:Rule(order = 1) val compose = createAndroidComposeRule<MainActivity>()
 
     @Test
+    fun profilesCombinesManagementAndEditing() {
+        compose.onNodeWithContentDescription("Settings").performClick()
+        compose.onNodeWithText("Profile", substring = false).assertDoesNotExist()
+        compose.onNodeWithText("Profiles", substring = false).performClick()
+        compose.onNodeWithText("Add profile").assertIsDisplayed()
+        compose.onNodeWithText("Edit active profile").performClick()
+        compose.onNodeWithText("Display name").assertIsDisplayed()
+        compose.onNodeWithText("Bio", substring = false).assertIsDisplayed()
+        compose.onNodeWithText("Choose profile photo").assertIsDisplayed()
+    }
+
+    @Test
     fun readsTextAndCaptionsFromAndroidShareIntents() {
         val own = "app.p2p.interop.files"
         val url = "https://example.org/article"

@@ -544,7 +544,7 @@ private fun ChannelPostCard(
         }
         val reactions = post.reactions.values.flatten().groupingBy { it }.eachCount()
         Row(verticalAlignment = Alignment.CenterVertically) {
-            StarButton(post.saved, "post", saving && !post.saved, savePost)
+            StarButton(post.saved, "post", saving, savePost)
             IconButton(onClick = react) { Icon(Icons.Outlined.EmojiEmotions, "React to post") }
             if (reactions.isNotEmpty()) Text(reactions.entries.joinToString("  ") { (emoji, count) ->
                 if (count == 1) emoji else "$emoji $count"

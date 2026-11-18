@@ -195,6 +195,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             var profilesOpen by rememberSaveable { mutableStateOf(false) }
+            var editProfileRequested by rememberSaveable { mutableStateOf(false) }
             var profileError by remember { mutableStateOf<String?>(null) }
             val profileScope = rememberCoroutineScope()
             LaunchedEffect(pendingAlert) { if (pendingAlert != null) profilesOpen = true }
@@ -233,7 +234,8 @@ class MainActivity : ComponentActivity() {
                             { incomingWebxdc.compareAndSet(it, null) },
                             hasOtherProfiles = profiles.hasOtherProfiles(), inPip = inPip,
                             minimizeVideo = if (canMinimize) ::minimizeVideoCall else null,
-                            openProfiles = { profilesOpen = true })
+                            openProfiles = { profilesOpen = true },
+                            editProfileRequested = editProfileRequested, clearEditProfileRequest = { editProfileRequested = false })
                     }
                 }
                 if (profilesOpen && !inPip) {
@@ -256,6 +258,9 @@ class MainActivity : ComponentActivity() {
                                     profileError = error.message ?: "Couldn’t switch profiles."
                                 }
                             }
+                        }, edit = {
+                            profilesOpen = false
+                            editProfileRequested = true
                         }, close = {
                             profilesOpen = false
                             profileError = null
@@ -400,7 +405,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                    clearShared: () -> Unit, updateRequested: Boolean, clearUpdateRequest: () -> Unit,
                    secureJoinLink: String?, clearSecureJoinLink: () -> Unit,
                    webxdcShortcut: WebxdcShortcut?, clearWebxdcShortcut: (WebxdcShortcut) -> Unit,
-                   hasOtherProfiles: Boolean, inPip: Boolean, minimizeVideo: (() -> Unit)?, openProfiles: () -> Unit) {
+                   hasOtherProfiles: Boolean, inPip: Boolean, minimizeVideo: (() -> Unit)?, openProfiles: () -> Unit,
+                   editProfileRequested: Boolean = false, clearEditProfileRequest: () -> Unit = {}) {
     val loadedRecords by model.items.collectAsState()
     val savingItems by model.savingItems.collectAsState()
     val records = loadedRecords.orEmpty()
@@ -1048,6 +1054,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                 modal = "send"
                 clearShared()
             }
+        }
+        LaunchedEffect(editProfileRequested) {
+            if (editProfileRequested) { modal = "profile"; clearEditProfileRequest() }
         }
         LaunchedEffect(updateRequested) {
             if (updateRequested) {
@@ -2869,7 +2878,6 @@ internal fun PageActionButton(
 internal data class SettingsDestination(val label: String, val route: String, val icon: ImageVector)
 
 internal val settingsDestinations = listOf(
-    SettingsDestination("Profile", "profile", Icons.Outlined.PersonOutline),
     SettingsDestination("Profiles", "profiles", Icons.Outlined.PeopleOutline),
     SettingsDestination("Setup", "setup", Icons.Outlined.Tune),
     SettingsDestination("Appearance", "appearance", Icons.Outlined.Palette),
@@ -3693,7 +3701,7 @@ internal fun ColumnScope.ThreadView(
             }
         }
         Row(
-            Modifier.fillMaxWidth().background(Panel).padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+            Modifier.fillMaxWidth().background(Panel).padding(start = 10.dp, end = 10.dp, top = 12.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = attach, enabled = canCompose && !preparing) { Icon(Icons.Outlined.AttachFile, "Add attachment", tint = readableAccent(Panel, Ink)) }
@@ -3704,11 +3712,21 @@ internal fun ColumnScope.ThreadView(
                     emojiPicker = true
                 }
             }, enabled = canCompose) { Icon(Icons.Outlined.EmojiEmotions, "Emoji picker", tint = readableAccent(Panel, Ink)) }
-            OutlinedTextField(draft, { draft = it }, modifier = Modifier.weight(1f).onFocusChanged {
-                if (it.isFocused) emojiPicker = false
-            }, enabled = canCompose, maxLines = if (LocalConfiguration.current.screenHeightDp < 480) 2 else 4,
-                placeholder = { FittedLabel("Message", fontWeight = FontWeight.Normal, size = 16) },
-                textStyle = contentTextStyle(MaterialTheme.typography.bodyLarge), shape = RoundedCornerShape(19.dp))
+            androidx.compose.foundation.text.BasicTextField(draft, { draft = it },
+                modifier = Modifier.weight(1f).heightIn(min = 48.dp)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(19.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp).onFocusChanged {
+                        if (it.isFocused) emojiPicker = false
+                    }, enabled = canCompose,
+                maxLines = if (LocalConfiguration.current.screenHeightDp < 480) 2 else 4,
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(readableAccent(Panel, Ink)),
+                textStyle = contentTextStyle(MaterialTheme.typography.bodyLarge).copy(color = Ink),
+                decorationBox = { field ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (draft.text.isEmpty()) Text("Message", color = Ink.copy(alpha = .65f), fontSize = 16.sp)
+                        field()
+                    }
+                })
             Spacer(Modifier.width(6.dp))
             FilledIconButton(onClick = {
                 val submitted = draft.text
@@ -3830,12 +3848,11 @@ private fun QuotedMessage(author: String, text: String) {
 
 @Composable
 internal fun StarButton(starred: Boolean, item: String, saving: Boolean = false, toggle: () -> Unit) {
-    val background = MaterialTheme.colorScheme.surfaceVariant
-    val savedColor = if (contrastRatio(Color(0xFFFFC107), background) >= 3f) Color(0xFFFFC107) else Color(0xFF805500)
-    IconButton(onClick = toggle, enabled = !starred && !saving) {
-        if (saving) CircularProgressIndicator(Modifier.size(23.dp).semantics { contentDescription = "Saving " + item }, strokeWidth = 2.dp)
+    val savedColor = MaterialTheme.colorScheme.primary
+    IconButton(onClick = toggle, enabled = !saving) {
+        if (saving) CircularProgressIndicator(Modifier.size(23.dp).semantics { contentDescription = (if (starred) "Removing saved " else "Saving ") + item }, strokeWidth = 2.dp)
         else Icon(if (starred) Icons.Outlined.Star else Icons.Outlined.StarBorder,
-            if (starred) "Saved " + item else "Save " + item,
+            if (starred) "Remove " + item + " from Saved" else "Save " + item,
             Modifier.size(25.dp), tint = if (starred) savedColor else LocalContentColor.current)
     }
 }
