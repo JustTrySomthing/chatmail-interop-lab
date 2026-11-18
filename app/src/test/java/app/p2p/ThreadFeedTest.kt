@@ -140,7 +140,7 @@ class ThreadFeedTest {
         val names = listOf("Photo.jpg", "Audio.wav", "Video.mp4", "Document.pdf", "Contact.vcf", "Calculator.xdc", "Package.apk")
         val rows = names.mapIndexed { i, name -> Record("item$i", "file-sent", obj("thread" to "test-thread", "name" to name,
             "mime" to listOf("image/jpeg", "audio/wav", "video/mp4", "application/pdf", "text/vcard", "application/octet-stream", "application/vnd.android.package-archive")[i],
-            "webxdc" to (i == 5), "nativeVcard" to (i == 4)).toString()) }
+            "webxdc" to (i == 5), "nativeVcard" to (i == 4), "size" to ((i + 1) * 1024L)).toString()) }
         var appOpened: String? = null
         val opened = mutableListOf<String>()
         showFeed(mutableStateOf(rows + message(1)), file = { opened.add(it) }, openApp = { appOpened = it.key }).use { scenario ->
@@ -150,6 +150,7 @@ class ThreadFeedTest {
             names.forEachIndexed { i, name ->
                 compose.onNode(hasScrollToIndexAction()).performScrollToIndex(i)
                 compose.onNodeWithText(name).assertIsDisplayed().performClick()
+                compose.onNodeWithText("${i + 1}.0 KB").assertIsDisplayed()
             }
             assertEquals("item5", appOpened)
             assertEquals(listOf("item0", "item1", "item2", "item3", "item4", "item6"), opened)

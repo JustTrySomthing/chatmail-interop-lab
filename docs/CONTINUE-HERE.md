@@ -1,5 +1,17 @@
 # Continue Relay Lab development
 
+## Pending next APK: readable Settings, fullscreen apps, and save feedback
+
+Published APK remains RC72 (108). The user is collecting changes before the next APK; do not publish a new build until requested. This checkpoint includes the clearer Saved actions below.
+
+Settings keeps two columns with 104dp tiles, 15–19sp fitted labels, and two lines for multiword labels; single words cannot split across lines. Item stars in chat/group messages, attachments, and channel posts show saving progress and a contrasting gold saved state. Failed operations clear transient progress and allow retries; native message saving verifies a saved-copy ID before reporting success. Existing standard Chatmail Saved Messages storage is retained.
+
+Media cards place the save star at the preview's top right, give filenames the full lower row, and show file size from metadata or the available local file (Size unavailable when neither exists). Chat/group floating Apps buttons now have an outline and shadow for visibility over images.
+
+Visible Webxdc apps enter immersive mode in landscape, hiding Android system bars, the Relay Lab viewer toolbar, and diagnostics footer. Edge swipes temporarily reveal Android controls. Portrait, minimizing, or closing restores normal bars; individual app HTML remains unchanged. Active sessions remain intact across rotation. Viewer inset padding uses one stable modifier across fullscreen transitions; the rotation test caught recursive UnionInsets when conditionally adding/removing padding modifiers.
+
+Automated verification: all 208 debug unit/UI tests passed, zero failures/errors/skips; Kotlin compilation passed. Narrow-screen Settings and Media screenshots inspected. No APK assembled or published for this checkpoint. Device verification remains pending for Moto readability, Android 36 rotation/gesture behavior, and real-account Saved synchronization. UI tests exercise save progress/success/retry, viewer toolbar restoration, narrow Settings at 280/320/360dp with enlarged fonts, and Media file sizes. The new isolated composable tests use a bare ComponentActivity to avoid launching the entire application's asynchronous UI during component tests.
+
 ## Pending next APK: clearer Saved actions
 
 User requested these source changes now and explicitly asked to wait for more changes before making the next APK. Published release remains RC72 (108). Saved menus now say Open Saved Item and Remove From Saved. The source action resolves the actual Chatmail origin to Go to Chat, Go to Group, or Go to Channel, including when the original message is not cached in the UI. Personal items keep that action hidden. While resolution is pending/unavailable, Go to Source avoids falsely identifying a channel as a chat. Existing navigation and removal behavior is preserved; channel navigation opens the channel, so it is not labeled Go to Post. Targeted PersonalSpace and Saved UI tests passed (24 tests, zero failures/errors/skips). No APK or release was created.

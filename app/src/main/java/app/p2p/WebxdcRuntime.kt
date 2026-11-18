@@ -144,6 +144,28 @@ internal fun webxdcPickedFiles(resultCode: Int, data: Intent?): Array<Uri>? {
 }
 
 @Composable
+internal fun WebxdcImmersiveMode(enabled: Boolean) {
+    val context = LocalContext.current
+    DisposableEffect(enabled, context) {
+        var base = context
+        while (base is android.content.ContextWrapper && base !is Activity) base = base.baseContext
+        val window = (base as? Activity)?.window
+        val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
+        val priorBehavior = controller?.systemBarsBehavior
+        if (enabled) {
+            controller?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller?.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose {
+            if (enabled) {
+                controller?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                if (priorBehavior != null) controller?.systemBarsBehavior = priorBehavior
+            }
+        }
+    }
+}
+
+@Composable
 internal fun WebxdcPage(title: String, close: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         WebxdcFrame(title, Modifier.fillMaxSize(), close, content = content)
@@ -152,15 +174,16 @@ internal fun WebxdcPage(title: String, close: () -> Unit, content: @Composable C
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WebxdcFrame(
+internal fun WebxdcFrame(
     title: String, modifier: Modifier, back: () -> Unit, close: (() -> Unit)? = null,
-    switchApps: (() -> Unit)? = null, visible: Boolean = true,
+    switchApps: (() -> Unit)? = null, visible: Boolean = true, fullscreen: Boolean = false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
     Surface(modifier, color = colors.background, contentColor = colors.onBackground) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
-            if (visible) TopAppBar(
+        val frameInsets = if (fullscreen) WindowInsets.ime else WindowInsets.systemBars.union(WindowInsets.ime)
+        Column(Modifier.fillMaxSize().windowInsetsPadding(frameInsets)) {
+            if (visible && !fullscreen) TopAppBar(
                 title = { Text(title, maxLines = 1) },
                 navigationIcon = {
                     val label = if (close == null) "Close $title" else "Minimize $title"
@@ -233,7 +256,8 @@ internal fun WebxdcRunner(
         }
     }
     val bounds = if (visible) Modifier.fillMaxSize() else Modifier.size(0.dp).clearAndSetSemantics {}
-    WebxdcFrame(info?.name ?: title, bounds, minimize, close, switchApps, visible) {
+    WebxdcFrame(info?.name ?: title, bounds, minimize, close, switchApps, visible,
+        fullscreen = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
         val current = info
         when {
             loadError != null -> Text(loadError.orEmpty(), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
@@ -565,7 +589,7 @@ private fun ColumnScope.SandboxedWebxdc(
         onRelease = ::releaseBrowser
         )
     }
-    if (visible) {
+    if (visible && androidx.compose.ui.platform.LocalConfiguration.current.orientation != android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
         TextButton(onClick = {
             val browser = view
             fun copyReport(page: String, notify: Boolean = true) {

@@ -79,7 +79,8 @@ class SettingsTilesTest {
                 compose.onNodeWithText(item.label, useUnmergedTree = true)
                     .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
                 assertFalse(item.label, layouts.single().hasVisualOverflow)
-                assertEquals(1, layouts.single().lineCount)
+                assertTrue(item.label, layouts.single().layoutInput.style.fontSize.value * fontScale >= 14.9f)
+                assertTrue(layouts.single().lineCount in 1..2)
             }
             compose.runOnIdle { query.value = "updates" }
             compose.onNodeWithText("Updates").performScrollTo().assertIsDisplayed().performClick()

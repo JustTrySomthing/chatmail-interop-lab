@@ -2252,48 +2252,55 @@ class P2pModel internal constructor(application: Application, internal val profi
     // The historical star entry points now use standard Chatmail saved copies.
     fun star(key: String) = work { saveToCollection(key) }
 
+    internal val savingItems = MutableStateFlow<Set<String>>(emptySet())
     private val collectionMutex = Mutex()
 
     internal suspend fun saveToCollection(key: String) = collectionMutex.withLock {
         val record = requireNotNull(records.get(key)) { "This item is unavailable." }
         val data = record.data()
-        withChatmail { core ->
-            val chat = requireNotNull(core.nativeThread(core.savedMessagesChat()))
-            cacheNativeThread(chat)
-            val target = nativeThreadKey(chat.id)
-            if (data.optString("thread") == target) return@withChatmail
-            val native = data.optInt("nativeMessage")
-            if (native > 9) {
-                val original = core.message(native)
-                if (original.optInt("savedMessageId") <= 9 && original.optInt("originalMsgId") <= 9) core.saveMessage(native)
-                val savedId = core.message(native).optInt("savedMessageId")
-                change(key) { put("nativeSavedId", savedId); remove("star") }
-            } else {
-                val parts = legacySavedParts(record, records.threadItems())
-                val files = parts.associate { part -> part.key to galleryFile(part) }
-                check(parts.none { it.kind.startsWith("file-") && files[it.key] == null }) {
-                    "Download all attachments before saving this item."
-                }
-                if (record.kind == "post") change(record.key) { put("star", true) }
-                for (part in parts) {
-                    val partData = part.data()
-                    val prior = partData.optInt("savedCopyId")
-                    val exists = prior > 9 && runCatching { core.message(prior).optInt("chatId") == chat.id }.getOrDefault(false)
-                    if (!exists) {
-                        val file = files[part.key]
-                        val text = partData.optString("text").ifBlank { partData.optString("caption") }
-                            .ifBlank { partData.optString("name").ifBlank { "Saved item" } }
-                        val id = core.nativeSend(chat.id, text, null, file, partData.optString("name").takeIf { file != null })
-                        change(part.key) { put("savedCopyId", id) }
+        savingItems.value = setOf(key)
+        try {
+            withChatmail { core ->
+                val chat = requireNotNull(core.nativeThread(core.savedMessagesChat()))
+                cacheNativeThread(chat)
+                val target = nativeThreadKey(chat.id)
+                if (data.optString("thread") == target) return@withChatmail
+                val native = data.optInt("nativeMessage")
+                if (native > 9) {
+                    val original = core.message(native)
+                    if (original.optInt("savedMessageId") <= 9 && original.optInt("originalMsgId") <= 9) core.saveMessage(native)
+                    val savedId = core.message(native).optInt("savedMessageId")
+                    check(savedId > 9) { "The item could not be saved. Please try again." }
+                    change(key) { put("nativeSavedId", savedId); remove("star") }
+                } else {
+                    val parts = legacySavedParts(record, records.threadItems())
+                    val files = parts.associate { part -> part.key to galleryFile(part) }
+                    check(parts.none { it.kind.startsWith("file-") && files[it.key] == null }) {
+                        "Download all attachments before saving this item."
                     }
+                    if (record.kind == "post") change(record.key) { put("star", true) }
+                    for (part in parts) {
+                        val partData = part.data()
+                        val prior = partData.optInt("savedCopyId")
+                        val exists = prior > 9 && runCatching { core.message(prior).optInt("chatId") == chat.id }.getOrDefault(false)
+                        if (!exists) {
+                            val file = files[part.key]
+                            val text = partData.optString("text").ifBlank { partData.optString("caption") }
+                                .ifBlank { partData.optString("name").ifBlank { "Saved item" } }
+                            val id = core.nativeSend(chat.id, text, null, file, partData.optString("name").takeIf { file != null })
+                            change(part.key) { put("savedCopyId", id) }
+                        }
+                    }
+                    // Preserve the legacy star until every attachment is safely copied.
+                    // Per-part copy ids let a retry resume without duplicating earlier parts.
+                    for (part in parts) change(part.key) { remove("star") }
                 }
-                // Preserve the legacy star until every attachment is safely copied.
-                // Per-part copy ids let a retry resume without duplicating earlier parts.
-                for (part in parts) change(part.key) { remove("star") }
+                refreshAfterNativeSend(core, chat.id, target)
             }
-            refreshAfterNativeSend(core, chat.id, target)
+            notice.value = "Saved."
+        } finally {
+            savingItems.value = emptySet()
         }
-        notice.value = "Saved."
     }
 
     internal suspend fun preparePersonalSpace(): String {

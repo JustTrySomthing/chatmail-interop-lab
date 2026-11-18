@@ -55,6 +55,10 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
@@ -73,9 +77,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -400,6 +402,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                    webxdcShortcut: WebxdcShortcut?, clearWebxdcShortcut: (WebxdcShortcut) -> Unit,
                    hasOtherProfiles: Boolean, inPip: Boolean, minimizeVideo: (() -> Unit)?, openProfiles: () -> Unit) {
     val loadedRecords by model.items.collectAsState()
+    val savingItems by model.savingItems.collectAsState()
     val records = loadedRecords.orEmpty()
     val appearance = Appearance.read(records.firstOrNull { it.kind == "appearance" }?.data())
     P2pTheme(appearance) {
@@ -1115,6 +1118,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
             modal = if (fullPage in setOf(FullPageRoute.Settings, FullPageRoute.Contacts)) null else "settings"
         }
         val webxdcVisible = activeWebxdc != null && !showTalkCall && modal == null
+        WebxdcImmersiveMode(webxdcVisible && androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
         BackHandler(thread != null || modal != null || webxdcVisible || (area == Area.Social && (legacySocial || channelId != null))) {
             when {
                 webxdcVisible -> activeWebxdc = null
@@ -1445,7 +1449,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             attach = { modal = "attach" },
                             messageMenu = ::showItemActions,
                             react = { selected = it; modal = "message-reactions" },
-                            star = { key -> model.star(key) },
+                            star = { key -> model.star(key) }, savingItems = savingItems,
                             galleryFile = model::galleryFile,
                             requestAttachment = { model.requestDownload(it) },
                             file = ::showAttachment,
@@ -2898,17 +2902,17 @@ internal fun SettingsGrid(query: String, open: (String) -> Unit) {
             matches.chunked(2).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
                     row.forEach { item ->
-                        Surface(onClick = { open(item.route) }, modifier = Modifier.weight(1f).height(88.dp),
+                        Surface(onClick = { open(item.route) }, modifier = Modifier.weight(1f).height(104.dp),
                             shape = RoundedCornerShape(20.dp), color = Panel, contentColor = Ink,
                             tonalElevation = 0.dp, shadowElevation = 1.dp,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = .16f))) {
                             val tint = readableAccent(Panel, Ink)
                             val label: @Composable (Modifier) -> Unit = { modifier ->
-                                BasicText(item.label, modifier, maxLines = 1, softWrap = false,
+                                BasicText(item.label, modifier, maxLines = if (' ' in item.label) 2 else 1, softWrap = true,
                                     style = LocalTextStyle.current.copy(color = Ink, fontWeight = FontWeight.Medium,
-                                        textAlign = if (stackIcon) TextAlign.Center else TextAlign.Start, lineHeight = 20.sp / fontScale),
-                                    autoSize = TextAutoSize.StepBased(minFontSize = 10.sp / fontScale,
-                                        maxFontSize = 15.sp / fontScale, stepSize = .25.sp / fontScale))
+                                        textAlign = if (stackIcon) TextAlign.Center else TextAlign.Start, lineHeight = 23.sp / fontScale),
+                                    autoSize = TextAutoSize.StepBased(minFontSize = 15.sp / fontScale,
+                                        maxFontSize = 19.sp / fontScale, stepSize = .25.sp / fontScale))
                             }
                             if (stackIcon) {
                                 Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 10.dp),
@@ -3445,7 +3449,8 @@ internal fun ColumnScope.ThreadView(
     openApps: (() -> Unit)? = null,
     openWebxdc: ((Record) -> Unit)? = null,
     draftText: String? = null,
-    consumeDraftText: () -> Unit = {}
+    consumeDraftText: () -> Unit = {},
+    savingItems: Set<String> = emptySet()
 ) {
     LaunchedEffect(view) { if (view == "Saved") onView(Feed) }
     val messages = remember(records, id) {
@@ -3523,7 +3528,7 @@ internal fun ColumnScope.ThreadView(
                     if (app != null && app.data().optBoolean("webxdc") && galleryFile(app) != null && openWebxdc != null)
                         openWebxdc(app)
                     else file(key)
-                }, star, loadOlder, find.isNotBlank())
+                }, star, loadOlder, find.isNotBlank(), savingItems)
             } else if (visible.isEmpty()) {
                 val message = when {
                     find.isNotBlank() -> "No matching messages"
@@ -3582,7 +3587,7 @@ internal fun ColumnScope.ThreadView(
                                                 IconButton(onClick = { react(message.key) }, enabled = canCompose) {
                                                     Icon(Icons.Outlined.EmojiEmotions, if (isAttachment) "React to attachment" else "React to message", Modifier.size(24.dp))
                                                 }
-                                                StarButton(message.isSavedItem(), if (isAttachment) "attachment" else "message") { star(message.key) }
+                                                StarButton(message.isSavedItem(), if (isAttachment) "attachment" else "message", message.key in savingItems) { star(message.key) }
                                             }
                                         }
                                         if (maxWidth < 300.dp) Column {
@@ -3665,7 +3670,8 @@ internal fun ColumnScope.ThreadView(
                     onClick = {
                         if (nearLatest) openApps?.invoke() else scope.launch { listState.animateScrollToItem(0) }
                     },
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 8.dp),
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 8.dp)
+                        .shadow(10.dp, CircleShape).border(2.dp, Ink.copy(alpha = .65f), CircleShape),
                     shape = CircleShape,
                     containerColor = AccentPanel,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer
@@ -3822,18 +3828,21 @@ private fun QuotedMessage(author: String, text: String) {
 }
 
 @Composable
-private fun StarButton(starred: Boolean, item: String, toggle: () -> Unit) {
-    IconButton(onClick = toggle, enabled = !starred) {
-        Icon(if (starred) Icons.Outlined.Star else Icons.Outlined.StarBorder,
+internal fun StarButton(starred: Boolean, item: String, saving: Boolean = false, toggle: () -> Unit) {
+    val background = MaterialTheme.colorScheme.surfaceVariant
+    val savedColor = if (contrastRatio(Color(0xFFFFC107), background) >= 3f) Color(0xFFFFC107) else Color(0xFF805500)
+    IconButton(onClick = toggle, enabled = !starred && !saving) {
+        if (saving) CircularProgressIndicator(Modifier.size(23.dp).semantics { contentDescription = "Saving " + item }, strokeWidth = 2.dp)
+        else Icon(if (starred) Icons.Outlined.Star else Icons.Outlined.StarBorder,
             if (starred) "Saved " + item else "Save " + item,
-            Modifier.size(25.dp), tint = LocalContentColor.current)
+            Modifier.size(25.dp), tint = if (starred) savedColor else LocalContentColor.current)
     }
 }
 
 @Composable
 private fun MediaGallery(
     records: List<Record>, localFile: (Record) -> File?, open: (String) -> Unit, star: (String) -> Unit,
-    loadOlder: (() -> Unit)? = null, searching: Boolean = false
+    loadOlder: (() -> Unit)? = null, searching: Boolean = false, savingItems: Set<String> = emptySet()
 ) {
     val saveMedia = LocalMediaDownload.current
     LazyVerticalGrid(
@@ -3872,14 +3881,20 @@ private fun MediaGallery(
                             else -> Icons.Outlined.InsertDriveFile
                         }, null, Modifier.size(36.dp), tint = readableAccent(Edge, Ink))
                         if (isVideo && image != null) Icon(Icons.Outlined.PlayCircle, "Video", tint = Color.White)
+                        Surface(Modifier.align(Alignment.TopEnd).padding(5.dp), shape = CircleShape, color = Edge, contentColor = Ink, shadowElevation = 4.dp) {
+                            StarButton(record.isSavedItem(), "attachment", record.key in savingItems) { star(record.key) }
+                        }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.weight(1f).heightIn(min = 48.dp).combinedClickable(onClick = { open(record.key) },
                             onLongClickLabel = "Download media", onLongClick = download)
                             .padding(horizontal = 9.dp), contentAlignment = Alignment.CenterStart) {
-                            Text(label, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                            Column(Modifier.padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(label, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                                val size = data.optLong("size").takeIf { it > 0 } ?: path?.takeIf { it.isFile }?.length()
+                                Text(size?.let(::formatSize) ?: "Size unavailable", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
-                        StarButton(record.isSavedItem(), "attachment") { star(record.key) }
                     }
                 }
             }
