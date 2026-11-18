@@ -137,6 +137,37 @@ class PersonalSpaceUiTest {
         }
     }
 
+    @Test fun dragAcrossRightEdgeAndBackLeftKeepsChosenEmptyCell() {
+        seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
+        val app = Record(nativeMessageKey(20), "file-sent", obj("name" to "App.xdc", "webxdc" to true).toString())
+        val layout = mutableStateOf(personalDesktopLayout(listOf(app), null))
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity -> activity.setContent { P2pTheme(Appearance()) {
+                PersonalAppsDesktop(listOf(app), layout.value.encode(), { null }, {}, { layout.value = it(layout.value) },
+                    { _, _ -> }, {}, false, null, {})
+            } } }
+            val viewport = compose.onNodeWithTag("desktop-viewport")
+            viewport.performTouchInput { down(Offset(width / 6f, height / 8f)) }
+            compose.mainClock.advanceTimeBy(700)
+            viewport.performTouchInput { moveTo(Offset(width + 2f, height / 8f)) }
+            compose.waitForIdle()
+            compose.mainClock.advanceTimeBy(1000)
+            viewport.performTouchInput { moveTo(Offset(width * 5f / 6, height * 7f / 8)); up() }
+            compose.waitForIdle()
+            assertEquals(app.key, layout.value.pages[1][11])
+            viewport.performTouchInput { down(Offset(width * 5f / 6, height * 7f / 8)) }
+            compose.mainClock.advanceTimeBy(700)
+            viewport.performTouchInput { moveTo(Offset(-2f, height / 2f)) }
+            compose.waitForIdle()
+            compose.mainClock.advanceTimeBy(1000)
+            viewport.performTouchInput { moveTo(Offset(width / 2f, height * 5f / 8)); up() }
+            compose.waitForIdle()
+            assertEquals(app.key, layout.value.pages[0][7])
+            compose.onNodeWithText("Done").assertDoesNotExist()
+            scenario.onActivity { screenshot("desktop-free-placement", it.window.decorView) }
+        }
+    }
+
     private fun screenshot(name: String, view: android.view.View) {
         val file = File("build/ui-checks/$name.png").apply { parentFile?.mkdirs() }
         val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)

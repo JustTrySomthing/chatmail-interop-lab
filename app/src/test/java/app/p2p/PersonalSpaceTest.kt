@@ -32,7 +32,7 @@ class PersonalSpaceTest {
         assertEquals(apps.toSet(), result.toSet())
         val moved = personalDesktopLayout(apps, obj("order" to org.json.JSONArray(order))).move(result[0].key, 1, 0)
         assertEquals(result[0].key, moved.pages[1][0])
-        assertEquals(result.map { it.key }.toSet(), moved.pages.flatten().toSet())
+        assertEquals(result.map { it.key }.toSet(), moved.pages.flatten().filter(String::isNotEmpty).toSet())
     }
 
     @Test fun explicitPagesAndOverflowKeepEveryAppExactlyOnce() {
@@ -41,8 +41,8 @@ class PersonalSpaceTest {
         val pages = personalDesktopLayout(apps, null).pages
         assertEquals(3, pages.size)
         assertEquals(apps[0].key, pages[2][0])
-        assertEquals(15, pages.flatten().size)
-        assertEquals(apps.map(Record::key).toSet(), pages.flatten().toSet())
+        assertEquals(15, pages.flatten().filter(String::isNotEmpty).size)
+        assertEquals(apps.map(Record::key).toSet(), pages.flatten().filter(String::isNotEmpty).toSet())
         assertTrue(pages.all { it.size <= 12 })
     }
 
@@ -67,8 +67,8 @@ class PersonalSpaceTest {
         val apps = (20..44).map { app(it, nativeThreadKey(12)) }
         val moved = personalDesktopLayout(apps, null).move(apps[12].key, 0, 0)
         assertEquals(apps[12].key, moved.pages[0][0])
-        assertEquals(apps.size, moved.pages.flatten().size)
-        assertEquals(apps.map(Record::key).toSet(), moved.pages.flatten().toSet())
+        assertEquals(apps.size, moved.pages.flatten().filter(String::isNotEmpty).size)
+        assertEquals(apps.map(Record::key).toSet(), moved.pages.flatten().filter(String::isNotEmpty).toSet())
         assertTrue(moved.pages.all { it.size <= DesktopPageSize })
         assertEquals(moved, personalDesktopLayout(apps, moved.encode()))
     }
@@ -108,7 +108,7 @@ class PersonalSpaceTest {
             .group(third, folder).rename(folder, " Work ")
         assertEquals(DesktopFolder(folder, "Work", listOf(second, first, third)), grouped.folders.single())
         assertEquals(grouped, personalDesktopLayout(apps, grouped.encode()))
-        assertFalse(first in grouped.pages.flatten())
+        assertFalse(first in grouped.pages.flatten().filter(String::isNotEmpty))
         val hidden = apps.map { if (it.key == first) it.copy(payload = it.data().put("desktopHidden", true).toString()) else it }
         assertEquals(grouped, personalDesktopLayout(hidden, grouped.encode()))
         val extracted = grouped.move(first, 0, 0)
@@ -116,8 +116,26 @@ class PersonalSpaceTest {
         assertEquals(listOf(second, third), extracted.folders.single().members)
         val dissolved = extracted.dissolve(folder)
         assertTrue(dissolved.folders.isEmpty())
-        assertEquals(apps.size, dissolved.pages.flatten().size)
-        assertEquals(apps.map(Record::key).toSet(), dissolved.pages.flatten().toSet())
+        assertEquals(apps.size, dissolved.pages.flatten().filter(String::isNotEmpty).size)
+        assertEquals(apps.map(Record::key).toSet(), dissolved.pages.flatten().filter(String::isNotEmpty).toSet())
+    }
+
+    @Test fun vacantSlotsSurviveMoveReloadAndFolderOperations() {
+        val apps = (20..22).map { app(it, nativeThreadKey(12)) }
+        val moved = personalDesktopLayout(apps, null).move(apps[0].key, 0, 11)
+        assertEquals("", moved.pages[0][0])
+        assertEquals(apps[1].key, moved.pages[0][1])
+        assertEquals(apps[0].key, moved.pages[0][11])
+        assertEquals(moved, personalDesktopLayout(apps, moved.encode()))
+        val across = moved.move(apps[0].key, 1, 8)
+        val back = across.move(apps[0].key, 0, 9)
+        assertEquals(apps[0].key, back.pages[0][9])
+        assertEquals(apps[1].key, back.pages[0][1])
+        assertEquals(back, personalDesktopLayout(apps, back.encode()))
+        val grouped = back.group(apps[1].key, apps[2].key, "desktop-folder:holes")
+        assertEquals(apps[0].key, grouped.pages[0][9])
+        assertEquals(grouped, personalDesktopLayout(apps, grouped.encode()))
+        assertEquals(apps[0].key, grouped.dissolve("desktop-folder:holes").pages[0][9])
     }
 
 }

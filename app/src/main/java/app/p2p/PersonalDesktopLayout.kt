@@ -14,8 +14,17 @@ internal data class PersonalDesktopLayout(val pages: List<List<String>>, val fol
 
     fun move(id: String, page: Int, index: Int): PersonalDesktopLayout {
         if (pageOf(id) < 0 && folders.none { id in it.members }) return this
-        val result = pages.map { it.filterNot { key -> key == id }.toMutableList() }.toMutableList()
-        insert(result, id, page, index)
+        val sourcePage = pageOf(id)
+        val sourceSlot = pages.getOrNull(sourcePage)?.indexOf(id) ?: -1
+        val result = pages.map { row -> row.map { if (it == id) "" else it }.toMutableList() }.toMutableList()
+        val targetPage = page.coerceIn(0, result.size)
+        val targetSlot = index.coerceIn(0, DesktopPageSize - 1)
+        val displaced = result.getOrNull(targetPage)?.getOrNull(targetSlot).orEmpty()
+        if (displaced.isNotEmpty() && sourcePage >= 0) {
+            result[sourcePage][sourceSlot] = displaced
+            result[targetPage][targetSlot] = ""
+        }
+        insert(result, id, targetPage, targetSlot)
         return PersonalDesktopLayout(trim(result), folders.map { it.copy(members = it.members - id) })
     }
 
@@ -32,13 +41,13 @@ internal data class PersonalDesktopLayout(val pages: List<List<String>>, val fol
         if (targetPage < 0) return this
         val existing = folders.firstOrNull { it.id == target }
         if (existing != null) return PersonalDesktopLayout(
-            trim(pages.map { it - app }),
+            trim(pages.map { row -> row.map { if (it == app) "" else it } }),
             folders.map { if (it.id == target) it.copy(members = it.members + app) else it }
         )
         val id = newFolderId ?: return this
         if (folders.any { it.id == id }) return this
         return PersonalDesktopLayout(
-            trim(pages.map { page -> (page - app).map { if (it == target) id else it } }),
+            trim(pages.map { page -> page.map { when (it) { app -> ""; target -> id; else -> it } } }),
             folders + DesktopFolder(id, "Folder", listOf(target, app))
         )
     }
@@ -55,10 +64,9 @@ internal data class PersonalDesktopLayout(val pages: List<List<String>>, val fol
         if (page < 0) return this
         val result = pages.map { it.toMutableList() }.toMutableList()
         val slot = result[page].indexOf(id)
-        result[page].removeAt(slot)
+        result[page][slot] = ""
         folder.members.forEachIndexed { index, app ->
-            val destination = slot + index
-            insert(result, app, page + destination / DesktopPageSize, destination % DesktopPageSize)
+            if (index == 0) insert(result, app, page, slot) else append(result, app, page)
         }
         return PersonalDesktopLayout(trim(result), folders - folder)
     }
@@ -98,37 +106,43 @@ internal fun personalDesktopLayout(apps: List<Record>, saved: JSONObject?): Pers
             val entries = sourcePages.optJSONArray(page) ?: return@repeat
             repeat(entries.length()) { index ->
                 val id = entries.optString(index)
-                if ((id in visibleKeys || id in folderIds) && claimed.add(id)) append(pages, id, page)
+                while (pages.size <= page) pages.add(mutableListOf())
+                if (index < DesktopPageSize) {
+                    val accepted = (id in visibleKeys || id in folderIds) && claimed.add(id)
+                    pages[page].add(if (accepted) id else "")
+                } else if ((id in visibleKeys || id in folderIds) && claimed.add(id)) append(pages, id, page + 1)
             }
         }
         folders.filterNot { it.id in claimed }.forEach { append(pages, it.id, pages.lastIndex) }
         // New installs fill the first free page slot. Hidden folder members retain membership.
         visible.sortedBy { it.created }.filterNot { it.key in claimed }.forEach { app ->
-            val freePage = pages.indexOfFirst { it.size < DesktopPageSize }
+            val freePage = pages.indexOfFirst { it.size < DesktopPageSize || "" in it }
             append(pages, app.key, if (freePage == -1) pages.size else freePage)
         }
     }
     return PersonalDesktopLayout(trim(pages), folders)
 }
 
+// Empty strings are vacant cells; never compact interior holes or empty interior pages.
 private fun append(pages: MutableList<MutableList<String>>, id: String, page: Int) {
     var target = page
-    while (target < pages.size && pages[target].size >= DesktopPageSize) target++
+    while (target < pages.size && pages[target].size >= DesktopPageSize && "" !in pages[target]) target++
     while (pages.size <= target) pages.add(mutableListOf())
-    pages[target].add(id)
+    val vacant = pages[target].indexOf("")
+    if (vacant >= 0) pages[target][vacant] = id else pages[target].add(id)
 }
 
 private fun insert(pages: MutableList<MutableList<String>>, id: String, page: Int, index: Int) {
-    var target = page.coerceIn(0, pages.size)
-    if (target == pages.size) pages.add(mutableListOf())
-    pages[target].add(index.coerceIn(0, pages[target].size), id)
-    while (pages[target].size > DesktopPageSize) {
-        val overflow = pages[target].removeAt(DesktopPageSize)
-        target++
-        if (target == pages.size) pages.add(mutableListOf())
-        pages[target].add(0, overflow)
-    }
+    val target = page.coerceIn(0, pages.size)
+    while (pages.size <= target) pages.add(mutableListOf())
+    val slot = index.coerceIn(0, DesktopPageSize - 1)
+    while (pages[target].size <= slot) pages[target].add("")
+    val displaced = pages[target][slot]
+    pages[target][slot] = id
+    if (displaced.isNotEmpty() && displaced != id) append(pages, displaced, target)
 }
 
-private fun trim(pages: List<List<String>>): List<List<String>> =
-    pages.take(pages.indexOfLast { it.isNotEmpty() }.plus(1).coerceAtLeast(1))
+private fun trim(pages: List<List<String>>): List<List<String>> {
+    val result = pages.map { it.dropLastWhile(String::isEmpty) }
+    return result.take(result.indexOfLast { it.isNotEmpty() }.plus(1).coerceAtLeast(1))
+}

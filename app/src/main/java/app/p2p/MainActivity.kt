@@ -364,12 +364,13 @@ internal enum class Area(val label: String, val icon: ImageVector) {
 // Give labels the full tab width; Material's item insets clipped Channels on small phones.
 @Composable
 internal fun RelayNavigationBar(selected: Area, select: (Area) -> Unit, unread: (Area) -> Boolean = { false }) {
+    val navFontScale = LocalDensity.current.fontScale
     Row(modifier = Modifier.fillMaxWidth().wrapContentWidth().widthIn(max = 760.dp)
         .background(Panel).windowInsetsPadding(NavigationBarDefaults.windowInsets).selectableGroup()) {
         Area.entries.forEach { area ->
             val active = selected == area
             val tint = if (active) readableAccent(Panel, Ink) else Quiet
-            Column(Modifier.weight(1f).heightIn(min = 80.dp)
+            Column(Modifier.weight(1f).height(80.dp)
                 .selectable(selected = active, role = Role.Tab, onClick = { select(area) })
                 .padding(horizontal = 2.dp, vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -382,9 +383,10 @@ internal fun RelayNavigationBar(selected: Area, select: (Area) -> Unit, unread: 
                         tint = if (active) MaterialTheme.colorScheme.onSecondaryContainer else Quiet)
                     if (unread(area)) Badge(Modifier.align(Alignment.TopEnd))
                 }
-                Text(area.label, Modifier.fillMaxWidth(), color = tint, fontSize = 12.sp,
-                    lineHeight = 14.sp, textAlign = TextAlign.Center,
-                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal)
+                BasicText(area.label, Modifier.fillMaxWidth(), maxLines = 1, softWrap = false,
+                    style = LocalTextStyle.current.copy(color = tint, textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Medium, letterSpacing = 0.sp, lineHeight = 14.sp / navFontScale),
+                    autoSize = TextAutoSize.StepBased(minFontSize = 8.sp / navFontScale, maxFontSize = 12.sp / navFontScale, stepSize = 0.25.sp / navFontScale))
             }
         }
     }

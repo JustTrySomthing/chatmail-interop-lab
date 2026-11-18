@@ -1,12 +1,12 @@
 # Relay Lab recovery entry point
 
-Updated November 17, 2026. This GitHub repository is **public**.
+Updated November 18, 2026. This GitHub repository is **public**.
 
 ## Current source
 
-Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc67.
+Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc69.
 
-RC67 (103) fixes the bottom navigation label width so Channels is fully visible, balances the Groups and Channels icon sizes, and uses stars consistently for Saved across the toolbar, messages, and channel posts. Navigation destinations, unread indicators, saving behavior, and existing data are preserved. Includes the RC66 default-on daily update checks and release candidates, and the established RC58 signing identity.
+RC69 (105) preserves empty desktop grid positions, supports dragging back and forth across page edges with animated transitions, and keeps the bottom navigation at a fixed height with equal-width tabs and single-line labels. Includes the RC68 folders, long-press menus, and compact Settings. Uses the established RC58 signing identity.
 
 ## Persistent signing identity
 
@@ -27,7 +27,7 @@ base64 --decode recovery/relay-lab-signing.enc.base64 > signing.enc
 openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in signing.enc -out signing-recovery.zip -pass file:/secure/path/password.txt
 ```
 
-The saved ZIP was restored in a separate directory and the downloaded GitHub backup was decrypted and matched byte-for-byte on November 17, 2026. The final RC58 APK was then signed with that restored key and passed the signature guard. Preserve this same identity for every subsequent release.
+The saved ZIP was restored in a separate directory and the downloaded GitHub backup was decrypted and matched byte-for-byte on November 18, 2026. The final RC58 APK was then signed with that restored key and passed the signature guard. Preserve this same identity for every subsequent release.
 
 Historical RC56 certificate: `8f901d6be86ba90c7df654c43d42932758ac9f5d33925e1492dfcb94c3ac7ece`. Its key remains unavailable; public certificates/APKs cannot replace a signing key.
 
@@ -44,4 +44,4 @@ python3 scripts/check-call-apk.py app/build/outputs/apk/preview/app-preview.apk
 python3 scripts/check-release-signature.py app/build/outputs/apk/preview/app-preview.apk --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner"
 ```
 
-Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc67-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
+Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc69-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.

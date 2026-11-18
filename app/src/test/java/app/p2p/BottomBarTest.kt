@@ -30,6 +30,10 @@ class BottomBarTest {
     @Test fun smallPhoneShowsCompleteLabelsAndNavigates() = verify(1f)
     @Test fun largerFontsKeepLabelsAndTouchTargetsVisible() = verify(1.3f)
 
+    @Test fun largeSystemFontsCannotGrowTheBar() = verify(2f)
+    @Test @Config(qualifiers = "w280dp-h640dp")
+    fun veryNarrowPhoneKeepsEverySelectedLabelOnOneLine() = verify(1.3f)
+
     private fun verify(fontScale: Float) {
         seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
         val selected = mutableStateOf(Area.Chats)
@@ -42,6 +46,7 @@ class BottomBarTest {
                     }
                 }
             } } }
+            var baselineHeight: Float? = null
             for (area in Area.entries) {
                 val tab = compose.onNodeWithText(area.label)
                 tab.assertIsDisplayed().performClick().assertIsSelected()
@@ -50,10 +55,12 @@ class BottomBarTest {
                 compose.onNodeWithText(area.label, useUnmergedTree = true)
                     .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
                 assertFalse("${area.label} must not overflow", layouts.single().hasVisualOverflow)
-                if (fontScale == 1f) assertEquals(1, layouts.single().lineCount)
+                assertEquals(1, layouts.single().lineCount)
                 val bounds = tab.fetchSemanticsNode().boundsInRoot
                 assertTrue(bounds.width >= 48f)
                 assertTrue(bounds.height >= 48f)
+                baselineHeight?.let { assertEquals(it, bounds.height, 0.1f) }
+                baselineHeight = bounds.height
             }
             scenario.onActivity { activity ->
                 val view = activity.window.decorView

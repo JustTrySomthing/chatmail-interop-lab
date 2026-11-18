@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -170,7 +171,7 @@ internal fun PersonalAppsDesktop(
                 index % DesktopColumns * cellPx.width,
                 index / DesktopColumns * cellPx.height - scroll.value
             ), cellPx)
-            fun tileAt(point: Offset) = layout.pages.getOrNull(pager.currentPage)?.getOrNull(slot(point))
+            fun tileAt(point: Offset) = layout.pages.getOrNull(pager.currentPage)?.getOrNull(slot(point))?.takeIf { it.isNotEmpty() }
 
             val start by rememberUpdatedState<(Offset) -> Boolean>(start@{ point ->
                 if (!pager.isScrollInProgress && viewport.contains(point)) {
@@ -202,7 +203,7 @@ internal fun PersonalAppsDesktop(
                     val page = pager.currentPage
                     if (!moved) {
                         options = id
-                    } else if (viewport.contains(finger)) {
+                    } else if (finger.y in 0f..viewport.height) {
                         when {
                             current.folder != null && folderBounds.contains(finger) -> Unit
                             current.folder != null -> {
@@ -232,7 +233,7 @@ internal fun PersonalAppsDesktop(
             val abort by rememberUpdatedState<() -> Unit>({ if (drag != null) endDrag(cancel = true) })
             val inFolder = activeFolder != null && folderBounds.contains(finger)
             val edge = when {
-                !moved || !viewport.contains(finger) || inFolder -> 0
+                !moved || finger.y !in 0f..viewport.height || inFolder -> 0
                 finger.x < edgeWidth -> -1
                 finger.x > viewport.width - edgeWidth -> 1
                 else -> 0
@@ -253,7 +254,7 @@ internal fun PersonalAppsDesktop(
                     if (hover in folders) folderOpen = hover
                 }
             }
-            LaunchedEffect(drag?.id, edge) {
+            LaunchedEffect(drag?.id, edge, pager.settledPage) {
                 if (edge == 0) return@LaunchedEffect
                 delay(550)
                 val next = pager.currentPage + edge
@@ -263,7 +264,7 @@ internal fun PersonalAppsDesktop(
                         extraPage = true
                         withFrameNanos { }
                     }
-                    pager.scrollToPage(next)
+                    pager.animateScrollToPage(next, animationSpec = tween(220))
                 }
             }
             val verticalEdge = when {
@@ -317,7 +318,7 @@ internal fun PersonalAppsDesktop(
                                     repeat(DesktopColumns) { column ->
                                         val id = items.getOrNull(row * DesktopColumns + column)
                                         Box(Modifier.weight(1f).height(cellHeight)) {
-                                            if (id != null) key(id) {
+                                            if (!id.isNullOrEmpty()) key(id) {
                                                 val folder = folders[id]
                                                 DesktopTile(shown[id], folder, localFile, iconCache,
                                                     Modifier.fillMaxSize().testTag("desktop-app-$id")
@@ -449,7 +450,7 @@ internal fun PersonalAppsDesktop(
                         if (id.isEmpty()) {
                             val created = DesktopFolder(newFolderId(), value)
                             val page = pager.currentPage
-                            edit { current -> current.addFolder(created, page, current.pages.getOrNull(page).orEmpty().size) }
+                            edit { current -> current.addFolder(created, page, current.pages.getOrNull(page).orEmpty().let { cells -> cells.indexOf("").takeIf { it >= 0 } ?: cells.size }) }
                             folderOpen = created.id
                         } else edit { it.rename(id, value) }
                         naming = null
