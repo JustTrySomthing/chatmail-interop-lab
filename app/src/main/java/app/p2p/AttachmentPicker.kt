@@ -8,14 +8,17 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.*
-import androidx.compose.material3.Text
+import androidx.compose.material3.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.FileProvider
 import java.io.File
 
-/** One chooser for all composers. Selection never opts media out of compression. */
+/** One chooser for all composers. Compression is the default; original files require an explicit choice. */
 @Composable
 internal fun rememberAttachmentPicker(
     model: P2pModel,
@@ -26,10 +29,12 @@ internal fun rememberAttachmentPicker(
     var destination by rememberSaveable { mutableStateOf<String?>(null) }
     var screen by rememberSaveable { mutableStateOf<String?>(null) }
     var capturePath by rememberSaveable { mutableStateOf<String?>(null) }
+    var originalFile by rememberSaveable { mutableStateOf(false) }
     var video by rememberSaveable { mutableStateOf(false) }
     fun finish(items: List<AttachmentDraft> = emptyList()) {
         val target = destination
         destination = null
+        originalFile = false
         screen = null
         if (target != null) onComplete(target, items)
     }
@@ -68,7 +73,7 @@ internal fun rememberAttachmentPicker(
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val items = uris.distinct().map { uri ->
             runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            describeAttachment(context, uri, asFile = false)
+            describeAttachment(context, uri, asFile = originalFile)
         }
         finish(items)
     }
@@ -90,6 +95,12 @@ internal fun rememberAttachmentPicker(
                     else microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
                 },
                 file = {
+                    originalFile = false
+                    screen = null
+                    runCatching { files.launch(arrayOf("*/*")) }.onFailure { screen = "unavailable" }
+                },
+                original = {
+                    originalFile = true
                     screen = null
                     runCatching { files.launch(arrayOf("*/*")) }.onFailure { screen = "unavailable" }
                 })
@@ -103,13 +114,26 @@ internal fun rememberAttachmentPicker(
             Text("Check Android permissions, or use Attach File to select an existing file.")
         }
     }
-    return { target -> if (destination == null) { destination = target; screen = "menu" } }
+    return { target -> if (destination == null) { destination = target; originalFile = false; screen = "menu" } }
 }
 
 @Composable
-internal fun AttachmentActions(photo: () -> Unit, video: () -> Unit, audio: () -> Unit, file: () -> Unit) {
+internal fun AttachmentActions(photo: () -> Unit, video: () -> Unit, audio: () -> Unit, file: () -> Unit, original: () -> Unit) {
+    Text("Uses Your Compression Settings", style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
     P2pRow("Take Photo", "", Icons.Outlined.PhotoCamera, click = photo)
     P2pRow("Record Video", "", Icons.Outlined.Videocam, click = video)
     P2pRow("Record Audio", "", Icons.Outlined.Mic, click = audio)
     P2pRow("Attach File", "", Icons.Outlined.AttachFile, click = file)
+    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+    OutlinedCard(onClick = original, modifier = Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Icon(Icons.Outlined.AttachFile, contentDescription = null)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Attach Original File", style = MaterialTheme.typography.titleSmall)
+                Text("Send without compression. Larger files use more data and may take longer.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
 }

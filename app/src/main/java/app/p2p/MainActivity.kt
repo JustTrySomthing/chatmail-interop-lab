@@ -1179,6 +1179,14 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                                     runNativeAction(done = { attempt++ }) { model.setChatmailReadReceipts(checked) }
                                 })
                         }
+                        Text("Read receipts apply to this profile. Other privacy controls are available below.", color = Quiet)
+                        P2pRow("Notification Privacy", "Choose what appears in alerts and control incoming calls.", Icons.Outlined.NotificationsNone) { modal = "notifications" }
+                        P2pRow("Block List", "Review and unblock contacts or groups.", Icons.Outlined.Block) { modal = "block-list" }
+                        P2pRow("Storage", "Choose how long messages stay on this device.", Icons.Outlined.Inventory2) { modal = "storage" }
+                        P2pRow("Profiles", "Manage profiles or remove a profile from this device.", Icons.Outlined.PeopleOutline) { openProfiles() }
+                        Text("Disappearing messages are set in each conversation’s options. Local storage cleanup only removes this device’s copies.", color = Quiet)
+                        Text("Chatmail conversations use end-to-end encryption. This does not hide everything: delivery services still handle routing information, recipients can keep copies, and websites you open can receive connection information.", color = Quiet)
+                        P2pRow("Privacy Help", "Learn about encryption, apps, deletion and backups.", Icons.Outlined.HelpOutline) { modal = "help" }
                         if (receipts == null) LinearProgressIndicator(Modifier.fillMaxWidth())
                         if (receipts?.isFailure == true) {
                             Text("Connect this profile to load its privacy settings.", color = Quiet)

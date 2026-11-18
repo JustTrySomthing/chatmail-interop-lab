@@ -1,5 +1,13 @@
 # Continue Relay Lab development
 
+## After RC75: original attachments, Help and Privacy
+
+Added a separate outlined Attach Original File action below the four standard attachment choices, with a divider and plain-language size/data warning. Regular Attach File retains compression settings; original selection passes asFile=true through the existing draft/Core File route, bypassing image/video media compression. Choice state resets on completion/cancellation and each new chooser session. Existing preview labels show Original file; original drafts do not offer trimming. Shared chooser covers chats, groups and channels.
+
+Expanded searchable Help from 13 to 28 questions, covering Saved copies, personal/shared apps and desktop management, Media, message actions, archive/trash/mute/block, unread indicators, disappearing versus local retention, encryption limitations, Webxdc internet isolation, original sending/file-size limits, troubleshooting and profile deletion. Corrected original-quality advice and current video/update wording. Privacy now links to existing Notifications, Block List, Storage, Profiles and Help, with clear scope explanations. No new app lock or biometric feature is introduced.
+
+Validation: debug assembly and all 223 automated tests passed with zero failures/errors/skips, including the updated 320 dp attachment-menu test and existing original-file/compression checks. Physical-device original-file sending remains pending. Published APK remains RC75 (111); these changes require the next APK.
+
 ## RC75 release checkpoint — November 18, 2026
 
 RC75 (111) includes the unified attachment menu with compression preserved, clearer button labels, group leaving and channel management, mute/archive fixes, confirmed profile deletion, optional local storage cleanup, unread Channels indicators, and a more prominent in-call video control. Includes all RC74 fixes and keeps the established RC58+ signing identity. Install over RC74 without uninstalling. Android package app.p2p.interop; ARM64; Android 12+; target/compile SDK 35.

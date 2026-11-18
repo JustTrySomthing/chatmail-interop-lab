@@ -20,7 +20,7 @@ import org.robolectric.annotation.GraphicsMode
 class AttachmentMenuTest {
     @get:Rule val compose = createEmptyComposeRule()
 
-    @Test fun fourActionsAreReadableAndRouteIndependently() {
+    @Test fun attachmentChoicesAreReadableAndRouteIndependently() {
         seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
         var action = ""
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -28,16 +28,16 @@ class AttachmentMenuTest {
                 P2pTheme(Appearance(mode = ThemeMode.DARK)) {
                     Column {
                         AttachmentActions({ action = "photo" }, { action = "video" },
-                            { action = "audio" }, { action = "file" })
+                            { action = "audio" }, { action = "file" }, { action = "original" })
                     }
                 }
             } }
             for ((label, expected) in listOf("Take Photo" to "photo", "Record Video" to "video",
-                "Record Audio" to "audio", "Attach File" to "file")) {
+                "Record Audio" to "audio", "Attach File" to "file", "Attach Original File" to "original")) {
                 compose.onNodeWithText(label).assertIsDisplayed().performClick()
                 assertEquals(expected, action)
             }
-            compose.onAllNodes(hasClickAction()).assertCountEquals(4)
+            compose.onAllNodes(hasClickAction()).assertCountEquals(5)
             compose.onNodeWithText("Other File Type").assertDoesNotExist()
             compose.onNodeWithText("Photos").assertDoesNotExist()
         }
