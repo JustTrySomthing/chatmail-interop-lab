@@ -79,3 +79,11 @@ internal fun SavedCollection(
         confirmButton = { TextButton(onClick = { remove(item); removing = null }) { Text("Remove") } },
         dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } }) }
 }
+
+internal fun canDeletePersonalApp(item: Record, native: org.json.JSONObject, selfChat: Int): Boolean {
+    val data = item.data()
+    return selfChat > 9 && data.optInt("nativeMessage") > 9 && data.optBoolean("webxdc") &&
+        !data.optBoolean("locallyDeleted") && data.optInt("nativeOriginalId") <= 9 &&
+        native.optInt("chatId") == selfChat && native.optString("viewType") == "Webxdc" &&
+        native.optInt("originalMsgId") <= 9
+}

@@ -13,6 +13,17 @@ class PersonalSpaceTest {
         nativeMessageKey(id), "file-sent", obj("nativeMessage" to id, "thread" to thread,
             "webxdc" to true, "nativeOriginalId" to original, "locallyDeleted" to deleted).toString(), id.toLong())
 
+    @Test fun personalDeletionRejectsChatAppsAndSavedCopiesAndIsolatesStorage() {
+        val item = Record(nativeMessageKey(20), "file-sent", obj("nativeMessage" to 20, "webxdc" to true).toString())
+        val native = obj("chatId" to 12, "viewType" to "Webxdc")
+        assertTrue(canDeletePersonalApp(item, native, 12))
+        assertFalse(canDeletePersonalApp(item, native, 13))
+        assertFalse(canDeletePersonalApp(item, obj("chatId" to 12, "viewType" to "Webxdc", "originalMsgId" to 25), 12))
+        assertFalse(canDeletePersonalApp(item, obj("chatId" to 12, "viewType" to "Text"), 12))
+        assertNotEquals(webxdcHost(PRIMARY_PROFILE, "me@example.org", 20), webxdcHost(PRIMARY_PROFILE, "me@example.org", 21))
+        assertNotEquals(webxdcHost(PRIMARY_PROFILE, "me@example.org", 20), webxdcHost("other", "me@example.org", 20))
+    }
+
     @Test fun personalDesktopDoesNotImportSharedAppsOrSavedSharedCopies() {
         val self = nativeThreadKey(12)
         val personal = app(20, self)

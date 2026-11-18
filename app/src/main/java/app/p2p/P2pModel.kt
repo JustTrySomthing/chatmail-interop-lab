@@ -2338,6 +2338,20 @@ class P2pModel internal constructor(application: Application, internal val profi
         }
     }
 
+    internal suspend fun deletePersonalApp(key: String): String = collectionMutex.withLock {
+        withChatmail { core ->
+            val item = requireNotNull(records.get(key)) { "This app is unavailable." }
+            val data = item.data()
+            val id = data.optInt("nativeMessage")
+            val message = core.message(id)
+            check(canDeletePersonalApp(item, message, core.savedMessagesChat())) { "Only a personal app can be deleted here." }
+            val host = webxdcHost(profileId, WebxdcInfo.from(core.webxdcInfo(id)).selfAddr, id)
+            core.deleteSavedMessage(id)
+            change(key) { put("locallyDeleted", true) }
+            host
+        }
+    }
+
     internal suspend fun installPersonalApp(draft: AttachmentDraft) {
         try {
             val target = savedMessagesThread()

@@ -17,7 +17,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Dashboard
-import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -27,9 +26,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.core.content.pm.ShortcutInfoCompat
-import androidx.core.content.pm.ShortcutManagerCompat
-import androidx.core.graphics.drawable.IconCompat
 import java.io.ByteArrayInputStream
 import java.io.FilterInputStream
 import java.io.InputStream
@@ -158,10 +154,9 @@ internal fun WebxdcPage(title: String, close: () -> Unit, content: @Composable C
 @Composable
 private fun WebxdcFrame(
     title: String, modifier: Modifier, back: () -> Unit, close: (() -> Unit)? = null,
-    switchApps: (() -> Unit)? = null, visible: Boolean = true, pin: (() -> Unit)? = null,
+    switchApps: (() -> Unit)? = null, visible: Boolean = true,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    var menuOpen by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
     Surface(modifier, color = colors.background, contentColor = colors.onBackground) {
         Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
@@ -173,15 +168,6 @@ private fun WebxdcFrame(
                 },
                 actions = {
                     if (switchApps != null) IconButton(onClick = switchApps) { Icon(Icons.Outlined.Dashboard, "Open apps") }
-                    if (pin != null) Box {
-                        IconButton(onClick = { menuOpen = true }) { Icon(Icons.Outlined.MoreVert, "App options") }
-                        DropdownMenu(menuOpen, onDismissRequest = { menuOpen = false }) {
-                            DropdownMenuItem(text = { Text("Add to home screen") }, onClick = {
-                                menuOpen = false
-                                pin()
-                            })
-                        }
-                    }
                     if (close != null) IconButton(onClick = close) { Icon(Icons.Outlined.Close, "Close $title") }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = colors.surface)
@@ -209,15 +195,6 @@ internal fun List<Record>.webxdcMessages(thread: String?): List<Record> =
 internal data class WebxdcShortcut(val profile: String, val thread: String, val id: Int) {
     fun intent(context: Context) = Intent(ACTION).setClass(context, MainActivity::class.java)
         .putExtra(EXTRA_PROFILE, profile).putExtra("thread", thread).putExtra("message", id)
-
-    fun pin(context: Context, title: String): Boolean {
-        val shortcut = ShortcutInfoCompat.Builder(context, "webxdc-$profile-$id")
-            .setShortLabel(title.ifBlank { "Chat app" }.take(40))
-            .setIcon(IconCompat.createWithResource(context, R.drawable.ic_p2p))
-            .setIntent(intent(context))
-            .build()
-        return runCatching { ShortcutManagerCompat.requestPinShortcut(context, shortcut, null) }.getOrDefault(false)
-    }
 
     companion object {
         private const val ACTION = "app.p2p.OPEN_WEBXDC"
@@ -256,14 +233,7 @@ internal fun WebxdcRunner(
         }
     }
     val bounds = if (visible) Modifier.fillMaxSize() else Modifier.size(0.dp).clearAndSetSemantics {}
-    val pin = info?.let { app ->
-        {
-            if (!WebxdcShortcut(model.profileId, thread, id).pin(context, app.name)) {
-                android.widget.Toast.makeText(context, "This launcher couldn’t add the shortcut.", android.widget.Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-    WebxdcFrame(info?.name ?: title, bounds, minimize, close, switchApps, visible, pin) {
+    WebxdcFrame(info?.name ?: title, bounds, minimize, close, switchApps, visible) {
         val current = info
         when {
             loadError != null -> Text(loadError.orEmpty(), Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error)
@@ -292,12 +262,7 @@ private fun ColumnScope.SandboxedWebxdc(
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val live = remember(id) { AtomicBoolean(true) }
     val joined = remember(id) { AtomicBoolean(false) }
-    val host = remember(id, info.selfAddr) {
-        val address = if (model.profileId == PRIMARY_PROFILE) info.selfAddr else "${model.profileId}:${info.selfAddr}"
-        val profile = java.security.MessageDigest.getInstance("SHA-256").digest(address.toByteArray())
-            .take(8).joinToString("") { "%02x".format(it.toInt() and 255) }
-        "rl-$profile-msg$id.localhost"
-    }
+    val host = remember(id, info.selfAddr) { webxdcHost(model.profileId, info.selfAddr, id) }
     var view by remember(id) { mutableStateOf<WebView?>(null) }
     val diagnostics = remember(id) { mutableStateListOf<String>() }
     fun note(code: String) {
@@ -744,4 +709,11 @@ private class WebxdcBridge(
 
     private fun write(action: (Chatmail) -> Unit): Boolean =
         live.get() && runCatching { runBlocking { model.webxdcWrite(thread, id, action) } }.isSuccess
+}
+
+internal fun webxdcHost(profileId: String, selfAddr: String, id: Int): String {
+    val address = if (profileId == PRIMARY_PROFILE) selfAddr else "$profileId:$selfAddr"
+    val profile = java.security.MessageDigest.getInstance("SHA-256").digest(address.toByteArray())
+        .take(8).joinToString("") { "%02x".format(it.toInt() and 255) }
+    return "rl-$profile-msg$id.localhost"
 }

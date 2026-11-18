@@ -1485,7 +1485,29 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             if (local == null) model.requestDownload(app.key) else launchWebxdc(app, local) },
                         edit = { change -> model.editDesktop(personalThread, change) }, hide = model::setDesktopHidden,
                         add = { modal = "personal-catalog" }, loading = personalLoading,
-                        error = personalError, retry = { personalRevision++ })
+                        error = personalError, retry = { personalRevision++ }, deleteApp = { app ->
+                            val id = app.data().optInt("nativeMessage")
+                            webxdcSessions.removeAll { it.id == id }
+                            if (activeWebxdc == id) activeWebxdc = null
+                            runNativeAction(done = { personalRevision++ }) {
+                                check(androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DELETE_BROWSING_DATA)) {
+                                    "Update Android System WebView to delete this app and all of its data. You can still remove its icon."
+                                }
+                                androidx.compose.runtime.withFrameNanos { }
+                                androidx.compose.runtime.withFrameNanos { }
+                                val host = model.deletePersonalApp(app.key)
+                                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    kotlinx.coroutines.suspendCancellableCoroutine<Unit> { continuation ->
+                                        androidx.webkit.WebStorageCompat.deleteBrowsingDataForSite(android.webkit.WebStorage.getInstance(), "https://$host") {
+                                            if (continuation.isActive) continuation.resumeWith(Result.success(Unit))
+                                        }
+                                    }
+                                    android.webkit.GeolocationPermissions.getInstance().clear("https://$host")
+                                    androidx.core.content.pm.ShortcutManagerCompat.disableShortcuts(context,
+                                        listOf("webxdc-${model.profileId}-$id"), "This personal app was deleted.")
+                                }
+                            }
+                        })
                     area == Area.Chats || area == Area.Groups -> {
                         val isGroup = area == Area.Groups
                         val folder = if (isGroup) groupFolder else chatFolder

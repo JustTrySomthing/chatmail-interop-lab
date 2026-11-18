@@ -70,7 +70,7 @@ internal typealias DesktopEdit = (PersonalDesktopLayout) -> PersonalDesktopLayou
 internal fun PersonalAppsDesktop(
     apps: List<Record>, saved: JSONObject?, localFile: (Record) -> File?,
     open: (Record) -> Unit, edit: (DesktopEdit) -> Unit, hide: (String, Boolean) -> Unit,
-    add: () -> Unit, loading: Boolean, error: String?, retry: () -> Unit
+    add: () -> Unit, loading: Boolean, error: String?, retry: () -> Unit, deleteApp: (Record) -> Unit = {}
 ) {
     val layout = remember(apps, saved) { personalDesktopLayout(apps, saved) }
     val shown = remember(apps) { apps.filterNot { it.data().optBoolean("desktopHidden") }.associateBy(Record::key) }
@@ -81,6 +81,7 @@ internal fun PersonalAppsDesktop(
     var manage by rememberSaveable { mutableStateOf(false) }
     var folderOpen by rememberSaveable { mutableStateOf<String?>(null) }
     var naming by rememberSaveable { mutableStateOf<String?>(null) }
+    var deletingApp by rememberSaveable { mutableStateOf<String?>(null) }
     var deleting by rememberSaveable { mutableStateOf<String?>(null) }
     var drag by remember { mutableStateOf<DesktopDrag?>(null) }
     var finger by remember { mutableStateOf(Offset.Zero) }
@@ -157,7 +158,7 @@ internal fun PersonalAppsDesktop(
             val cellWidth = maxWidth / DesktopColumns
             val cellPx = with(density) { Size(cellWidth.toPx(), cellHeight.toPx()) }
             val viewport = Rect(Offset.Zero, with(density) { Size(maxWidth.toPx(), maxHeight.toPx()) })
-            val edgeWidth = with(density) { 28.dp.toPx() }.coerceAtMost(viewport.width / 6)
+            val edgeWidth = with(density) { 56.dp.toPx() }.coerceAtMost(viewport.width / 7)
             var origin by remember { mutableStateOf(Offset.Zero) }
             var folderBounds by remember { mutableStateOf(Rect.Zero) }
             val memberBounds = remember(activeFolder?.id) { mutableMapOf<String, Rect>() }
@@ -256,7 +257,7 @@ internal fun PersonalAppsDesktop(
             }
             LaunchedEffect(drag?.id, edge, pager.settledPage) {
                 if (edge == 0) return@LaunchedEffect
-                delay(550)
+                delay(250)
                 val next = pager.currentPage + edge
                 if (next in 0..layout.pages.size) {
                     if (next == layout.pages.size) {
@@ -389,6 +390,15 @@ internal fun PersonalAppsDesktop(
                         }
                     }
                 }
+                if (drag != null && edge != 0 && (edge > 0 || pager.currentPage > 0)) {
+                    Box(Modifier.align(if (edge < 0) Alignment.CenterStart else Alignment.CenterEnd)
+                        .width(with(density) { edgeWidth.toDp() }).fillMaxHeight()
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = .18f))
+                        .testTag("desktop-edge-highlight"), contentAlignment = Alignment.Center) {
+                        Icon(if (edge < 0) Icons.Outlined.ChevronLeft else Icons.Outlined.ChevronRight,
+                            "Move to adjacent page", tint = MaterialTheme.colorScheme.onBackground, modifier = Modifier.size(32.dp))
+                    }
+                }
                 drag?.takeIf { moved }?.let { current ->
                     val topLeft = current.tile.topLeft + finger - current.start
                     DesktopTile(shown[current.id], folders[current.id], localFile, iconCache,
@@ -408,32 +418,35 @@ internal fun PersonalAppsDesktop(
         val folder = folders[id]
         val parent = layout.folders.firstOrNull { id in it.members }
         if (app != null || folder != null) {
-            val page = layout.pageOf(id)
             P2pAlertDialog(onDismissRequest = { options = null }, title = { Text(folder?.name ?: app!!.desktopName()) },
                 text = {
-                    Column {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (folder != null) {
-                            DesktopAction("Rename folder") { options = null; naming = id }
-                            DesktopAction("Delete folder") { options = null; deleting = id }
+                            DesktopAction("Rename folder", Icons.Outlined.Edit) { options = null; naming = id }
+                            DesktopAction("Delete folder", Icons.Outlined.FolderDelete) { options = null; deleting = id }
                         }
-                        if (parent != null) {
-                            DesktopAction("Move to Apps") {
-                                edit { current ->
-                                    val parentPage = current.pageOf(parent.id).coerceAtLeast(0)
-                                    current.move(id, parentPage, current.pages[parentPage].indexOf(parent.id) + 1)
-                                }
-                                options = null
+                        if (parent != null) DesktopAction("Remove from folder", Icons.Outlined.FolderOpen) {
+                            edit { current ->
+                                val page = current.pageOf(parent.id).coerceAtLeast(0)
+                                val cells = current.pages[page]
+                                current.move(id, page, cells.indexOf("").takeIf { it >= 0 } ?: cells.size)
                             }
-                        } else {
-                            if (page > 0) DesktopAction("Move to previous page") { nextPage(id, page - 1, 0); options = null }
-                            DesktopAction("Move to next page") { nextPage(id, page + 1, 0); options = null }
-                            if (app != null) layout.folders.forEach { target ->
-                                DesktopAction("Move to ${target.name}") { edit { it.group(id, target.id) }; options = null }
-                            }
+                            options = null
                         }
-                        if (app != null) DesktopAction("Remove icon (keep app data)") { hide(id, true); options = null }
+                        if (app != null) {
+                            DesktopAction("Remove icon", Icons.Outlined.HideSource, "Keep app and saved data") { hide(id, true); options = null }
+                            DesktopAction("Delete app and data", Icons.Outlined.DeleteOutline, "Delete this personal copy", destructive = true) { deletingApp = id; options = null }
+                        }
                     }
-                }, confirmButton = { P2pTextButton(onClick = { options = null }) { Text("Done") } })
+                }, confirmButton = { P2pTextButton(onClick = { options = null }) { Text("Done", color = MaterialTheme.colorScheme.onSurface) } })
+        }
+    }
+    deletingApp?.let { id ->
+        apps.firstOrNull { it.key == id }?.let { app ->
+            P2pAlertDialog(onDismissRequest = { deletingApp = null }, title = { Text("Delete app and data?") },
+                text = { Text("Delete ${app.desktopName()} and its saved data? This cannot be undone. Other installed copies and apps in chats will remain.") },
+                confirmButton = { P2pTextButton(onClick = { deletingApp = null; deleteApp(app) }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+                dismissButton = { P2pTextButton(onClick = { deletingApp = null }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurface) } })
         }
     }
     naming?.let { id ->
@@ -454,17 +467,17 @@ internal fun PersonalAppsDesktop(
                             folderOpen = created.id
                         } else edit { it.rename(id, value) }
                         naming = null
-                    }) { Text(if (id.isEmpty()) "Create" else "Save") }
+                    }) { Text(if (id.isEmpty()) "Create" else "Save", color = MaterialTheme.colorScheme.onSurface) }
                 },
-                dismissButton = { P2pTextButton(onClick = { naming = null }) { Text("Cancel") } })
+                dismissButton = { P2pTextButton(onClick = { naming = null }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurface) } })
         }
     }
     deleting?.let { id ->
         P2pAlertDialog(onDismissRequest = { deleting = null }, title = { Text("Delete folder?") },
             text = { Text("The apps in this folder will move back to the Apps pages.") },
             confirmButton = {
-                P2pTextButton(onClick = { edit { it.dissolve(id) }; deleting = null; folderOpen = null }) { Text("Delete folder") }
-            }, dismissButton = { P2pTextButton(onClick = { deleting = null }) { Text("Cancel") } })
+                P2pTextButton(onClick = { edit { it.dissolve(id) }; deleting = null; folderOpen = null }) { Text("Delete folder", color = MaterialTheme.colorScheme.error) }
+            }, dismissButton = { P2pTextButton(onClick = { deleting = null }) { Text("Cancel", color = MaterialTheme.colorScheme.onSurface) } })
     }
     if (manage) P2pAlertDialog(onDismissRequest = { manage = false }, title = { Text("Hidden app icons") },
         text = {
@@ -472,14 +485,24 @@ internal fun PersonalAppsDesktop(
                 if (hidden.isEmpty()) Text("No hidden icons.")
                 hidden.forEach { app -> DesktopAction("Restore ${app.desktopName()}") { hide(app.key, false) } }
             }
-        }, confirmButton = { P2pTextButton(onClick = { manage = false }) { Text("Done") } })
+        }, confirmButton = { P2pTextButton(onClick = { manage = false }) { Text("Done", color = MaterialTheme.colorScheme.onSurface) } })
 }
 
 @Composable
-private fun DesktopAction(label: String, action: () -> Unit) {
-    Text(label, Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = action)
-        .heightIn(min = 48.dp).wrapContentHeight(Alignment.CenterVertically).padding(vertical = 8.dp),
-        style = MaterialTheme.typography.bodyLarge)
+private fun DesktopAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector = Icons.Outlined.Restore,
+    subtitle: String? = null, destructive: Boolean = false, action: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Surface(onClick = action, modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+        color = colors.surfaceContainerHigh, contentColor = colors.onSurface) {
+        Row(Modifier.heightIn(min = 64.dp).padding(14.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Icon(icon, null, Modifier.size(26.dp), tint = if (destructive) colors.error else readableAccent(colors.surfaceContainerHigh, colors.onSurface))
+            Column(Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
+                subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant) }
+            }
+        }
+    }
 }
 
 @Composable

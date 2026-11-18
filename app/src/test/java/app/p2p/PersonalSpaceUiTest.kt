@@ -46,7 +46,7 @@ class PersonalSpaceUiTest {
             icon.performTouchInput { down(center) }
             compose.mainClock.advanceTimeBy(700)
             icon.performTouchInput { up() }
-            compose.onNodeWithText("Remove icon (keep app data)").assertIsDisplayed().performClick()
+            compose.onNodeWithText("Remove icon").assertIsDisplayed().performClick()
             assertEquals(nativeMessageKey(32), opened)
             compose.runOnIdle { assertEquals(13, apps.value.size) }
             compose.onNodeWithContentDescription("Manage hidden apps").performClick()
@@ -149,7 +149,7 @@ class PersonalSpaceUiTest {
             val viewport = compose.onNodeWithTag("desktop-viewport")
             viewport.performTouchInput { down(Offset(width / 6f, height / 8f)) }
             compose.mainClock.advanceTimeBy(700)
-            viewport.performTouchInput { moveTo(Offset(width + 2f, height / 8f)) }
+            viewport.performTouchInput { moveTo(Offset(width - 40f, height / 8f)) }
             compose.waitForIdle()
             compose.mainClock.advanceTimeBy(1000)
             viewport.performTouchInput { moveTo(Offset(width * 5f / 6, height * 7f / 8)); up() }
@@ -157,7 +157,7 @@ class PersonalSpaceUiTest {
             assertEquals(app.key, layout.value.pages[1][11])
             viewport.performTouchInput { down(Offset(width * 5f / 6, height * 7f / 8)) }
             compose.mainClock.advanceTimeBy(700)
-            viewport.performTouchInput { moveTo(Offset(-2f, height / 2f)) }
+            viewport.performTouchInput { moveTo(Offset(40f, height / 2f)) }
             compose.waitForIdle()
             compose.mainClock.advanceTimeBy(1000)
             viewport.performTouchInput { moveTo(Offset(width / 2f, height * 5f / 8)); up() }
@@ -165,6 +165,36 @@ class PersonalSpaceUiTest {
             assertEquals(app.key, layout.value.pages[0][7])
             compose.onNodeWithText("Done").assertDoesNotExist()
             scenario.onActivity { screenshot("desktop-free-placement", it.window.decorView) }
+        }
+    }
+
+    @Test fun appMenuConfirmsOnlySelectedInstanceDeletion() = verifyAppMenu(ThemeMode.DARK)
+    @Test fun appMenuIsReadableInLightTheme() = verifyAppMenu(ThemeMode.LIGHT)
+
+    private fun verifyAppMenu(mode: ThemeMode) {
+        seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
+        val apps = (20..21).map { id -> Record(nativeMessageKey(id), "file-sent",
+            obj("name" to "Calculator.xdc", "webxdc" to true).toString()) }
+        var deleted: String? = null
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity -> activity.setContent { P2pTheme(Appearance(mode = mode)) {
+                PersonalAppsDesktop(apps, null, { null }, {}, {}, { _, _ -> }, {}, false, null, {},
+                    deleteApp = { deleted = it.key })
+            } } }
+            val icon = compose.onNodeWithTag("desktop-app-${nativeMessageKey(20)}")
+            icon.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
+            compose.onNodeWithText("Move to next page").assertDoesNotExist()
+            compose.onNodeWithText("Move to previous page").assertDoesNotExist()
+            compose.onNodeWithText("Remove icon").assertIsDisplayed()
+            scenario.onActivity { screenshot("app-options-${mode.name.lowercase()}", org.robolectric.shadows.ShadowDialog.getLatestDialog().window!!.decorView) }
+            compose.onNodeWithText("Delete app and data").performClick()
+            assertNull(deleted)
+            compose.onNodeWithText("Cancel").performClick()
+            assertNull(deleted)
+            icon.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnLongClick) { it() }
+            compose.onNodeWithText("Delete app and data").performClick()
+            compose.onNodeWithText("Delete", substring = false).performClick()
+            assertEquals(apps[0].key, deleted)
         }
     }
 
