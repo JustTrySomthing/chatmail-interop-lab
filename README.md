@@ -8,12 +8,12 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc73**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc73/P2P-0.7.23-rc73-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc74**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc74/P2P-0.7.23-rc74-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC73 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC74 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
-RC73 (109) includes all changes since RC72: clearer Saved actions and responsive save stars, larger two-column Settings labels, fullscreen landscape apps, Media filename space and file sizes, more visible Apps buttons, simpler automatic background setup, incoming-call permission guidance, and reminder/video-call fixes. Preserves the established RC58 signing identity.
+RC74 (110) combines profile controls, refines message-field spacing, makes Saved stars use the theme accent and toggle saved copies off, and supports Webxdc fullscreen requests with Back and lifecycle cleanup. Includes all RC73 fixes and preserves the established RC58 signing identity.
 
 ### Update from the app
 
@@ -31,7 +31,7 @@ Relay Lab uses Chatmail Core for interoperability. Cross-app support varies by c
 
 ## Build a debug APK
 
-First check out tag `v0.7.23-rc73` for this release, or branch `securejoin-invites` for current development. Main retains older application source; follow [RECOVERY.md](RECOVERY.md).
+First check out tag `v0.7.23-rc74` for this release, or branch `securejoin-invites` for current development. Main retains older application source; follow [RECOVERY.md](RECOVERY.md).
 
 Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
 
@@ -43,7 +43,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 
 
 Download signed Android builds from the Releases page.
 
-The downloadable APK's source is at the [RC73 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc73). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
+The downloadable APK's source is at the [RC74 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc74). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
 
 ### Release publishing
 
@@ -61,7 +61,7 @@ Chatmail Core handles message delivery, offline queuing, encrypted attachments, 
 
 Verified Chatmail mappings let earlier one-to-one conversations use Core while retaining their local history. Groups created with the earlier P2P protocol keep their original transport and history. Create a group in the current **Groups** screen to use it across clients.
 
-**Settings → Your profile** updates the name, photo, and bio in Chatmail Core. A first-run contact link can supply relay candidates, and an active profile can add a relay or login link. The P2P backup preserves earlier P2P data. Its restore leaves the Chatmail database in place.
+**Settings → Profiles → Edit active profile** updates the name, photo, and bio in Chatmail Core. A first-run contact link can supply relay candidates, and an active profile can add a relay or login link. The P2P backup preserves earlier P2P data. Its restore leaves the Chatmail database in place.
 
 ## Interoperability code
 
@@ -85,7 +85,7 @@ In **Settings → Backup**, export a standard Chatmail archive that includes the
 
 ### Multiple profiles
 
-Open **Settings → Profiles** to switch profiles or add a profile. A new profile opens Setup, where you can create a Chatmail identity, restore a standard backup, or scan an Add Second Device QR code. Setup's **Switch profile** button lets you return to your original profile even before finishing setup. The original profile keeps its existing conversations, identity, and files. Other profiles have their own Chatmail database, local history, attachments, and Webxdc storage.
+Open **Settings → Profiles** to edit the active profile, switch profiles, or add a profile. A new profile opens Setup, where you can create a Chatmail identity, restore a standard backup, or scan an Add Second Device QR code. Setup's **Switch profile** button lets you return to your original profile even before finishing setup. The original profile keeps its existing conversations, identity, and files. Other profiles have their own Chatmail database, local history, attachments, and Webxdc storage.
 
 Enabled profiles receive messages and incoming calls through the existing background connection or scheduled synchronization. An incoming call notification identifies the receiving profile. Opening or answering it switches to that profile if there is no call or other protected operation in progress. Declining keeps the current profile selected. In **Settings → Profiles**, disable an inactive profile to stop its background connection and alerts, or enable it to resume. Finish a call, a backup or device transfer, or a message that's currently sending before switching. Android permissions and the app's updater apply to the whole installation. Creating, switching, and restoring profiles on Android still need device testing.
 
@@ -103,7 +103,7 @@ The Android comparison uses Delta Chat and ArcaneChat 2.69.0. This list tracks t
 | Background delivery for multiple profiles | Implemented. Enabled profiles receive messages and incoming-call alerts. Notification actions route to the receiving profile. Android background timing and cross-profile calls still need phone testing. |
 | Explicitly disable and re-enable a profile | Implemented under **Settings → Profiles** for inactive profiles. |
 | Compare encryption fingerprints | Implemented under **Chat options → Encryption info** for one-to-one Chatmail conversations. |
-| List and remove relays | Implemented under **Settings → Profile → Manage Chatmail relays**. The final relay is protected. |
+| List and remove relays | Implemented under **Settings → Profiles → Edit active profile → Manage Chatmail relays**. The final relay is protected. |
 | Set channel photos | Implemented in **Edit channel** using the standard Chatmail channel image. |
 | Show channel post view counts | Implemented for channel owners using Core read receipts. |
 | Clone a Chatmail group | Implemented in **Group info**. Review the name, description, and members before creating the new group. |
