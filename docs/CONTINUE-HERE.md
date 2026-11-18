@@ -1,14 +1,22 @@
 # Continue Relay Lab development
 
-## Pending next APK: focused regression review
+## RC73 release checkpoint — November 18, 2026
+
+The user requested the next APK, lifting the earlier hold. RC73 (109) includes every source change since RC72: clearer Saved actions, visible save progress/success/retry, readable two-column Settings, immersive landscape Webxdc apps with portrait restoration, Media filename space/file sizes, Apps button contrast, simplified automatic background setup and incoming-call permissions, and native Chatmail reply reminder/video-call Activity fixes. Detailed implementation notes follow.
+
+Verification: 213 automated tests passed with zero failures/errors/skips. Debug and signed preview assemblies passed. The first combined run lost its Gradle daemon; separate test and assembly runs succeeded. APK package app.p2p.interop, version 0.7.23-rc73 (109), min API 31, target/compile API 35. WebRTC packaging and the established RC58+ signing certificate verified. Previous focused Android lint passed with zero errors (50 warnings, one hint). Physical-device checks remain pending for Moto readability, rotation/system bars, lock-screen/background calls and cross-client behavior; automated checks do not establish those results.
+
+APK: P2P-0.7.23-rc73-ARM64-Preview.apk. SHA-256: `26731785f489d9e7eee012cf2c4f8c64601122528f4e36d09df1aee8b9e21975`. Source is tagged v0.7.23-rc73 on securejoin-invites. Install over RC72 without uninstalling. README and main recovery pointers identify this release.
+
+## Included in RC73: focused regression review
 
 User asked for concrete bug fixes only, with no random changes or redesign. Two production edits: ReplyReminder.valid now accepts UUID Chatmail one-to-one chat keys as well as legacy P2P peer IDs (previously Remind me to reply was omitted for native direct chats); video calls obtain their screen-awake window from LocalActivity rather than casting LocalContext, which may be wrapped. Added native conversation/message reminder scheduling, rescheduling, persisted extras, legacy compatibility, and malformed-ID regression tests.
 
 Review covered recent setup/background permissions, call notifications, lock-screen and fullscreen state cleanup, Saved/Media paths, and reminder routing. Android lint initially found one error in the video-call Activity lookup and 50 warnings. Warnings were examined rather than suppressed: intentional ARM64-only packaging, optional PiP animation advice, style/API migration suggestions, application-context ownership, inlined notification permission constants guarded at runtime, immutable replacement of saveable ArrayLists, the existing WebView feature guard, and parent-handled SVG gestures. No dependency upgrades or unrelated UI changes made.
 
-Verification: Android lint passes with zero errors (50 existing warnings and one hint). The combined lint/test/build daemon stopped unexpectedly after lint completed; the fresh run passed all 213 unit/UI tests with zero failures/errors/skips and assembled the debug APK. WebRTC APK packaging verification passed. RC72 (108) remains the published APK. Physical-device interoperability, lock-screen/background delivery, and rotation behavior remain separate verification tasks. Do not claim the entire app is bug-free based on automated checks.
+Verification: Android lint passes with zero errors (50 existing warnings and one hint). The combined lint/test/build daemon stopped unexpectedly after lint completed; the fresh run passed all 213 unit/UI tests with zero failures/errors/skips and assembled the debug APK. WebRTC APK packaging verification passed. These fixes are now included in RC73 (109). Physical-device interoperability, lock-screen/background delivery, and rotation behavior remain separate verification tasks. Do not claim the entire app is bug-free based on automated checks.
 
-## Pending next APK: simpler Setup and call permissions
+## Included in RC73: simpler Setup and call permissions
 
 Background delivery is now automatic, including boot, package updates, and old installations with the removed enabled=false preference. Removed the Receive in background switch from Setup and the equivalent Background delivery switch from Notifications. The optional reliable foreground connection mode remains in notification settings; it is not a receiving on/off switch. Android battery approval is still needed for the existing unobtrusive continuous connection; fallback network jobs remain available when approval is declined. Do not claim guaranteed delivery after force-stop or manufacturer process restrictions.
 
@@ -16,9 +24,9 @@ Setup uses Relay Lab branding and contrasting highlighted cards, describes camer
 
 Permission audit: notifications cover calls/messages/reply reminders; microphone covers voice/video calls and recording; camera covers video calls, QR scanning and captures. File selection uses Android's document picker, so broad storage access is unnecessary. Optional Webxdc location permission remains requested when used. Update installation access is requested at installation. Reply reminders use JobScheduler, not exact alarms, so no exact-alarm or Do Not Disturb bypass permission is added. User mute and Quiet Hours choices remain intact.
 
-Verification: all 211 debug unit/UI tests passed with zero failures/errors/skips, and Kotlin compilation passed. Setup rendering inspected in the dark theme; highlighted card contrast corrected. Tests cover background boot/upgrade scheduling with old disabled preferences, full-screen call versus message routing, Quiet Hours, blocked notification categories, and removal of lock-screen access when call UI closes. Physical locked-screen call reception and manufacturer battery behavior remain device-test tasks. Published APK remains RC72 (108); wait for the user's next APK request.
+Verification: all 211 debug unit/UI tests passed with zero failures/errors/skips, and Kotlin compilation passed. Setup rendering inspected in the dark theme; highlighted card contrast corrected. Tests cover background boot/upgrade scheduling with old disabled preferences, full-screen call versus message routing, Quiet Hours, blocked notification categories, and removal of lock-screen access when call UI closes. Physical locked-screen call reception and manufacturer battery behavior remain device-test tasks. Included in RC73 (109), following the user’s new APK request.
 
-## Pending next APK: readable Settings, fullscreen apps, and save feedback
+## Included in RC73: readable Settings, fullscreen apps, and save feedback
 
 Published APK remains RC72 (108). The user is collecting changes before the next APK; do not publish a new build until requested. This checkpoint includes the clearer Saved actions below.
 
@@ -30,9 +38,9 @@ Visible Webxdc apps enter immersive mode in landscape, hiding Android system bar
 
 Automated verification: all 208 debug unit/UI tests passed, zero failures/errors/skips; Kotlin compilation passed. Narrow-screen Settings and Media screenshots inspected. No APK assembled or published for this checkpoint. Device verification remains pending for Moto readability, Android 36 rotation/gesture behavior, and real-account Saved synchronization. UI tests exercise save progress/success/retry, viewer toolbar restoration, narrow Settings at 280/320/360dp with enlarged fonts, and Media file sizes. The new isolated composable tests use a bare ComponentActivity to avoid launching the entire application's asynchronous UI during component tests.
 
-## Pending next APK: clearer Saved actions
+## Included in RC73: clearer Saved actions
 
-User requested these source changes now and explicitly asked to wait for more changes before making the next APK. Published release remains RC72 (108). Saved menus now say Open Saved Item and Remove From Saved. The source action resolves the actual Chatmail origin to Go to Chat, Go to Group, or Go to Channel, including when the original message is not cached in the UI. Personal items keep that action hidden. While resolution is pending/unavailable, Go to Source avoids falsely identifying a channel as a chat. Existing navigation and removal behavior is preserved; channel navigation opens the channel, so it is not labeled Go to Post. Targeted PersonalSpace and Saved UI tests passed (24 tests, zero failures/errors/skips). No APK or release was created.
+User requested these source changes now and explicitly asked to wait for more changes before making the next APK. The earlier hold was lifted by the user’s RC73 build request. Saved menus now say Open Saved Item and Remove From Saved. The source action resolves the actual Chatmail origin to Go to Chat, Go to Group, or Go to Channel, including when the original message is not cached in the UI. Personal items keep that action hidden. While resolution is pending/unavailable, Go to Source avoids falsely identifying a channel as a chat. Existing navigation and removal behavior is preserved; channel navigation opens the channel, so it is not labeled Go to Post. Targeted PersonalSpace and Saved UI tests passed (24 tests, zero failures/errors/skips). No APK was created at that checkpoint; the changes are now included in RC73.
 
 ## RC72 Saved collection redesign
 
