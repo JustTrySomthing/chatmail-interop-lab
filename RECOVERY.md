@@ -4,9 +4,9 @@ Updated November 17, 2026. This GitHub repository is **public**.
 
 ## Current source
 
-Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc64.
+Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc65.
 
-RC64 (100) adds an Apps bottom tab with a personal Webxdc desktop, catalog installation, icon ordering and pages. Saved is now a global collection backed by standard Chatmail saved copies, with bookmark actions and migration of old stars. Chat app instances remain separate. The RC62 startup improvements and RC63 removal of the three-app cap remain included. Install over RC58–RC63 using the established signing identity. Phone interaction and cross-client verification of the new navigation remain pending.
+RC65 (101) reviews and fixes the personal Apps/Saved implementation: moves onto full desktop pages now work and persist atomically; hidden icons no longer change explicit page placement; drag targets refresh after layout changes; deleted legacy stars are excluded from migration; caption search and existing-Saved attachment navigation work; notes have an accurate removal warning; catalog/Saved errors appear inside their dialogs. All RC64 features and earlier Webxdc fixes remain included. Uses the established RC58 signer. Device and cross-client checks remain separate from automated verification.
 
 ## Persistent signing identity
 
@@ -44,4 +44,4 @@ python3 scripts/check-call-apk.py app/build/outputs/apk/preview/app-preview.apk
 python3 scripts/check-release-signature.py app/build/outputs/apk/preview/app-preview.apk --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner"
 ```
 
-Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc64-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
+Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc65-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
