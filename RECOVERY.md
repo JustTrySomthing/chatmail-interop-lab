@@ -4,9 +4,9 @@ Updated November 18, 2026. This GitHub repository is **public**.
 
 ## Current source
 
-Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc69.
+Repository: JustTrySomthing/chatmail-interop-lab. Active development: **securejoin-invites**, draft PR #1. Fetch its current head before editing. Main retains older application source; follow this pointer and read the branch README and docs/CONTINUE-HERE.md. Current diagnostic release source is tagged v0.7.23-rc70.
 
-RC69 (105) preserves empty desktop grid positions, supports dragging back and forth across page edges with animated transitions, and keeps the bottom navigation at a fixed height with equal-width tabs and single-line labels. Includes the RC68 folders, long-press menus, and compact Settings. Uses the established RC58 signing identity.
+RC70 (106) improves page dragging and themed app menus, adds confirmed personal app/data deletion, and removes Android shortcut creation. Uses the established RC58 signing identity.
 
 ## Persistent signing identity
 
@@ -32,4 +32,4 @@ python3 scripts/check-call-apk.py app/build/outputs/apk/preview/app-preview.apk
 python3 scripts/check-release-signature.py app/build/outputs/apk/preview/app-preview.apk --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner"
 ```
 
-Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc69-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
+Preview output: app/build/outputs/apk/preview/app-preview.apk. Publish the current build as P2P-0.7.23-rc70-ARM64-Preview.apk. Compare its SHA-256 with the uploaded asset. Update README, continuation notes and recovery manifest for each release. Record phone tests separately from build checks.
