@@ -165,7 +165,7 @@ private suspend fun attachCatalogApp(context: Context, app: CatalogApp, attach: 
 }
 
 @Composable
-internal fun WebxdcCatalog(close: () -> Unit, actionLabel: String = "Add to chat", externalBusy: Boolean = false, attach: (AttachmentDraft) -> Unit) {
+internal fun WebxdcCatalog(close: () -> Unit, actionLabel: String = "Add to chat", externalBusy: Boolean = false, externalError: String? = null, attach: (AttachmentDraft) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf("Home") }
@@ -188,11 +188,12 @@ internal fun WebxdcCatalog(close: () -> Unit, actionLabel: String = "Add to chat
     val selection = entries?.firstOrNull { it.id == selectedId }
     WebxdcPage(title = "Apps", close = { if (!busy && !externalBusy) close() }) {
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        if (error != null || index?.cached == true || downloadError != null) {
+        if (error != null || externalError != null || index?.cached == true || downloadError != null) {
             Column(Modifier.padding(horizontal = 16.dp)) {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                externalError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 if (index?.cached == true) Text("Showing the saved app catalog.")
-                P2pTextButton(enabled = !loading && !busy, onClick = {
+                P2pTextButton(enabled = !loading && !busy && !externalBusy, onClick = {
                     error = null
                     downloadError = null
                     loading = true

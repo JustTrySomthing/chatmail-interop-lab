@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.io.File
@@ -49,7 +50,7 @@ internal fun movedApp(order: List<String>, key: String, destination: Int): List<
 
 internal fun personalAppPages(apps: List<Record>): List<List<Record>> {
     val pages = mutableListOf<MutableList<Record>>(mutableListOf())
-    for (app in apps) {
+    for (app in apps.filterNot { it.data().optBoolean("desktopHidden") }) {
         var page = app.data().optInt("desktopPage", 0).coerceIn(0, apps.size)
         while (true) {
             while (pages.size <= page) pages.add(mutableListOf())
@@ -59,6 +60,42 @@ internal fun personalAppPages(apps: List<Record>): List<List<Record>> {
     }
     return pages
 }
+
+// Pin the resulting pages when moving: merely changing the destination metadata
+// cannot move an overflow item back onto a page which is already full.
+internal fun movedPersonalAppPages(apps: List<Record>, order: List<String>, key: String, destination: Int): List<List<Record>> {
+    val pages = personalAppPages(orderedPersonalApps(apps, order))
+        .map { it.toMutableList() }.toMutableList()
+    val moving = pages.flatten().firstOrNull { it.key == key } ?: return pages
+    pages.forEach { it.removeAll { item -> item.key == key } }
+    var page = destination.coerceIn(0, pages.size)
+    while (pages.size <= page) pages.add(mutableListOf())
+    pages[page].add(0, moving)
+    while (pages[page].size > 12) {
+        val overflow = pages[page].removeAt(12)
+        page++
+        if (pages.size <= page) pages.add(mutableListOf())
+        pages[page].add(0, overflow)
+    }
+    while (pages.size > 1 && pages.last().isEmpty()) pages.removeAt(pages.lastIndex)
+    return pages
+}
+
+internal fun legacySavedCandidates(records: List<Record>) = records.filter {
+    val data = it.data()
+    data.optBoolean("star") && !data.optBoolean("locallyDeleted") && data.optInt("webxdcParent") <= 9
+}
+
+internal fun legacySavedParts(item: Record, records: List<Record>): List<Record> {
+    if (item.kind != "post") return listOf(item)
+    val attachments = records.filter { it.kind.startsWith("file-") && it.data().optString("post") == item.key && !it.data().optBoolean("locallyDeleted") }
+    check(attachments.size >= item.data().optInt("media")) { "Some post attachments are unavailable. Download them before saving this post." }
+    return listOf(item) + attachments
+}
+
+internal fun savedRemovalExplanation(item: Record): String =
+    if (item.data().optInt("nativeOriginalId") > 9) "The original message in its conversation will remain."
+    else "This removes the item from Saved. There may be no other copy."
 
 @Composable
 private fun PersonalAppIcon(item: Record, localFile: (Record) -> File?) {
@@ -96,7 +133,7 @@ internal fun PersonalAppsDesktop(
     val shown = ordered.filterNot { it.data().optBoolean("desktopHidden") }
     var selected by remember { mutableStateOf<Record?>(null) }
     var manage by remember { mutableStateOf(false) }
-    val arrangedPages = personalAppPages(shown)
+    val arrangedPages = personalAppPages(ordered)
     val pages = arrangedPages.size
     val pager = rememberPagerState(pageCount = { pages })
     val scope = rememberCoroutineScope()
@@ -122,20 +159,21 @@ internal fun PersonalAppsDesktop(
                     repeat(4) { row ->
                         Row(Modifier.fillMaxWidth()) {
                             repeat(3) { column ->
-                                val app = arrangedPages[page].getOrNull(row * 3 + column)
+                                val app = arrangedPages.getOrNull(page)?.getOrNull(row * 3 + column)
                                 if (app == null) Spacer(Modifier.weight(1f).height(112.dp))
                                 else key(app.key) {
                                     var dragX by remember { mutableFloatStateOf(0f) }
                                     var dragY by remember { mutableFloatStateOf(0f) }
                                     Column(Modifier.weight(1f).height(112.dp)
-                                        .pointerInput(app.key, shown.map { it.key }) {
+                                        .testTag("desktop-app-${app.key}")
+                                        .pointerInput(app.key, page, arrangedPages.map { entries -> entries.map { it.key } }, ordered.map { it.key }) {
                                             detectDragGesturesAfterLongPress(
                                                 onDragStart = { dragX = 0f; dragY = 0f },
                                                 onDragEnd = {
                                                     val dx = kotlin.math.round(dragX / cellWidth).toInt()
                                                     val dy = kotlin.math.round(dragY / cellHeight).toInt()
                                                     val cell = row * 3 + column
-                                                    val targetCell = (cell + dx + dy * 3).coerceIn(0, arrangedPages[page].lastIndex)
+                                                    val targetCell = ((row + dy).coerceIn(0, 3) * 3 + (column + dx).coerceIn(0, 2)).coerceAtMost(arrangedPages[page].lastIndex)
                                                     val targetKey = arrangedPages[page][targetCell].key
                                                     if (targetCell != cell) reorder(movedApp(ordered.map { it.key }, app.key, ordered.indexOfFirst { it.key == targetKey }))
                                                     else selected = app
@@ -222,7 +260,7 @@ internal fun SavedCollection(
         }
     }
     removing?.let { item -> AlertDialog(onDismissRequest = { removing = null }, title = { Text("Remove from Saved?") },
-        text = { Text("The original message in its conversation will remain.") },
+        text = { Text(savedRemovalExplanation(item)) },
         confirmButton = { TextButton(onClick = { remove(item); removing = null }) { Text("Remove") } },
         dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } }) }
 }

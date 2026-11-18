@@ -1,5 +1,13 @@
 # Continue Relay Lab development
 
+## RC65 review checkpoint
+
+The user clarified that Relay Lab is used only by them and a couple of demo testers. Prioritize current behavior; do not add backward-compatibility machinery for obsolete features. Preserve existing test data and the signer when updating.
+
+Reviewed RC64 UI, Core-backed saving, migration, desktop ordering and profile boundaries. Fixed moves from overflow pages onto a full previous page by materializing and atomically saving page assignments/order. Page/hide/order writes share a mutex. Drag gesture closures now refresh with page contents and clamp rows/columns separately. Hidden icons no longer affect page-number clamping. Deleted starred records are not migrated. Legacy social post saves include all attached files, validate media availability before copying, preserve the parent star until all parts succeed, and checkpoint each saved-copy id for resumable retries. Saved attachment actions open Saved when already saved; caption text participates in search. Notes/files without an original reference no longer promise another copy in removal confirmations. Catalog installation and Saved action errors are shown within the open dialog. Profile-keyed composition and standard Core save/delete/Webxdc paths remain in place.
+
+Verification: 184 tests passed (0 failures/errors/skips); required debug tests/build and signed preview build passed; signature and WebRTC APK packaging checks passed. APK SHA-256: `4551e1be2533044b473530a50ee7747d1f3135e11f798ad2d0fa2349fd43e65d`. Tests added for full-page movement and persisted layout, hidden-page stability, deleted-star migration, note removal wording/caption search, complete legacy-post attachment selection and a real pointer drag gesture. Phone/cross-client verification remains pending.
+
 ## RC64 personal desktop and global Saved checkpoint
 
 User approved an Apps bottom tab and global Saved bookmark collection. PersonalSpace.kt contains desktop layout, icon rendering, paging/reorder, hidden-icon restoration, Saved list/search/removal confirmation. Personal installs use commitDraft into Core's self-chat; standard sharing and existing Webxdc runtime remain unchanged. A saved shared-app copy is excluded from the personal desktop using originalMsgId. Old stars are migrated on opening Saved; failed migration keeps old stars visible for retry. Native and channel saves use Core save_msgs with savedMessageId deduplication; legacy items use nativeSend and retain their saved copy id.

@@ -2269,16 +2269,27 @@ class P2pModel internal constructor(application: Application, internal val profi
                 val savedId = core.message(native).optInt("savedMessageId")
                 change(key) { put("nativeSavedId", savedId); remove("star") }
             } else {
-                val prior = data.optInt("savedCopyId")
-                val exists = prior > 9 && runCatching { core.message(prior).optInt("chatId") == chat.id }.getOrDefault(false)
-                if (!exists) {
-                    val file = galleryFile(record)
-                    check(!record.kind.startsWith("file-") || file != null) { "Download this attachment before saving it." }
-                    val text = data.optString("text").ifBlank { data.optString("caption") }
-                        .ifBlank { data.optString("name").ifBlank { "Saved item" } }
-                    val id = core.nativeSend(chat.id, text, null, file, data.optString("name").takeIf { file != null })
-                    change(key) { put("savedCopyId", id); remove("star") }
-                } else change(key) { remove("star") }
+                val parts = legacySavedParts(record, records.threadItems())
+                val files = parts.associate { part -> part.key to galleryFile(part) }
+                check(parts.none { it.kind.startsWith("file-") && files[it.key] == null }) {
+                    "Download all attachments before saving this item."
+                }
+                if (record.kind == "post") change(record.key) { put("star", true) }
+                for (part in parts) {
+                    val partData = part.data()
+                    val prior = partData.optInt("savedCopyId")
+                    val exists = prior > 9 && runCatching { core.message(prior).optInt("chatId") == chat.id }.getOrDefault(false)
+                    if (!exists) {
+                        val file = files[part.key]
+                        val text = partData.optString("text").ifBlank { partData.optString("caption") }
+                            .ifBlank { partData.optString("name").ifBlank { "Saved item" } }
+                        val id = core.nativeSend(chat.id, text, null, file, partData.optString("name").takeIf { file != null })
+                        change(part.key) { put("savedCopyId", id) }
+                    }
+                }
+                // Preserve the legacy star until every attachment is safely copied.
+                // Per-part copy ids let a retry resume without duplicating earlier parts.
+                for (part in parts) change(part.key) { remove("star") }
             }
             refreshAfterNativeSend(core, chat.id, target)
         }
@@ -2304,7 +2315,7 @@ class P2pModel internal constructor(application: Application, internal val profi
     }
 
     internal suspend fun migrateSavedStars() {
-        val starred = (records.threadItems() + records.all("post")).filter { it.data().optBoolean("star") }
+        val starred = legacySavedCandidates(records.threadItems() + records.all("post"))
         var failed = 0
         for (item in starred) try { saveToCollection(item.key) }
         catch (cancelled: CancellationException) { throw cancelled }
@@ -2334,20 +2345,36 @@ class P2pModel internal constructor(application: Application, internal val profi
         } finally { deleteTemporaryDrafts(listOf(draft)) }
     }
 
+    private val desktopMutex = Mutex()
+
     internal fun saveDesktopOrder(order: List<String>) = work {
-        save("personal-app-desktop", "thread-pref", obj("order" to JSONArray(order.distinct())))
+        desktopMutex.withLock {
+            save("personal-app-desktop", "thread-pref", obj("order" to JSONArray(order.distinct())))
+        }
     }
 
     internal fun moveDesktopPage(key: String, page: Int) = work {
-        val item = requireNotNull(records.get(key))
-        check(records.get(item.data().optString("thread"))?.data()?.optBoolean("nativeSelfTalk") == true)
-        change(key) { put("desktopPage", page.coerceAtLeast(0)) }
+        desktopMutex.withLock {
+            val item = requireNotNull(records.get(key))
+            val thread = item.data().optString("thread")
+            check(records.get(thread)?.data()?.optBoolean("nativeSelfTalk") == true)
+            val apps = personalApps(records.threadItems(), thread)
+            val order = records.get("personal-app-desktop")?.data()?.strings("order").orEmpty()
+            val pages = movedPersonalAppPages(apps, order, key, page)
+            database.withTransaction {
+                pages.forEachIndexed { index, entries -> entries.forEach { app -> change(app.key) { put("desktopPage", index) } } }
+                val keys = pages.flatten().map { it.key } + apps.filter { it.data().optBoolean("desktopHidden") }.map { it.key }
+                save("personal-app-desktop", "thread-pref", obj("order" to JSONArray(keys.distinct())))
+            }
+        }
     }
 
     internal fun setDesktopHidden(key: String, hidden: Boolean) = work {
-        val item = requireNotNull(records.get(key))
-        check(records.get(item.data().optString("thread"))?.data()?.optBoolean("nativeSelfTalk") == true)
-        change(key) { put("desktopHidden", hidden) }
+        desktopMutex.withLock {
+            val item = requireNotNull(records.get(key))
+            check(records.get(item.data().optString("thread"))?.data()?.optBoolean("nativeSelfTalk") == true)
+            change(key) { put("desktopHidden", hidden) }
+        }
     }
 
     fun markRead(thread: String) = work {

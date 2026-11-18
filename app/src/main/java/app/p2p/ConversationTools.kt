@@ -37,7 +37,7 @@ internal fun threadSearchMatches(query: String, title: String, values: Iterable<
 }
 
 internal fun Record.searchText(): String = data().let { value ->
-    listOf("text", "name", "mime").map(value::optString).filter(String::isNotBlank).joinToString(" ")
+    listOf("text", "caption", "name", "mime").map(value::optString).filter(String::isNotBlank).joinToString(" ")
 }
 
 internal fun inboxTimestamp(created: Long, now: Long): String {

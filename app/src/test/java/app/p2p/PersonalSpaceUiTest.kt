@@ -4,7 +4,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
-import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.geometry.Offset
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
@@ -63,8 +63,9 @@ class PersonalSpaceUiTest {
         var removed: String? = null
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity -> activity.setContent { P2pTheme(Appearance()) {
-                SavedCollection(rows, self, false, null, {}, {}, {}, { removed = it.key }, {}, {})
+                SavedCollection(rows, self, false, "Unable to remove this saved item", {}, {}, {}, { removed = it.key }, {}, {})
             } } }
+            compose.onNodeWithText("Unable to remove this saved item").assertIsDisplayed()
             compose.onNodeWithText("Saved from Avery").assertIsDisplayed()
             compose.onNodeWithText("Saved from family").assertIsDisplayed()
             compose.onNodeWithText("Original Avery").assertDoesNotExist()
@@ -73,6 +74,28 @@ class PersonalSpaceUiTest {
             assertNull(removed)
             compose.onNodeWithText("Remove", useUnmergedTree = true).performClick()
             assertEquals(nativeMessageKey(40), removed)
+        }
+    }
+
+    @Test fun draggingAnIconReordersWithoutOpeningTheApp() {
+        seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
+        val apps = (20..22).map { id -> Record(nativeMessageKey(id), "file-sent",
+            obj("name" to "App $id.xdc", "nativeMessage" to id, "webxdc" to true, "thread" to nativeThreadKey(12)).toString(), id.toLong()) }
+        val order = mutableStateOf(apps.map { it.key })
+        var opened = false
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity -> activity.setContent { P2pTheme(Appearance()) {
+                PersonalAppsDesktop(apps, order.value, { null }, { opened = true }, { order.value = it },
+                    { _, _ -> }, { _, _ -> }, {}, false, null, {})
+            } } }
+            val icon = compose.onNodeWithTag("desktop-app-${apps[0].key}")
+            icon.performTouchInput { down(Offset(20f, 70f)) }
+            compose.mainClock.advanceTimeBy(1000)
+            icon.performTouchInput { moveBy(Offset(110f, 0f)); up() }
+            compose.runOnIdle {
+                assertEquals(listOf(apps[1].key, apps[0].key, apps[2].key), order.value)
+                assertFalse(opened)
+            }
         }
     }
 

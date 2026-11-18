@@ -2281,7 +2281,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                         onAction = { goThread(contact.key) })
                 }
             }
-            "saved" -> SavedCollection(records, personalThread, personalLoading, personalError,
+            "saved" -> SavedCollection(records, personalThread, personalLoading, personalError ?: nativeActionError,
                 close = { modal = null }, retry = { personalRevision++ },
                 open = { item ->
                     if (item.data().optBoolean("webxdc")) {
@@ -2301,7 +2301,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                     TextButton(onClick = { modal = "saved" }) { Text("Back to Saved") }
                 }
             }
-            "personal-catalog" -> WebxdcCatalog(close = { modal = null }, actionLabel = "Add to my apps", externalBusy = nativeActionBusy, attach = { draft ->
+            "personal-catalog" -> WebxdcCatalog(close = { modal = null }, actionLabel = "Add to my apps", externalBusy = nativeActionBusy, externalError = nativeActionError, attach = { draft ->
                 runNativeAction(done = { modal = null; personalRevision++ }) { model.installPersonalApp(draft) }
             })
             "webxdc-catalog" -> thread?.let { target ->
@@ -2699,7 +2699,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             P2pTextButton(onClick = { model.cancelQueuedOffer(file.key); modal = null }) { Text("Cancel queued offer") }
                         }
                         if (!data.optBoolean("listed")) P2pOutlinedButton(onClick = { model.saveToFiles(file.key); modal = null }) { Text("Save to Files") }
-                        P2pTextButton(onClick = { model.star(file.key); modal = null }) {
+                        P2pTextButton(onClick = { if (file.isSavedItem()) modal = "saved" else { model.star(file.key); modal = null } }) {
                             Text(if (file.isSavedItem()) "Saved" else "Save attachment")
                         }
                     }

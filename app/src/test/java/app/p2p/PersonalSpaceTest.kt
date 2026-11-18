@@ -63,4 +63,40 @@ class PersonalSpaceTest {
         assertEquals(41, message.savedMessageId)
         assertEquals(22, message.originalMsgId)
     }
+    @Test fun movingOverflowAppToFullPreviousPageReallyMovesItAndPreservesEveryInstance() {
+        val apps = (20..44).map { app(it, nativeThreadKey(12)) }
+        val pages = movedPersonalAppPages(apps, emptyList(), apps[12].key, 0)
+        assertEquals(apps[12].key, pages[0][0].key)
+        assertEquals(apps.size, pages.flatten().size)
+        assertEquals(apps.map { it.key }.toSet(), pages.flatten().map { it.key }.toSet())
+        assertTrue(pages.all { it.size <= 12 })
+        val persisted = pages.flatMapIndexed { page, entries -> entries.map { it.copy(payload = it.data().put("desktopPage", page).toString()) } }
+        assertEquals(pages.map { it.map(Record::key) }, personalAppPages(persisted).map { it.map(Record::key) })
+    }
+
+    @Test fun hidingIconsDoesNotPullOtherIconsOffAnExplicitPage() {
+        val apps = (20..24).map { app(it, nativeThreadKey(12)) }.toMutableList()
+        apps[0] = apps[0].copy(payload = apps[0].data().put("desktopPage", 4).toString())
+        for (i in 1..4) apps[i] = apps[i].copy(payload = apps[i].data().put("desktopHidden", true).toString())
+        assertEquals(apps[0].key, personalAppPages(apps)[4].single().key)
+    }
+
+    @Test fun deletedLegacyStarsDoNotMigrateAndSavedNotesHaveHonestRemovalText() {
+        val kept = app(20, nativeThreadKey(12)).copy(payload = obj("star" to true).toString())
+        val deleted = kept.copy(key = "deleted", payload = kept.data().put("locallyDeleted", true).toString())
+        assertEquals(listOf(kept), legacySavedCandidates(listOf(kept, deleted)))
+        assertTrue(savedRemovalExplanation(kept).contains("no other copy"))
+        assertTrue(savedRemovalExplanation(kept.copy(payload = obj("nativeOriginalId" to 30).toString())).contains("will remain"))
+        assertTrue(kept.copy(payload = obj("caption" to "Find this attachment").toString()).searchText().contains("Find this attachment"))
+    }
+
+    @Test fun legacyPostSavingIncludesAllMediaAndRejectsIncompletePosts() {
+        val post = Record("post", "post", obj("text" to "Photo", "media" to 1).toString())
+        val file = Record("photo", "file-received", obj("post" to "post").toString())
+        val other = file.copy(key = "other", payload = obj("post" to "unrelated").toString())
+        assertEquals(listOf(post, file), legacySavedParts(post, listOf(file, other)))
+        assertTrue(runCatching { legacySavedParts(post, listOf(other)) }.isFailure)
+        assertEquals(listOf(file), legacySavedParts(file, listOf(post, file)))
+    }
+
 }
