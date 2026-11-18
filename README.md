@@ -1,6 +1,6 @@
 # Relay Lab
 
-This is the public Relay Lab repository. Start with [RECOVERY.md](RECOVERY.md) when continuing development.
+This is the public Relay Lab repository. See the [RC68 release checkpoint](https://github.com/JustTrySomthing/chatmail-interop-lab/blob/securejoin-invites/docs/RC68.md) for the current development build.
 
 Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat and ArcaneChat. It offers encrypted chats and groups, channels, voice and video calls, chat-shared Webxdc apps, and offline read-aloud.
 
@@ -8,16 +8,16 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc67**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc67/P2P-0.7.23-rc67-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc68**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc68/P2P-0.7.23-rc68-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC67 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC68 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
-RC67 (103) fixes the bottom navigation label width so Channels is fully visible, balances the Groups and Channels icon sizes, and uses stars consistently for Saved across the toolbar, messages, and channel posts. Navigation destinations, unread indicators, saving behavior, and existing data are preserved. Includes the RC66 default-on daily update checks and release candidates, and the established RC58 signing identity.
+RC68 (104) gives Apps an OnKlav-style desktop with themed long-press menus, whole-tile dragging, swipeable pages, page dots, edge arrows, and folders. Settings uses two columns on compact phones, with a single-column fallback when space or system text size requires it. The signed ARM64 APK passed 192 automated tests. Physical phone testing remains pending. See the [RC68 release checkpoint](docs/RC68.md).
 
 ### Update from the app
 
-Open **Settings → Updates** and tap **Check now**. **Check daily** and **Include release candidates** are enabled by default; either can be turned off. RC58 starts a new persistent signing identity. **RC56 and earlier cannot update in place: export a Chatmail backup before uninstalling, then install RC58 and restore it.** Subsequent builds must use the saved RC58 key. Your saved update preferences are respected when upgrading.
+Open **Settings → Updates** and tap **Check now**. **Check daily** and **Include release candidates** are enabled by default. Back up chat history before uninstalling an older build.
 
 ## Features
 
@@ -31,21 +31,21 @@ Relay Lab uses Chatmail Core for interoperability. Cross-app support varies by c
 
 ## Build a debug APK
 
-First check out `securejoin-invites` (active development) or `v0.7.23-rc67` (release source); main currently retains older application source. Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
+Check out the [RC68 release source](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc68) or the `securejoin-invites` development branch before building. Use JDK 17 or 21 and Android SDK Platform 35. Set `ANDROID_HOME` to the SDK directory.
 
 ```sh
 ./gradlew :app:testDebugUnitTest :app:assembleDebug
 ```
 
-The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 scripts/check-call-apk.py app/build/outputs/apk/debug/app-debug.apk` to check the packaged WebRTC library and bootstrap. Use `P2P_INTEROP_KEYSTORE` and `P2P_INTEROP_KEY_PASSWORD` for separately signed release builds.
+The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 scripts/check-call-apk.py app/build/outputs/apk/debug/app-debug.apk` to check the packaged WebRTC library and bootstrap.
 
-For a non-debuggable development APK, run `./gradlew :app:assemblePreview`. The output is `app/build/outputs/apk/preview/app-preview.apk`. This variant uses the dedicated Relay Lab signing configuration. Set both signing environment variables using the restored backup described in RECOVERY.md. Do not distribute a debug-signed replacement.
+Download signed Android builds from the Releases page.
 
-The downloadable APK's source is at the [RC66 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc67). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
+The downloadable APK's source is at the [RC68 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc68). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
 
 ### Release publishing
 
-Update the applicable download row after publishing each build. For release candidates, use tag `vX.Y.Z-rcN`, mark the release as a pre-release, and upload `P2P-X.Y.Z-rcN-ARM64-Preview.apk`. Verify the APK's SHA-256 digest in the public release feed. In-place updates require the same app package and signing certificate as the installed build, and a higher version code.
+Release candidates are published as GitHub pre-releases. See the release checkpoint for verification results and the APK checksum.
 
 The current in-app updater selects release candidates. Verify the RC-to-final upgrade path before publishing a final build and adding its download link.
 
@@ -79,7 +79,7 @@ Long-press a message for editing, deletion for everyone, shared pinning, and sav
 
 In Group info, choose or remove a group photo. On a channel post, use the emoji button to send or remove your reaction. The Chatmail contact list shows the day a contact was last seen when Core reports it.
 
-In **Settings → Backup**, export a standard Chatmail archive that includes the profile and its history. It contains private keys and messages, so keep it in private storage. Choose **Restore Chatmail backup** during setup on a fresh install to import an archive. Existing installations retain their profile and use the existing P2P backup controls for earlier P2P data. For a QR transfer, open **Settings → Backup → Add second device** on the original device. On a fresh Relay Lab install, choose **Add as second device** during setup and scan the code on the same network. Standard Chatmail Core QR transfers still need a cross-client device test.
+In **Settings → Backup**, export a standard Chatmail archive that includes the profile and its history. Keep the archive in private storage. Choose **Restore Chatmail backup** during setup on a fresh install to import an archive. Existing installations retain their profile and use the existing P2P backup controls for earlier P2P data. For a QR transfer, open **Settings → Backup → Add second device** on the original device. On a fresh Relay Lab install, choose **Add as second device** during setup and scan the code on the same network. Standard Chatmail Core QR transfers still need a cross-client device test.
 
 ### Multiple profiles
 
