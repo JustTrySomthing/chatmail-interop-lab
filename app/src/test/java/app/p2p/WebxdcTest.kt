@@ -22,6 +22,43 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class WebxdcTest {
+    @Test fun fullscreenSurfaceIsRemovedAndCallbackRunsOnlyOnce() {
+        org.robolectric.Robolectric.buildActivity(Activity::class.java).setup().use { owner ->
+            val activity = owner.get()
+            val fullscreen = WebxdcFullscreen(activity.window)
+            val view = android.view.View(activity)
+            var hidden = 0
+            fullscreen.show(view, { hidden++ }, allowed = true)
+            assertTrue(fullscreen.active)
+            assertNotNull(view.parent)
+            var rejected = 0
+            fullscreen.show(android.view.View(activity), { rejected++ }, allowed = true)
+            assertEquals(1, rejected)
+            assertTrue(fullscreen.active)
+            fullscreen.hide(keepImmersive = true)
+            fullscreen.hide()
+            assertFalse(fullscreen.active)
+            assertNull(view.parent)
+            assertEquals(1, hidden)
+            fullscreen.show(view, { hidden++ }, allowed = false)
+            assertFalse(fullscreen.active)
+            assertNull(view.parent)
+            assertEquals(2, hidden)
+            fullscreen.show(view, { hidden++ }, allowed = true)
+            fullscreen.hide()
+            assertEquals(3, hidden)
+            assertNull(view.parent)
+        }
+    }
+
+    @Test fun fullscreenIsDelegatedOnlyToTheLocalAppFrame() {
+        assertTrue(webxdcPermissionsPolicy(false).contains("fullscreen=(self)"))
+        val wrapper = java.io.File("src/main/assets/webxdc/webxdc_wrapper.html").readText()
+        assertTrue(wrapper.contains("allowfullscreen"))
+        assertTrue(wrapper.contains("fullscreen 'self'"))
+        assertTrue(wrapper.contains("sandbox=\"allow-scripts\""))
+    }
+
     @Test fun appDiagnosticsKeepErrorTypeWithoutMessageOrUrl() {
         assertEquals("TypeError", webxdcErrorCategory("Uncaught TypeError: secret payload at https://private.example/"))
         assertEquals("JavaScript error", webxdcErrorCategory("message containing private chat contents"))

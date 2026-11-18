@@ -1,5 +1,15 @@
 # Continue Relay Lab development
 
+## Pending next APK: Webxdc fullscreen requests
+
+User reported Quake III on RC73 with working invisible touch regions and TypeErrors at index.html lines 406/445. Inspected catalog package wofwca-quake3-v5.1.0.xdc: move/look are empty transparent divs, and those two lines call requestFullscreen. The line-163 CSP warning is its external Google Fonts stylesheet; keep network restrictions intact. The line-784 generic engine log is insufficient to diagnose. Do not claim visible controls were missing because Relay Lab blocked them.
+
+Fixed actual host omissions: delegate fullscreen to the same-origin app iframe and declare fullscreen=(self) in the response policy; handle WebChromeClient custom fullscreen views with an owned black overlay, system-bar hiding/restoration, and Back to exit. Reject hidden/background sessions and duplicate/attached views. Clean up on stop, hiding, renderer/WebView release, and disposal; callback is delivered once and the custom surface detached. Exiting fullscreen while a landscape game remains visible preserves landscape immersive bars. No changes to app packages, sandbox network access, sensor/camera/microphone grants, or game controls.
+
+Verification: all 216 automated tests passed with zero failures/errors/skips; debug APK assembly and WebRTC packaging check passed. Added tests for fullscreen attachment/removal/reopening, exactly-once callback cleanup, duplicate/hidden request rejection, and local iframe delegation.
+
+Published APK remains RC73 (109). These changes and the Profiles/composer/Saved fixes below await the next signed APK. Quake fullscreen behavior needs physical Android/WebView testing; automated surface tests are not that verification.
+
 ## Pending next APK: Profiles, composer spacing and saved-star toggles
 
 User deferred scheduled sending; no scheduling controls or behavior were added. Settings now has one Profiles entry. Its existing management dialog adds Edit active profile, which opens the existing name/photo/bio/relay editor; switching, adding, and enabling/disabling inactive profiles retain their existing behavior. No profile deletion or data migration was added.

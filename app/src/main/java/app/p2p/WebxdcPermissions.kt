@@ -41,7 +41,7 @@ internal fun webxdcCaptureCapabilities(origin: Uri, host: String, resources: Arr
 
 internal fun webxdcPermissionsPolicy(motionAllowed: Boolean): String {
     val motion = if (motionAllowed) "(self)" else "()"
-    return "camera=(self), microphone=(self), geolocation=(self), accelerometer=$motion, " +
+    return "fullscreen=(self), camera=(self), microphone=(self), geolocation=(self), accelerometer=$motion, " +
         "gyroscope=$motion, magnetometer=$motion, ambient-light-sensor=()"
 }
 

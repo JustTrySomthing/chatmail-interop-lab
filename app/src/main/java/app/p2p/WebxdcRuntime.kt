@@ -274,6 +274,12 @@ private fun ColumnScope.SandboxedWebxdc(
     visible: Boolean, hasGuard: Boolean, preparationMs: Long?, guardWaitMs: Long?, close: () -> Unit, sendDraft: (String, AttachmentDraft?) -> Unit
 ) {
     val context = LocalContext.current
+    val activity = androidx.activity.compose.LocalActivity.current
+    val fullscreen = remember(id, activity) { activity?.window?.let(::WebxdcFullscreen) }
+    BackHandler(enabled = visible && fullscreen?.active == true) {
+        fullscreen?.hide(context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
+    }
+    DisposableEffect(fullscreen) { onDispose { fullscreen?.hide() } }
     val frameStartedAt = remember(id) { android.os.SystemClock.elapsedRealtime() }
     val currentPreparationMs by rememberUpdatedState(preparationMs)
     val currentGuardWaitMs by rememberUpdatedState(guardWaitMs)
@@ -310,6 +316,7 @@ private fun ColumnScope.SandboxedWebxdc(
         permissions.androidResult(permissionsInForeground())
     }
     fun releaseBrowser(web: WebView) {
+        fullscreen?.hide()
         if (!destroyed.compareAndSet(false, true)) return
         live.set(false)
         permissions.deny()
@@ -389,6 +396,7 @@ private fun ColumnScope.SandboxedWebxdc(
                     else browser?.onPause()
                 }
                 Lifecycle.Event.ON_STOP -> {
+                    fullscreen?.hide()
                     if (permissions.authorized) closeSensitiveSession(browser)
                     else permissions.deny()
                 }
@@ -397,6 +405,7 @@ private fun ColumnScope.SandboxedWebxdc(
         }
         if (visible) lifecycle.addObserver(observer)
         else {
+            fullscreen?.hide()
             permissions.deny()
             if (permissions.authorized) closeSensitiveSession(browser)
             else {
@@ -492,6 +501,14 @@ private fun ColumnScope.SandboxedWebxdc(
                     }
                 }
                 web.webChromeClient = object : WebChromeClient() {
+                    override fun onShowCustomView(customView: View, callback: CustomViewCallback) {
+                        if (fullscreen == null) callback.onCustomViewHidden()
+                        else fullscreen.show(customView, callback, isVisible && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+                    }
+                    override fun onHideCustomView() {
+                        fullscreen?.hide(isVisible && context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
+                    }
+
                     override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                         if (message.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
                             note("${webxdcErrorCategory(message.message())}; line ${message.lineNumber()}")
