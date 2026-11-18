@@ -1,5 +1,11 @@
 # Continue Relay Lab development
 
+## Pending after RC74: attention indicators and video control
+
+User prioritized clear unread/missed-event indicators and deferred the remaining lower-priority parity additions. Existing chat/group unread counts and navigation dots, missed-call styling/Talk dot and voicemail badges remain. Fixed the main Channels tab omission: native channel unread state now feeds its navigation dot, refreshes during background/foreground Core catalog sync, and clears as channels are opened or removed. Following already shows channel unread counts.
+
+Audio-call UI now offers a full-width themed Turn Video On/Off button with a 32 dp camera icon and at least 56 dp height. The fullscreen video overlay camera icon is also 32 dp and high contrast, retaining its existing hit target/layout. Camera permission and signaling behavior are unchanged. Validation: debug assembly and all 223 automated tests passed with zero failures/errors/skips. Published APK remains RC74.
+
 ## Pending after RC74: group, channel, profile and storage controls
 
 Implemented the first requested Delta-help parity priorities. Group details now offer confirmed Leave Group, backed by Core self-removal, retaining history and showing membership status. Channel details offer Unfollow Channel for subscribers and Delete Channel for owners, with explicit consequences; owned posts have themed Post Options with Edit Post and confirmed Delete Post. Subscriber removal leaves through Core before deleting history; owner deletion does not claim to erase subscribers’ saved copies.

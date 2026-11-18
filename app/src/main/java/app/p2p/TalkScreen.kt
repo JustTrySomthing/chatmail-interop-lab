@@ -242,12 +242,13 @@ internal fun TalkCallPanel(
                     }
                     TalkPhase.Active, TalkPhase.Connecting -> {
                         if (call.phase == TalkPhase.Active) {
-                            IconButton(onClick = camera, modifier = Modifier.semantics {
-                                stateDescription = if (call.camera) "On" else "Off"
-                            }) {
-                                Icon(if (call.camera) Icons.Outlined.Videocam else Icons.Outlined.VideocamOff,
-                                    if (call.camera) "Turn camera off" else "Turn camera on",
-                                    tint = if (call.camera) colors.primary else colors.onSurfaceVariant)
+                            Button(onClick = camera, enabled = !call.switchingCamera, shape = P2pButtonShape,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).semantics {
+                                    stateDescription = if (call.camera) "On" else "Off"
+                                }) {
+                                Icon(Icons.Outlined.Videocam, null, Modifier.size(32.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Text(if (call.camera) "Turn Video Off" else "Turn Video On")
                             }
                             Button(onClick = mute, shape = P2pButtonShape, modifier = Modifier.fillMaxWidth()) {
                                 Icon(if (call.muted) Icons.Outlined.MicOff else Icons.Outlined.Mic, null)
@@ -320,7 +321,8 @@ private fun FullScreenTalkVideo(
                     }) {
                         Icon(if (call.camera) Icons.Outlined.Videocam else Icons.Outlined.VideocamOff,
                             if (call.camera) "Turn camera off" else "Turn camera on",
-                            tint = if (call.camera) Color.White else Color.LightGray)
+                            modifier = Modifier.size(32.dp),
+                            tint = Color.White)
                     }
                     if (call.camera) {
                         IconButton(onClick = switchCamera, enabled = !call.switchingCamera, modifier = Modifier.semantics {

@@ -6,6 +6,8 @@ Reviewed 2026-11-18 against https://delta.chat/en/help and Relay Lab source comm
 
 This is a source/API/UI review, not a new device interoperability test or independent security audit. The help page is an overview, not an exhaustive conformance specification. Existing automated tests do not demonstrate complete interoperability.
 
+User priority update: remaining pin-navigation, original-media, initial-video-choice and presence additions are deferred. Prioritize clear unread/missed-event indicators and an obvious in-call video toggle; see CONTINUE-HERE.md for that implementation.
+
 ## Actionable findings
 
 | Priority | Finding in Relay Lab | Evidence and next step |

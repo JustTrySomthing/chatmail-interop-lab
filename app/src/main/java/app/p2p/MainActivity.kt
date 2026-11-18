@@ -1347,7 +1347,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                                 Area.Talk -> (record.kind == "file-received" && data.optBoolean("voicemail")) || record.kind == "call-history"
                                 Area.Chats -> record.kind in setOf("message", "file-received") && !data.optBoolean("voicemail") && groups.none { it.key == data.optString("thread") }
                                 Area.Groups -> record.kind in setOf("message", "file-received") && groups.any { it.key == data.optString("thread") }
-                                Area.Social -> record.kind in setOf("post", "social-action")
+                                Area.Social -> record.kind in setOf("post", "social-action", "channel-attention")
                                 Area.Apps -> false
                             }
                         }

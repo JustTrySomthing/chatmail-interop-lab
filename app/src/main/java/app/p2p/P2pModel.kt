@@ -623,11 +623,19 @@ class P2pModel internal constructor(application: Application, internal val profi
         withContext(Dispatchers.Main) { saved() }
     }
 
-    internal suspend fun chatmailChannels() = withChatmail(action = Chatmail::channels)
+    private suspend fun cacheChannelAttention(channels: List<ChatmailChannel>) {
+        cacheNativeRecord("channel-attention", "channel-attention",
+            obj("unread" to channels.any { !it.owned && it.unread > 0 }), 0L)
+    }
+
+    internal suspend fun chatmailChannels() = withChatmail { core ->
+        core.channels().also { cacheChannelAttention(it) }
+    }
 
     internal suspend fun chatmailChannelHistory(id: Int, limit: Int) = withChatmail { core ->
         val channel = requireNotNull(core.channel(id)) { "Waiting for the channel owner to process your join request." }
         core.noticeChannel(channel)
+        cacheChannelAttention(core.channels())
         val history = core.channelPosts(channel, limit)
         history.copy(posts = history.posts.map(::channelPostMedia))
     }
@@ -865,6 +873,7 @@ class P2pModel internal constructor(application: Application, internal val profi
     private suspend fun updateNativeCatalog(core: Chatmail, now: Long) {
         if (now < nextNativeSync) return
         nextNativeSync = now + 8_000
+        cacheChannelAttention(core.channels())
         val legacy = records.all("contact").mapNotNull { row ->
             row.data().optInt("chatmailChat").takeIf { it > 9 }?.let { it to row.key }
         }.toMap()
@@ -2187,6 +2196,7 @@ class P2pModel internal constructor(application: Application, internal val profi
 
     internal suspend fun removeChatmailChannel(id: Int) = withChatmail { core ->
         core.removeChannel(id)
+        cacheChannelAttention(core.channels())
         clearThreadAlerts(nativeThreadKey(id))
     }
     internal suspend fun editChannelPost(id: Int, text: String) = withChatmail { it.editChannelPost(id, text.trim()) }
