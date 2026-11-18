@@ -397,6 +397,8 @@ internal class Chatmail(directory: File) : AutoCloseable {
         val ids = call("get_pinned_messages", chat) as JSONArray
         return nativeRows(chat, (0 until ids.length()).map(ids::getInt))
     }
+    fun deleteSavedMessage(id: Int) { call("delete_messages", JSONArray(listOf(id))) }
+
     fun saveMessage(id: Int) { call("save_msgs", JSONArray(listOf(id))) }
     fun savedMessagesChat(): Int = (call("create_chat_by_contact_id", 1) as Number).toInt()
     fun disappearingTimer(chat: Int): Int = (call("get_chat_ephemeral_timer", chat) as Number).toInt()
@@ -601,7 +603,7 @@ internal data class ChatmailChannel(
 internal data class ChannelPost(
     val id: Int, val channelId: Int, val channelName: String, val text: String,
     val time: Long, val state: Int, val attachment: ChatmailAttachment?, val localFile: File? = null,
-    val reactions: Map<Int, List<String>> = emptyMap()
+    val reactions: Map<Int, List<String>> = emptyMap(), val saved: Boolean = false
 )
 internal data class ChannelHistory(val posts: List<ChannelPost>, val hasOlder: Boolean)
 
@@ -624,7 +626,7 @@ internal fun parseChannelPost(message: JSONObject, channel: ChatmailChannel): Ch
     if (text.isBlank() && attachment == null) return null
     return ChannelPost(id, channel.id, channel.name, text,
         message.optLong("timestamp") * 1_000L, message.optInt("state"), attachment,
-        reactions = readNativeReactions(message))
+        reactions = readNativeReactions(message), saved = message.optInt("savedMessageId") > 9)
 }
 
 internal data class ChatmailContact(

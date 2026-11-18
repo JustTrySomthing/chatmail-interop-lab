@@ -38,7 +38,7 @@ internal data class NativeMessage(
     val reactions: Map<Int, List<String>>,
     val webxdcParent: Int? = null, val webxdcHref: String? = null,
     val edited: Boolean = false, val pinned: Boolean = false, val hasLocation: Boolean = false,
-    val forwarded: Boolean = false
+    val forwarded: Boolean = false, val savedMessageId: Int = 0, val originalMsgId: Int = 0
 )
 
 internal data class ChatmailAttachment(
@@ -154,7 +154,7 @@ internal fun readNativeMessage(row: JSONObject, chat: Int, webxdcParent: Int? = 
         quote?.optString("text").orEmpty(), quote?.optString("authorDisplayName").orEmpty(),
         row.optJSONObject("sender")?.optString("displayName").orEmpty(), attachment, readNativeReactions(row),
         webxdcParent, row.optString("webxdcHref").takeIf { webxdcParent != null && !row.isNull("webxdcHref") },
-        row.optBoolean("isEdited"), row.optBoolean("isPinned"), row.optBoolean("hasLocation"), row.optBoolean("isForwarded"))
+        row.optBoolean("isEdited"), row.optBoolean("isPinned"), row.optBoolean("hasLocation"), row.optBoolean("isForwarded"), row.optInt("savedMessageId"), row.optInt("originalMsgId"))
 }
 
 internal fun chatmailAttachmentViewType(

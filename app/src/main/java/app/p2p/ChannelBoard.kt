@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.outlined.Bookmark
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.EmojiEmotions
@@ -356,7 +358,7 @@ internal fun ChannelBoard(
                         }
                     }
                     ChannelPostCard(post, ownedPost, channelPhoto.ifEmpty { profilePhoto.takeIf { ownedPost }.orEmpty() },
-                        null, preview, openLink, { openAttachment(post) }, { if (!busy) reactingTo = post }, views)
+                        null, preview, openLink, { openAttachment(post) }, { if (!busy) reactingTo = post }, views, savePost = { submit { model.saveChannelPost(post.id) } })
                 }
                 if (hasOlder) item { P2pTextButton(onClick = { limit += 50 }) { Text("Load older posts") } }
             }
@@ -366,7 +368,7 @@ internal fun ChannelBoard(
                 }
                 items(matches, key = { it.id }) { post ->
                     ChannelPostCard(post, false, "", { selectChannel(post.channelId) }, preview, openLink,
-                        { openAttachment(post) }, { if (!busy) reactingTo = post })
+                        { openAttachment(post) }, { if (!busy) reactingTo = post }, savePost = { submit { model.saveChannelPost(post.id) } })
                 }
             }
             page == "Following" -> {
@@ -523,7 +525,7 @@ internal fun SocialPostCard(
 @Composable
 private fun ChannelPostCard(
     post: ChannelPost, owned: Boolean, photo: String, open: (() -> Unit)?, preview: (PreviewLink) -> Unit,
-    openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit, react: () -> Unit, views: Int? = null
+    openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit, react: () -> Unit, views: Int? = null, savePost: () -> Unit
 ) {
     val save = LocalMediaDownload.current
     val colors = MaterialTheme.colorScheme
@@ -541,6 +543,7 @@ private fun ChannelPostCard(
         }
         val reactions = post.reactions.values.flatten().groupingBy { it }.eachCount()
         Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = savePost) { Icon(if (post.saved) Icons.Outlined.Bookmark else Icons.Outlined.BookmarkBorder, if (post.saved) "Saved post" else "Save post") }
             IconButton(onClick = react) { Icon(Icons.Outlined.EmojiEmotions, "React to post") }
             if (reactions.isNotEmpty()) Text(reactions.entries.joinToString("  ") { (emoji, count) ->
                 if (count == 1) emoji else "$emoji $count"

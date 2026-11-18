@@ -354,7 +354,8 @@ private enum class Area(val label: String, val icon: ImageVector) {
     Talk("Talk", Icons.Outlined.Call),
     Chats("Chats", Icons.AutoMirrored.Outlined.Chat),
     Groups("Groups", Icons.Outlined.Groups),
-    Social("Channels", Icons.Outlined.Campaign)
+    Social("Channels", Icons.Outlined.Campaign),
+    Apps("Apps", Icons.Outlined.GridView)
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -417,6 +418,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
             return@P2pTheme
         }
         var area by rememberSaveable { mutableStateOf(Area.Chats) }
+        var personalThread by remember { mutableStateOf<String?>(null) }
+        var personalLoading by remember { mutableStateOf(false) }
+        var personalError by remember { mutableStateOf<String?>(null) }
+        var personalRevision by remember { mutableIntStateOf(0) }
         var chatFolder by rememberSaveable { mutableStateOf("Inbox") }
         var groupFolder by rememberSaveable { mutableStateOf("Inbox") }
         var socialPage by rememberSaveable { mutableStateOf("My Page") }
@@ -767,9 +772,22 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                 threadPreferences[id]?.optBoolean("blocked") == true
         val inlineAudio = LocalInlineAudio.current
         val appsInChat = remember(records, thread) { records.webxdcMessages(thread) }
-        LaunchedEffect(guard, hasWebxdcSessions, appsInChat.isNotEmpty(), modal) {
+        LaunchedEffect(area == Area.Apps, modal == "saved", personalRevision) {
+            if (area == Area.Apps || modal == "saved") {
+                personalLoading = true
+                try {
+                    personalError = chatAction {
+                        withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            if (modal == "saved") model.migrateSavedStars()
+                            personalThread = model.preparePersonalSpace()
+                        }
+                    }
+                } finally { personalLoading = false }
+            }
+        }
+        LaunchedEffect(guard, hasWebxdcSessions, appsInChat.isNotEmpty(), modal, area) {
             if (hasWebxdcSessions || appsInChat.isNotEmpty() ||
-                modal == "webxdc-catalog" || modal == "webxdc-sessions") warmWebxdcGuard = true
+                modal == "webxdc-catalog" || modal == "personal-catalog" || modal == "webxdc-sessions" || area == Area.Apps) warmWebxdcGuard = true
         }
         LaunchedEffect(records, threadPreferences, hasWebxdcSessions) {
             if (!hasWebxdcSessions) return@LaunchedEffect
@@ -853,9 +871,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                 if (href.isNotEmpty()) webxdcSessions[index] = webxdcSessions[index].copy(href = href)
             } else {
                 val title = data.optString("name").substringBeforeLast('.').ifBlank { "App" }
-                webxdcSessions.add(WebxdcSession(target, appId, local, href, title))
+                val ownerLabel = if (conversation.data().optBoolean("nativeSelfTalk")) "Only you" else name(target)
+                webxdcSessions.add(WebxdcSession(target, appId, local, href, "$title · $ownerLabel"))
             }
-            if (thread != target) {
+            if (thread != target && !(area == Area.Apps && conversation.data().optBoolean("nativeSelfTalk"))) {
                 goArea(if (conversation.kind == "group") Area.Groups else Area.Chats)
                 goThread(target)
             }
@@ -1083,7 +1102,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
             val searchLabel = if (searchingContacts) "Search contacts" else "Search settings"
             FullPageScreen(fullPage, ::closeFullPage, actions = {
                 AppToolbarActions(appMuted, model::setAppNotificationsMuted, searchLabel,
-                    { fullPageSearch = true }, { modal = "contacts" }, ::openSettings)
+                    { fullPageSearch = true }, { modal = "contacts" }, ::openSettings, { modal = "saved" })
             }) {
                 when (fullPage) {
                     FullPageRoute.Contacts -> {
@@ -1316,9 +1335,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             }
                         }
                         AppToolbarActions(appMuted, model::setAppNotificationsMuted,
-                            if (id == null) "Search" else "Search conversation",
-                            { modal = if (id == null) "area-search" else "thread-search" },
-                            { modal = "contacts" }, ::openSettings)
+                            if (id == null && area == Area.Apps) "Add apps" else if (id == null) "Search" else "Search conversation",
+                            { modal = if (id == null && area == Area.Apps) "personal-catalog" else if (id == null) "area-search" else "thread-search" },
+                            { modal = "contacts" }, ::openSettings, { modal = "saved" })
                     }
                 )
             },
@@ -1342,6 +1361,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                                             Area.Chats -> record.kind in setOf("message", "file-received") && !data.optBoolean("voicemail") && groups.none { it.key == data.optString("thread") }
                                             Area.Groups -> record.kind in setOf("message", "file-received") && groups.any { it.key == data.optString("thread") }
                                             Area.Social -> record.kind in setOf("post", "social-action")
+                                            Area.Apps -> false
                                         }
                                     }
                                     Box { Icon(value.icon, null); if (unread) Badge(Modifier.align(Alignment.TopEnd).offset(x = 16.dp, y = (-6).dp)) }
@@ -1385,7 +1405,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                         ThreadView(
                             id = id, view = threadView, records = records, peer = peer,
                             find = threadQuery, searchOpen = modal == "thread-search",
-                            name = ::name, photo = ::photo, onView = { threadView = it },
+                            name = ::name, photo = ::photo, onView = { if (it == "Saved") modal = "saved" else threadView = it },
                             quote = records.firstOrNull { it.key == quote && it.kind == "message" },
                             clearQuote = { quote = null },
                             attachments = mediaDrafts[id].orEmpty(), preparing = submitting || sendingDraft,
@@ -1410,7 +1430,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             attach = { modal = "attach" },
                             messageMenu = ::showItemActions,
                             react = { selected = it; modal = "message-reactions" },
-                            star = { model.star(it) },
+                            star = { key -> if (records.firstOrNull { it.key == key }?.isSavedItem() == true) modal = "saved" else model.star(key) },
                             galleryFile = model::galleryFile,
                             requestAttachment = { model.requestDownload(it) },
                             file = ::showAttachment,
@@ -1442,6 +1462,15 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             }
                         )
                     }
+                    area == Area.Apps -> PersonalAppsDesktop(
+                        apps = personalApps(records, personalThread),
+                        order = records.firstOrNull { it.key == "personal-app-desktop" }?.data()?.strings("order").orEmpty(),
+                        localFile = model::galleryFile,
+                        open = { app -> val local = model.galleryFile(app)
+                            if (local == null) model.requestDownload(app.key) else launchWebxdc(app, local) },
+                        reorder = model::saveDesktopOrder, hide = model::setDesktopHidden, movePage = model::moveDesktopPage,
+                        add = { modal = "personal-catalog" }, loading = personalLoading,
+                        error = personalError, retry = { personalRevision++ })
                     area == Area.Chats || area == Area.Groups -> {
                         val isGroup = area == Area.Groups
                         val folder = if (isGroup) groupFolder else chatFolder
@@ -1769,6 +1798,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                         else -> null
                     }
                     val actions = buildList {
+                        if (!conversation && item.kind in setOf("message", "file-sent", "file-received", "post") && data.optInt("webxdcParent") <= 9) {
+                            add(ItemAction(if (item.isSavedItem()) "View Saved" else "Save", Icons.Outlined.BookmarkBorder) {
+                                if (item.isSavedItem()) modal = "saved" else { model.star(item.key); modal = null }
+                            })
+                        }
                         if (text.isNotBlank() && !conversation) add(ItemAction("Copy text", Icons.Outlined.ContentCopy) {
                             copyItemText(text)
                         })
@@ -1788,10 +1822,6 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                         if (activeThread && data.optInt("nativeMessage") > 9 && data.optInt("webxdcParent") <= 9) {
                             add(ItemAction("Forward", Icons.AutoMirrored.Outlined.Reply) { modal = "forward-message" })
                             add(ItemAction("Message info", Icons.Outlined.Info) { modal = "message-info" })
-                            add(ItemAction("Save to Saved Messages", Icons.Outlined.BookmarkBorder) {
-                                model.saveNativeMessage(item.key)
-                                modal = null
-                            })
                             add(ItemAction(if (data.optBoolean("nativePinned")) "Unpin message" else "Pin message",
                                 Icons.Outlined.PushPin) {
                                 model.toggleNativeMessagePin(item.key)
@@ -2237,9 +2267,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                 Button(onClick = { modal = "add-contact" }) { Text(if (channelInviteOnly) "Back to join channel" else "Back to accept invite") }
             }
             "chat-new" -> Sheet("New chat", { modal = null }) {
-                P2pRow("Saved Messages", "Notes and saved messages", Icons.Outlined.BookmarkBorder,
+                P2pRow("Saved", "Your saved items from every conversation", Icons.Outlined.BookmarkBorder,
                     enabled = !nativeActionBusy) {
-                    runNativeAction(done = {}) { goThread(model.savedMessagesThread()) }
+                    modal = "saved"
                 }
                 val available = contacts.filterNot { blocked(it.key) || it.data().has("nativeContact") }
                 NativeContactRows(model, "", showEmpty = available.isEmpty()) { id ->
@@ -2251,6 +2281,29 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                         onAction = { goThread(contact.key) })
                 }
             }
+            "saved" -> SavedCollection(records, personalThread, personalLoading, personalError,
+                close = { modal = null }, retry = { personalRevision++ },
+                open = { item ->
+                    if (item.data().optBoolean("webxdc")) {
+                        val local = model.galleryFile(item)
+                        if (local == null) model.requestDownload(item.key) else launchWebxdc(item, local)
+                    } else if (item.kind.startsWith("file-")) showAttachment(item.key)
+                    else { selected = item.key; modal = "saved-detail" }
+                }, remove = { item -> runNativeAction(done = { personalRevision++ }) { model.removeSavedCopy(item.key) } },
+                source = { item -> runNativeAction(done = {}) {
+                    val target = model.savedOriginalThread(item.key)
+                    if (target.second != null) { goArea(Area.Social); channelId = target.second }
+                    else { goArea(Area.Chats); goThread(requireNotNull(target.first)) }
+                } }, note = { runNativeAction(done = {}) { goArea(Area.Chats); goThread(model.savedMessagesThread()) } })
+            "saved-detail" -> records.firstOrNull { it.key == selected }?.let { item ->
+                Sheet("Saved item", { modal = "saved" }) {
+                    androidx.compose.foundation.text.selection.SelectionContainer { Text(item.data().optString("text").ifBlank { item.data().optString("caption") }) }
+                    TextButton(onClick = { modal = "saved" }) { Text("Back to Saved") }
+                }
+            }
+            "personal-catalog" -> WebxdcCatalog(close = { modal = null }, actionLabel = "Add to my apps", externalBusy = nativeActionBusy, attach = { draft ->
+                runNativeAction(done = { modal = null; personalRevision++ }) { model.installPersonalApp(draft) }
+            })
             "webxdc-catalog" -> thread?.let { target ->
                 WebxdcCatalog(close = { modal = null }, attach = {
                     if (thread == target) {
@@ -2647,7 +2700,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                         }
                         if (!data.optBoolean("listed")) P2pOutlinedButton(onClick = { model.saveToFiles(file.key); modal = null }) { Text("Save to Files") }
                         P2pTextButton(onClick = { model.star(file.key); modal = null }) {
-                            Text(if (data.optBoolean("star")) "Remove star" else "Star attachment")
+                            Text(if (file.isSavedItem()) "Saved" else "Save attachment")
                         }
                     }
                 }
@@ -2987,14 +3040,15 @@ private fun SystemNavigationBar() {
 @Composable
 private fun AppToolbarActions(
     muted: Boolean, setMuted: (Boolean) -> Unit, searchLabel: String,
-    search: () -> Unit, contacts: () -> Unit, settings: () -> Unit
+    search: () -> Unit, contacts: () -> Unit, settings: () -> Unit, saved: () -> Unit
 ) {
     val tint = readableAccent(Base, Ink)
+    IconButton(onClick = saved) { Icon(Icons.Outlined.BookmarkBorder, "Saved", tint = tint) }
     IconToggleButton(checked = muted, onCheckedChange = setMuted) {
         Icon(if (muted) Icons.Outlined.NotificationsOff else Icons.Outlined.NotificationsNone,
             if (muted) "Unmute all notifications" else "Mute all notifications", tint = tint)
     }
-    IconButton(onClick = search) { Icon(Icons.Outlined.Search, searchLabel, tint = tint) }
+    IconButton(onClick = search) { Icon(if (searchLabel == "Add apps") Icons.Outlined.Add else Icons.Outlined.Search, searchLabel, tint = tint) }
     IconButton(onClick = contacts) { Icon(Icons.Outlined.PersonOutline, "Contacts", tint = tint) }
     IconButton(onClick = settings) { Icon(Icons.Outlined.Settings, "Settings", tint = tint) }
 }
@@ -3337,7 +3391,7 @@ internal fun ColumnScope.ThreadView(
     val seenReactions = remember(id) { reactionsByMessage.toMutableMap() }
     val visible = remember(messages, view, find) {
         val filtered = when (view) {
-            "Starred" -> messages.filter { it.data().optBoolean("star") }
+            "Saved" -> messages.filter { it.isSavedItem() }
             "Gallery" -> messages.filter { it.kind.startsWith("file-") && it.data().let { data ->
                 mediaKind(data.optString("mime"), data.optString("name")) != null
             } }
@@ -3363,7 +3417,7 @@ internal fun ColumnScope.ThreadView(
     val showEmoji = canCompose && view == Feed && !searchOpen && emojiPicker && !keyboardVisible
     BackHandler(showEmoji) { emojiPicker = false }
     if (!keyboardVisible || LocalConfiguration.current.screenHeightDp >= 480 || view != Feed) {
-        Segments(listOf(Feed, "Gallery", "Starred"), view, prominent = true) { next ->
+        Segments(listOf(Feed, "Gallery", "Saved"), view, prominent = true) { next ->
             emojiPicker = false
             focus.clearFocus()
             onView(next)
@@ -3397,7 +3451,7 @@ internal fun ColumnScope.ThreadView(
             if (visible.isEmpty()) {
                 val message = when {
                     find.isNotBlank() -> "No matching messages"
-                    view == "Starred" -> "No starred messages"
+                    view == "Saved" -> "No saved messages"
                     view == "Gallery" -> "No shared media"
                     else -> "No messages"
                 }
@@ -3456,7 +3510,7 @@ internal fun ColumnScope.ThreadView(
                                                 IconButton(onClick = { react(message.key) }, enabled = canCompose) {
                                                     Icon(Icons.Outlined.EmojiEmotions, if (isAttachment) "React to attachment" else "React to message", Modifier.size(24.dp))
                                                 }
-                                                StarButton(data.optBoolean("star"), if (isAttachment) "attachment" else "message") { star(message.key) }
+                                                StarButton(message.isSavedItem(), if (isAttachment) "attachment" else "message") { star(message.key) }
                                             }
                                         }
                                         if (maxWidth < 300.dp) Column {
@@ -3698,8 +3752,8 @@ private fun QuotedMessage(author: String, text: String) {
 @Composable
 private fun StarButton(starred: Boolean, item: String, toggle: () -> Unit) {
     IconButton(onClick = toggle) {
-        Icon(if (starred) Icons.Outlined.Star else Icons.Outlined.StarBorder,
-            if (starred) "Unstar " + item else "Star " + item,
+        Icon(if (starred) Icons.Outlined.Bookmark else Icons.Outlined.BookmarkBorder,
+            if (starred) "Saved " + item else "Save " + item,
             Modifier.size(25.dp), tint = LocalContentColor.current)
     }
 }
@@ -3743,7 +3797,7 @@ private fun MediaGallery(
                             .padding(horizontal = 9.dp), contentAlignment = Alignment.CenterStart) {
                             Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis, fontSize = 12.sp)
                         }
-                        StarButton(data.optBoolean("star"), "attachment") { star(record.key) }
+                        StarButton(record.isSavedItem(), "attachment") { star(record.key) }
                     }
                 }
             }

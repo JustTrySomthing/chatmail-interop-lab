@@ -642,6 +642,17 @@ class P2pModel internal constructor(application: Application, internal val profi
     private fun channelPostMedia(post: ChannelPost): ChannelPost =
         post.copy(localFile = post.attachment?.let(::availableChatmailFile))
 
+    internal suspend fun saveChannelPost(id: Int) = collectionMutex.withLock {
+        withChatmail { core ->
+            requireNotNull(core.channelPost(id)) { "This post is unavailable." }
+            if (core.message(id).optInt("savedMessageId") <= 9) core.saveMessage(id)
+            val chat = requireNotNull(core.nativeThread(core.savedMessagesChat()))
+            cacheNativeThread(chat)
+            refreshAfterNativeSend(core, chat.id, nativeThreadKey(chat.id))
+        }
+        notice.value = "Saved."
+    }
+
     internal suspend fun requestChannelAttachment(id: Int) = withChatmail { core ->
         val post = channelAttachment(core, id)
         val attachment = requireNotNull(post.attachment) { "This post no longer has an attachment." }
@@ -996,6 +1007,8 @@ class P2pModel internal constructor(application: Application, internal val profi
                 data.put("nativeMessage", message.id).put("thread", thread).put("author", author)
                     .put("text", message.text).put("caption", message.text)
                     .put("nativeEdited", message.edited).put("nativePinned", message.pinned)
+                    .put("nativeSavedId", message.savedMessageId).put("nativeOriginalId", message.originalMsgId.takeIf { it > 9 } ?: data.optInt("nativeOriginalId"))
+                    .put("nativeSelfTalk", chat.selfTalk)
                     .put("nativeLocation", message.hasLocation).put("nativeForwarded", message.forwarded)
                     .put("group", if (chat.group) thread else "")
                     .put("unread", !data.optBoolean("locallyDeleted") &&
@@ -2236,10 +2249,105 @@ class P2pModel internal constructor(application: Application, internal val profi
         alerts.clear(area, thread)
     }
 
-    fun star(key: String) = work {
-        database.withTransaction {
-            change(key) { put("star", !optBoolean("star")) }
+    // The historical star entry points now use standard Chatmail saved copies.
+    fun star(key: String) = work { saveToCollection(key) }
+
+    private val collectionMutex = Mutex()
+
+    internal suspend fun saveToCollection(key: String) = collectionMutex.withLock {
+        val record = requireNotNull(records.get(key)) { "This item is unavailable." }
+        val data = record.data()
+        withChatmail { core ->
+            val chat = requireNotNull(core.nativeThread(core.savedMessagesChat()))
+            cacheNativeThread(chat)
+            val target = nativeThreadKey(chat.id)
+            if (data.optString("thread") == target) return@withChatmail
+            val native = data.optInt("nativeMessage")
+            if (native > 9) {
+                val original = core.message(native)
+                if (original.optInt("savedMessageId") <= 9 && original.optInt("originalMsgId") <= 9) core.saveMessage(native)
+                val savedId = core.message(native).optInt("savedMessageId")
+                change(key) { put("nativeSavedId", savedId); remove("star") }
+            } else {
+                val prior = data.optInt("savedCopyId")
+                val exists = prior > 9 && runCatching { core.message(prior).optInt("chatId") == chat.id }.getOrDefault(false)
+                if (!exists) {
+                    val file = galleryFile(record)
+                    check(!record.kind.startsWith("file-") || file != null) { "Download this attachment before saving it." }
+                    val text = data.optString("text").ifBlank { data.optString("caption") }
+                        .ifBlank { data.optString("name").ifBlank { "Saved item" } }
+                    val id = core.nativeSend(chat.id, text, null, file, data.optString("name").takeIf { file != null })
+                    change(key) { put("savedCopyId", id); remove("star") }
+                } else change(key) { remove("star") }
+            }
+            refreshAfterNativeSend(core, chat.id, target)
         }
+        notice.value = "Saved."
+    }
+
+    internal suspend fun preparePersonalSpace(): String {
+        // Load saved history in pages so older personal apps are not omitted.
+        val target = savedMessagesThread()
+        withChatmail { core ->
+            val chat = requireNotNull(core.nativeThread(core.savedMessagesChat()))
+            var previous = Int.MAX_VALUE
+            while (true) {
+                val data = records.get(target)?.data() ?: break
+                val before = data.optInt("nativeHistoryFirst")
+                if (!data.optBoolean("nativeHasOlder") || before <= 9 || before >= previous) break
+                previous = before
+                updateNativeHistory(core, chat, target, 100, before,
+                    cached = records.threadItems().filter { it.data().optString("thread") == target })
+            }
+        }
+        return target
+    }
+
+    internal suspend fun migrateSavedStars() {
+        val starred = (records.threadItems() + records.all("post")).filter { it.data().optBoolean("star") }
+        var failed = 0
+        for (item in starred) try { saveToCollection(item.key) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { failed++ } // Keep unsuccessful legacy stars visible for retry.
+        if (failed > 0) notice.value = "$failed older saved items need a download or connection; their stars were preserved."
+    }
+
+    internal suspend fun removeSavedCopy(key: String) = collectionMutex.withLock {
+        withChatmail { core ->
+            val item = requireNotNull(records.get(key))
+            val id = item.data().optInt("nativeMessage")
+            val chat = core.savedMessagesChat()
+            check(id > 9 && core.message(id).optInt("chatId") == chat) { "Only a saved copy can be removed here." }
+            core.deleteSavedMessage(id)
+            change(key) { put("locallyDeleted", true) }
+            for (source in records.threadItems() + records.all("post")) {
+                if (source.data().optInt("nativeSavedId") == id || source.data().optInt("savedCopyId") == id)
+                    change(source.key) { remove("nativeSavedId"); remove("savedCopyId"); remove("star") }
+            }
+        }
+    }
+
+    internal suspend fun installPersonalApp(draft: AttachmentDraft) {
+        try {
+            val target = savedMessagesThread()
+            commitDraft(target, "", null, listOf(draft))
+        } finally { deleteTemporaryDrafts(listOf(draft)) }
+    }
+
+    internal fun saveDesktopOrder(order: List<String>) = work {
+        save("personal-app-desktop", "thread-pref", obj("order" to JSONArray(order.distinct())))
+    }
+
+    internal fun moveDesktopPage(key: String, page: Int) = work {
+        val item = requireNotNull(records.get(key))
+        check(records.get(item.data().optString("thread"))?.data()?.optBoolean("nativeSelfTalk") == true)
+        change(key) { put("desktopPage", page.coerceAtLeast(0)) }
+    }
+
+    internal fun setDesktopHidden(key: String, hidden: Boolean) = work {
+        val item = requireNotNull(records.get(key))
+        check(records.get(item.data().optString("thread"))?.data()?.optBoolean("nativeSelfTalk") == true)
+        change(key) { put("desktopHidden", hidden) }
     }
 
     fun markRead(thread: String) = work {
@@ -2429,9 +2537,19 @@ class P2pModel internal constructor(application: Application, internal val profi
         changeNativeMessage(key) { core, message -> core.setMessagePinned(message.id, !message.pinned) }
     }
 
-    internal fun saveNativeMessage(key: String) = work {
-        changeNativeMessage(key) { core, message -> core.saveMessage(message.id) }
-        notice.value = "Added to Saved Messages."
+    internal fun saveNativeMessage(key: String) = work { saveToCollection(key) }
+
+    internal suspend fun savedOriginalThread(key: String): Pair<String?, Int?> = withChatmail { core ->
+        val item = requireNotNull(records.get(key))
+        val id = item.data().optInt("nativeOriginalId")
+        val message = core.message(id)
+        val chatId = message.optInt("chatId")
+        val channel = core.channel(chatId)
+        if (channel != null) return@withChatmail null to channel.id
+        val chat = requireNotNull(core.nativeThread(chatId)) { "The original conversation is unavailable." }
+        cacheNativeThread(chat)
+        refreshAfterNativeSend(core, chat.id, nativeThreadKey(chat.id), id)
+        nativeThreadKey(chat.id) to null
     }
 
     internal suspend fun savedMessagesThread(): String = withChatmail { core ->

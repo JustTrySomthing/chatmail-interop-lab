@@ -165,7 +165,7 @@ private suspend fun attachCatalogApp(context: Context, app: CatalogApp, attach: 
 }
 
 @Composable
-internal fun WebxdcCatalog(close: () -> Unit, attach: (AttachmentDraft) -> Unit) {
+internal fun WebxdcCatalog(close: () -> Unit, actionLabel: String = "Add to chat", externalBusy: Boolean = false, attach: (AttachmentDraft) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var tab by rememberSaveable { mutableStateOf("Home") }
@@ -186,7 +186,7 @@ internal fun WebxdcCatalog(close: () -> Unit, attach: (AttachmentDraft) -> Unit)
     }
     val entries = index?.entries
     val selection = entries?.firstOrNull { it.id == selectedId }
-    WebxdcPage(title = "Apps", close = { if (!busy) close() }) {
+    WebxdcPage(title = "Apps", close = { if (!busy && !externalBusy) close() }) {
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         if (error != null || index?.cached == true || downloadError != null) {
             Column(Modifier.padding(horizontal = 16.dp)) {
@@ -237,9 +237,9 @@ internal fun WebxdcCatalog(close: () -> Unit, attach: (AttachmentDraft) -> Unit)
                 item { Text(selection.description, style = contentTextStyle(MaterialTheme.typography.bodyLarge)) }
                 item {
                     downloadError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                    if (busy || externalBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        P2pOutlinedButton(enabled = !busy, onClick = {
+                        P2pOutlinedButton(enabled = !busy && !externalBusy, onClick = {
                             busy = true
                             downloadError = null
                             scope.launch {
@@ -247,8 +247,8 @@ internal fun WebxdcCatalog(close: () -> Unit, attach: (AttachmentDraft) -> Unit)
                                     downloadError = chatAction { attachCatalogApp(context, selection, attach) }
                                 } finally { busy = false }
                             }
-                        }) { Text("Add to chat") }
-                        P2pTextButton(enabled = !busy, onClick = { selectedId = null }) { Text("Close") }
+                        }) { Text(actionLabel) }
+                        P2pTextButton(enabled = !busy && !externalBusy, onClick = { selectedId = null }) { Text("Close") }
                     }
                 }
             }

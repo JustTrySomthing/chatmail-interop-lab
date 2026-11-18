@@ -64,7 +64,7 @@ class ThreadFeedTest {
     }
 
     @Test
-    fun feedAndGalleryExposeStarsReactionsAndAttachmentPlayback() {
+    fun feedAndGalleryExposeSavedActionsReactionsAndAttachmentPlayback() {
         val audio = Record("audio", "file-sent", obj("thread" to "test-thread", "name" to "Recording.wav",
             "mime" to "audio/wav").toString())
         val video = Record("video", "file-sent", obj("thread" to "test-thread", "name" to "Clip.mp4",
@@ -81,12 +81,12 @@ class ThreadFeedTest {
             compose.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
             compose.onNodeWithContentDescription("React to message").performClick()
             assertEquals(listOf(video.key, message(1).key), reacted)
-            compose.onNodeWithContentDescription("Star message").performClick()
+            compose.onNodeWithContentDescription("Save message").performClick()
             compose.onNodeWithText("Gallery").performClick()
-            compose.onAllNodesWithContentDescription("Star attachment")[1].performClick()
-            compose.onNodeWithContentDescription("Unstar attachment").assertIsDisplayed()
+            compose.onAllNodesWithContentDescription("Save attachment")[1].performClick()
+            compose.onNodeWithContentDescription("Saved attachment").assertIsDisplayed()
             assertEquals(listOf(video.key), opened)
-            compose.onNodeWithText("Starred").performClick()
+            compose.onNodeWithText("Saved").performClick()
             compose.onNodeWithText("Recording.wav").assertIsDisplayed()
             compose.onNodeWithText("Message 1").assertIsDisplayed()
         }

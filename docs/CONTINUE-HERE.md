@@ -1,5 +1,13 @@
 # Continue Relay Lab development
 
+## RC64 personal desktop and global Saved checkpoint
+
+User approved an Apps bottom tab and global Saved bookmark collection. PersonalSpace.kt contains desktop layout, icon rendering, paging/reorder, hidden-icon restoration, Saved list/search/removal confirmation. Personal installs use commitDraft into Core's self-chat; standard sharing and existing Webxdc runtime remain unchanged. A saved shared-app copy is excluded from the personal desktop using originalMsgId. Old stars are migrated on opening Saved; failed migration keeps old stars visible for retry. Native and channel saves use Core save_msgs with savedMessageId deduplication; legacy items use nativeSend and retain their saved copy id.
+
+Personal app order is a profile-scoped thread-pref record; desktop page and hidden metadata are on the local cached message, preserved by normal cache refresh. Layout is local presentation, not a promised cross-client synchronized desktop. Removing icons does not delete data. Saved deletion verifies the target is in the self-chat and calls Core delete_messages; original messages are not deleted. Saved details and original-conversation navigation are separate actions.
+
+Automated verification: 179 tests passed (0 failures/errors/skips), including native-graphics Robolectric UI interaction tests for paging/opening exact instances, icon hiding/restoration, and global Saved/removal confirmation. Required debug tests/build and signed preview assembly passed; APK certificate and WebRTC packaging checks passed. APK SHA-256: `d3cbcc55e6a8fb4adb0c63aef79997de010a8bcaff5748f66f899158e43e9f7d`. Visual inspection additionally corrected desktop dark-theme content contrast and stacked Saved actions for narrow screens. Icon options have an explicit button; long-press dragging still needs phone verification. Required phone checks: personal installs, multiple independent copies, long-press drag, swipe pages, moving to new page, hiding/restoring icons, global Saved from two chats and channel, migration with an unavailable attachment, delete original vs saved copy, profile switching, restore and cross-client Webxdc status updates. Do not claim device or cross-client checks passed from unit tests.
+
 ## RC63 open-app parity checkpoint
 
 The user requested removal of artificial restrictions and parity with Delta Chat/ArcaneChat. Removed MAX_OPEN_WEBXDC_APPS=3 and the launch rejection/toast. The existing Compose app switcher and session identity are preserved; opening more apps does not evict existing ones. This aligns the absence of a product-level three-app cap; it does not claim identical Android activity architecture.
