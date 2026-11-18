@@ -1,6 +1,14 @@
 # Continue Relay Lab development
 
-## Pending next APK: Webxdc fullscreen requests
+## RC74 release checkpoint — November 18, 2026
+
+RC74 (110) contains all post-RC73 source changes described below: unified Profiles controls, compact composer spacing, themed toggleable Saved stars, and Webxdc fullscreen requests with lifecycle cleanup. No scheduled sending or game-control modifications were added. Install over RC73 without uninstalling; established RC58+ signer retained.
+
+All 216 automated tests passed with zero failures/errors/skips. Debug and signed preview APK builds passed. The combined assembly daemon stopped during the preview stage; the separate preview run succeeded. APK package app.p2p.interop, version 0.7.23-rc74 (110), min API 31, target/compile API 35. APK signature and WebRTC packaging verified. Device testing remains pending for profile management, actual Saved synchronization, and Quake fullscreen/rotation; automated checks do not establish these results.
+
+APK: P2P-0.7.23-rc74-ARM64-Preview.apk. SHA-256: `c40a3affaf2d1e49e832265435772888430899fac4e3c8fdde35c43da25ae268`. Source tag: v0.7.23-rc74 on securejoin-invites. README and main recovery pointers identify this release.
+
+## Included in RC74: Webxdc fullscreen requests
 
 User reported Quake III on RC73 with working invisible touch regions and TypeErrors at index.html lines 406/445. Inspected catalog package wofwca-quake3-v5.1.0.xdc: move/look are empty transparent divs, and those two lines call requestFullscreen. The line-163 CSP warning is its external Google Fonts stylesheet; keep network restrictions intact. The line-784 generic engine log is insufficient to diagnose. Do not claim visible controls were missing because Relay Lab blocked them.
 
@@ -8,9 +16,9 @@ Fixed actual host omissions: delegate fullscreen to the same-origin app iframe a
 
 Verification: all 216 automated tests passed with zero failures/errors/skips; debug APK assembly and WebRTC packaging check passed. Added tests for fullscreen attachment/removal/reopening, exactly-once callback cleanup, duplicate/hidden request rejection, and local iframe delegation.
 
-Published APK remains RC73 (109). These changes and the Profiles/composer/Saved fixes below await the next signed APK. Quake fullscreen behavior needs physical Android/WebView testing; automated surface tests are not that verification.
+These changes and the Profiles/composer/Saved fixes below are included in RC74 (110). Quake fullscreen behavior needs physical Android/WebView testing; automated surface tests are not that verification.
 
-## Pending next APK: Profiles, composer spacing and saved-star toggles
+## Included in RC74: Profiles, composer spacing and saved-star toggles
 
 User deferred scheduled sending; no scheduling controls or behavior were added. Settings now has one Profiles entry. Its existing management dialog adds Edit active profile, which opens the existing name/photo/bio/relay editor; switching, adding, and enabling/disabling inactive profiles retain their existing behavior. No profile deletion or data migration was added.
 
@@ -18,7 +26,7 @@ The conversation composer uses a 48dp-minimum outlined BasicTextField with 10dp 
 
 Verification: all 214 automated tests passed with zero failures/errors/skips; debug APK assembly passed. Added navigation coverage for the single Profiles entry and edit route; checked saved-star progress/removal and real Media save/unsave gestures, composer typing/draft retention, and two-column Settings at narrow widths and enlarged fonts. Inspected the 320dp Settings render. Initial checks caught and corrected a nested-scroll conflict in Profiles and updated the old saved-star accessibility label assertion. Core-backed save/delete and profile switching still need phone verification.
 
-Published APK remains RC73 (109). These changes need the next signed APK and physical-phone checks; do not claim RC73 already includes them.
+These changes are included in RC74 (110). Physical-phone checks remain pending.
 
 ## RC73 release checkpoint — November 18, 2026
 
