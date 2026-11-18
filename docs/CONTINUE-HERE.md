@@ -1,12 +1,14 @@
 # Continue Relay Lab development
 
-## After RC75: original attachments, Help and Privacy
+## RC76 (112): original attachments, Help and Privacy
+
+Release verification: debug and signed preview assembly passed; all 223 tests passed with zero failures/errors/skips. WebRTC APK packaging and established certificate checks passed. APK `P2P-0.7.23-rc76-ARM64-Preview.apk` SHA-256: `44e750a7aeca90204c7b239fe2464672db0bb8338c7f2da6a1c915d9d3e76d06`. The build daemons stopped during packaging at 1536 MiB; rerunning the completed compilation/packaging with 1024 MiB succeeded. Keep unit tests in a separate 512 MiB run.
 
 Added a separate outlined Attach Original File action below the four standard attachment choices, with a divider and plain-language size/data warning. Regular Attach File retains compression settings; original selection passes asFile=true through the existing draft/Core File route, bypassing image/video media compression. Choice state resets on completion/cancellation and each new chooser session. Existing preview labels show Original file; original drafts do not offer trimming. Shared chooser covers chats, groups and channels.
 
 Expanded searchable Help from 13 to 28 questions, covering Saved copies, personal/shared apps and desktop management, Media, message actions, archive/trash/mute/block, unread indicators, disappearing versus local retention, encryption limitations, Webxdc internet isolation, original sending/file-size limits, troubleshooting and profile deletion. Corrected original-quality advice and current video/update wording. Privacy now links to existing Notifications, Block List, Storage, Profiles and Help, with clear scope explanations. No new app lock or biometric feature is introduced.
 
-Validation: debug assembly and all 223 automated tests passed with zero failures/errors/skips, including the updated 320 dp attachment-menu test and existing original-file/compression checks. Physical-device original-file sending remains pending. Published APK remains RC75 (111); these changes require the next APK.
+Validation: debug assembly and all 223 automated tests passed with zero failures/errors/skips, including the updated 320 dp attachment-menu test and existing original-file/compression checks. Physical-device original-file sending remains pending. Included in RC76 (112).
 
 ## RC75 release checkpoint — November 18, 2026
 
