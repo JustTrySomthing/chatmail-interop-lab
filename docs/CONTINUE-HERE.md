@@ -6,6 +6,8 @@ Chatmail chats, groups, and individual channels show a compact **Pinned** strip 
 
 Message pinning uses the existing Core RPC. Channel owners can use **Pin Post** or **Unpin Post** from a long press or **Post Options**. Followers see shared pins inside that channel. The combined Feed has no pin strip.
 
+The debug APK assembled and passed the WebRTC packaging check. All 229 automated tests passed, including the 12-pin scrolling, older-message jump, and channel pin parsing checks.
+
 Device checks still needed with fresh profiles include shared pin/unpin propagation to and from Delta Chat and ArcaneChat, channel owner and follower behavior, and jumping to an older message, attachment, mini-app, or post. Use the RC77 tag to verify the RC77 recovery manifest.
 
 ## RC77 (113) release checkpoint
