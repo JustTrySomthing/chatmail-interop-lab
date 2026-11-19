@@ -141,7 +141,7 @@ internal fun MediaDialog(
                     IconButton(onClick = { download(current.id) }) { Icon(Icons.Outlined.Download, "Download Media") }
                 }
                 feedback?.let { Text(it, Modifier.align(Alignment.CenterHorizontally).padding(8.dp),
-                    color = MaterialTheme.colorScheme.primary) }
+                    color = readableAccent(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface)) }
                 HorizontalPager(state = pager, modifier = Modifier.weight(1f).fillMaxWidth()
                     .semantics { contentDescription = "Media pages" }, key = { pages[it].id }) { index ->
                     val page = pages[index]
@@ -325,7 +325,8 @@ private fun AudioControls(player: Player, inlineLabel: String?, options: (() -> 
     if (inlineLabel == null) {
         Column(Modifier.widthIn(max = 480.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Outlined.AudioFile, null, Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(Icons.Outlined.AudioFile, null, Modifier.size(72.dp),
+                tint = readableAccent(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface))
             Spacer(Modifier.height(24.dp))
             progress()
             Button(onClick = toggle) { Text(if (playing) "Pause" else "Play") }

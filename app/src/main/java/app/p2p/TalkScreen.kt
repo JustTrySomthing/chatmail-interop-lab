@@ -224,7 +224,8 @@ internal fun TalkCallPanel(
                     TalkPhase.Finished -> call.detail
                 }
                 if (call.phase == TalkPhase.Active) {
-                    Text("Connected", style = MaterialTheme.typography.labelLarge, color = colors.primary,
+                    Text("Connected", style = MaterialTheme.typography.labelLarge,
+                        color = readableAccent(colors.surface, colors.onSurface),
                         modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
                 }
                 Text(status, color = colors.onSurfaceVariant, textAlign = TextAlign.Center,
@@ -375,6 +376,7 @@ private fun TalkPulse() {
 @Composable
 private fun TalkRouteAnimation(step: TalkSetupStep, pending: Boolean, incoming: Boolean) {
     val colors = MaterialTheme.colorScheme
+    val routeColor = readableAccent(colors.surface, colors.onSurface)
     val phase = if (pending) {
         val transition = rememberInfiniteTransition(label = "Call route")
         transition.animateFloat(
@@ -396,26 +398,26 @@ private fun TalkRouteAnimation(step: TalkSetupStep, pending: Boolean, incoming: 
         val points = List(TalkSetupStep.entries.size + 1) { index ->
             Offset(first + span * index / TalkSetupStep.entries.size, centerY)
         }
-        drawLine(colors.primary.copy(alpha = .24f), points.first(), points.last(),
+        drawLine(routeColor.copy(alpha = .24f), points.first(), points.last(),
             strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
         if (active > 0) {
-            drawLine(colors.primary, points.first(), points[active],
+            drawLine(routeColor, points.first(), points[active],
                 strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
         }
         points.forEachIndexed { index, point ->
             val reached = index <= active
-            drawCircle(if (reached) colors.primary else colors.onSurfaceVariant.copy(alpha = .48f),
+            drawCircle(if (reached) routeColor else colors.onSurfaceVariant.copy(alpha = .48f),
                 radius = (if (index == active) 6.dp else 4.dp).toPx(), center = point)
         }
         if (phase != null) {
             val progress = phase.value
             val node = points[active]
-            drawCircle(colors.primary.copy(alpha = (1f - progress) * .5f),
+            drawCircle(routeColor.copy(alpha = (1f - progress) * .5f),
                 radius = (9.dp + 13.dp * progress).toPx(), center = node,
                 style = Stroke(1.5.dp.toPx()))
             val next = points[active + 1]
             val dot = node + (next - node) * progress
-            drawCircle(colors.primary.copy(alpha = kotlin.math.sin(progress * Math.PI).toFloat()),
+            drawCircle(routeColor.copy(alpha = kotlin.math.sin(progress * Math.PI).toFloat()),
                 radius = 3.dp.toPx(), center = dot)
         }
     }

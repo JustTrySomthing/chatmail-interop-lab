@@ -49,6 +49,7 @@ internal data class QuietHours(
 @Composable
 internal fun QuietHoursControls(current: QuietHours, cancel: () -> Unit, save: (QuietHours) -> Unit) {
     val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
     var enabled by rememberSaveable { mutableStateOf(current.enabled) }
     var start by rememberSaveable { mutableIntStateOf(current.start) }
     var end by rememberSaveable { mutableIntStateOf(current.end) }
@@ -89,16 +90,16 @@ internal fun QuietHoursControls(current: QuietHours, cancel: () -> Unit, save: (
         !enabled -> "Off"
         schedule == current && schedule.active(clock) -> "Quiet now"
         else -> "Schedule ready"
-    }, color = MaterialTheme.colorScheme.primary)
+    }, color = readableAccent(colors.surface, colors.onSurface))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton({ pickingStart = true }, Modifier.weight(1f), enabled = enabled, shape = P2pButtonShape,
+        P2pOutlinedButton({ pickingStart = true }, Modifier.weight(1f), enabled = enabled,
             contentPadding = PaddingValues(horizontal = 8.dp)) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("From")
                 Text(time(start), style = MaterialTheme.typography.labelMedium)
             }
         }
-        OutlinedButton({ pickingStart = false }, Modifier.weight(1f), enabled = enabled, shape = P2pButtonShape,
+        P2pOutlinedButton({ pickingStart = false }, Modifier.weight(1f), enabled = enabled,
             contentPadding = PaddingValues(horizontal = 8.dp)) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Until")

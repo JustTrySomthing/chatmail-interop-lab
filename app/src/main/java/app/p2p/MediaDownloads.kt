@@ -136,7 +136,8 @@ internal fun DownloadMediaDialog(
 ) {
     P2pAlertDialog(
         onDismissRequest = { if (!busy) close() },
-        icon = { Icon(Icons.Outlined.Download, null, tint = MaterialTheme.colorScheme.primary) },
+        icon = { Icon(Icons.Outlined.Download, null,
+            tint = readableAccent(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface)) },
         title = { Text(request.title) },
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -146,7 +147,7 @@ internal fun DownloadMediaDialog(
                 }
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 status?.let { Text(it, color = if (busy) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error) }
-                if (!busy) OutlinedButton(onClick = choose, shape = P2pButtonShape, modifier = Modifier.fillMaxWidth()) {
+                if (!busy) P2pOutlinedButton(onClick = choose, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Outlined.FolderOpen, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text("Choose Location")

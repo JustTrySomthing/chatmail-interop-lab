@@ -126,8 +126,9 @@ internal fun P2pOutlinedButton(
     enabled: Boolean = true,
     contentPadding: PaddingValues = ButtonDefaults.ContentPadding,
     content: @Composable RowScope.() -> Unit
-) = Button(onClick = onClick, modifier = modifier, enabled = enabled, contentPadding = contentPadding,
-    shape = P2pButtonShape, colors = ButtonDefaults.buttonColors(), content = content)
+) = OutlinedButton(onClick = onClick, modifier = modifier, enabled = enabled, contentPadding = contentPadding,
+    shape = P2pButtonShape, colors = ButtonDefaults.outlinedButtonColors(contentColor = actionForeground()),
+    content = content)
 
 @Composable
 internal fun P2pTheme(appearance: Appearance, content: @Composable () -> Unit) {

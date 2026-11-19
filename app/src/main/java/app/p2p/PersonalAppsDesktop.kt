@@ -8,6 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
@@ -324,7 +326,11 @@ internal fun PersonalAppsDesktop(
                                                 DesktopTile(shown[id], folder, localFile, iconCache,
                                                     Modifier.fillMaxSize().testTag("desktop-app-$id")
                                                         .alpha(if (moved && drag?.id == id) 0f else 1f)
-                                                        .then(if (armed == id) Modifier.background(MaterialTheme.colorScheme.primaryContainer, P2pDialogShape) else Modifier),
+                                                        .then(if (armed == id) Modifier
+                                                            .background(MaterialTheme.colorScheme.surfaceVariant, P2pDialogShape)
+                                                            .border(1.dp, readableAccent(MaterialTheme.colorScheme.surfaceVariant,
+                                                                MaterialTheme.colorScheme.onSurface), P2pDialogShape)
+                                                        else Modifier),
                                                     click = { if (folder != null) folderOpen = id else shown[id]?.let(open) },
                                                     longClick = { options = id })
                                             }
@@ -507,8 +513,9 @@ private fun DesktopAction(label: String, icon: androidx.compose.ui.graphics.vect
 
 @Composable
 private fun PageDots(page: Int, count: Int, enabled: Boolean, label: String, select: (Int) -> Unit) {
-    val ink = readableAccent(MaterialTheme.colorScheme.background, MaterialTheme.colorScheme.onBackground)
-    Box(Modifier.fillMaxWidth().height(48.dp).semantics {
+    val colors = MaterialTheme.colorScheme
+    val ink = readableAccent(colors.surface, colors.onSurface)
+    Box(Modifier.fillMaxWidth().height(48.dp).background(colors.surface, RoundedCornerShape(12.dp)).semantics {
         contentDescription = "${label.replaceFirstChar(Char::uppercase)} ${page + 1} of $count"
     }, contentAlignment = Alignment.Center) {
         if (page > 0) IconButton(onClick = { select(page - 1) }, enabled = enabled, modifier = Modifier.align(Alignment.CenterStart)) {
@@ -543,6 +550,7 @@ private fun DesktopTile(
     click: (() -> Unit)? = null, longClick: (() -> Unit)? = null
 ) {
     val title = folder?.name ?: app?.desktopName() ?: return
+    val colors = MaterialTheme.colorScheme
     Column(modifier.then(if (click == null) Modifier else Modifier
         .clickable(role = Role.Button, interactionSource = remember { MutableInteractionSource() },
             indication = null, onClick = click)
@@ -557,7 +565,8 @@ private fun DesktopTile(
                 Text(initial, Modifier.padding(top = 4.dp), color = inkOnAccent(tint), style = MaterialTheme.typography.labelLarge)
             }
         } else if (app != null) PersonalAppIcon(app, localFile, iconCache)
-        Text(title, Modifier.padding(top = 4.dp), color = MaterialTheme.colorScheme.onBackground, textAlign = TextAlign.Center,
+        Text(title, Modifier.padding(top = 4.dp).background(colors.surface, RoundedCornerShape(6.dp))
+            .padding(horizontal = 5.dp, vertical = 1.dp), color = colors.onSurface, textAlign = TextAlign.Center,
             maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelLarge)
     }
 }

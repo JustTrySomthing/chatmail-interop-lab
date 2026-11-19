@@ -164,6 +164,7 @@ private suspend fun attachCatalogApp(context: Context, app: CatalogApp, attach: 
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun WebxdcCatalog(close: () -> Unit, actionLabel: String = "Add to chat", externalBusy: Boolean = false, externalError: String? = null, attach: (AttachmentDraft) -> Unit) {
     val context = LocalContext.current
@@ -239,8 +240,8 @@ internal fun WebxdcCatalog(close: () -> Unit, actionLabel: String = "Add to chat
                 item {
                     downloadError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     if (busy || externalBusy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        P2pOutlinedButton(enabled = !busy && !externalBusy, onClick = {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(enabled = !busy && !externalBusy, shape = P2pButtonShape, onClick = {
                             busy = true
                             downloadError = null
                             scope.launch {

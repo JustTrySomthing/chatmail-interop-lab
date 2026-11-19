@@ -1,12 +1,18 @@
 package app.p2p
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import org.robolectric.Robolectric
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import org.junit.Assert.*
@@ -46,7 +52,7 @@ class SaveAndViewerUiTest {
         var clicks = 0
         Robolectric.buildActivity(ComponentActivity::class.java).setup().use { controller ->
             controller.get().setContent { P2pTheme(Appearance()) {
-                StarButton(saved.value, "message", saving.value) { clicks++; saving.value = true }
+                StarButton(saved.value, "message", MaterialTheme.colorScheme.surface, saving.value) { clicks++; saving.value = true }
             } }
             compose.onNodeWithContentDescription("Save message").performClick()
             compose.onNodeWithContentDescription("Saving message").assertExists()
@@ -61,6 +67,33 @@ class SaveAndViewerUiTest {
             compose.onNodeWithContentDescription("Save message").assertDoesNotExist()
             compose.runOnIdle { controller.get().setContent {} }
             compose.waitForIdle()
+        }
+    }
+
+    @Test fun savedStarIsVisibleOnAnAccentColoredMessage() {
+        Robolectric.buildActivity(ComponentActivity::class.java).setup().use { controller ->
+            controller.get().setContent {
+                P2pTheme(Appearance(accent = Accent.CLASSIC_VIOLET)) {
+                    val colors = MaterialTheme.colorScheme
+                    Surface(Modifier.fillMaxSize(), color = colors.primary, contentColor = colors.onPrimary) {
+                        Box {
+                            StarButton(true, "message", colors.primary) {}
+                        }
+                    }
+                }
+            }
+            compose.onNodeWithContentDescription("Remove message from Saved").assertIsDisplayed()
+            val background = Accent.CLASSIC_VIOLET.swatch
+            compose.runOnIdle {
+                val view = controller.get().findViewById<android.view.View>(android.R.id.content)
+                val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+                view.draw(Canvas(bitmap))
+                val pixels = IntArray(bitmap.width * bitmap.height)
+                bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                bitmap.recycle()
+                assertTrue(pixels.any { it == background.toArgb() })
+                assertTrue(pixels.any { contrastRatio(Color(it), background) >= 4.5f })
+            }
         }
     }
 

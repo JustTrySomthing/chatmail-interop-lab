@@ -445,7 +445,7 @@ internal fun ChannelBoard(
                 }
             }
             page == "Following" -> {
-                item { P2pOutlinedButton(onClick = join, modifier = Modifier.fillMaxWidth()) { Text("Join Channel") } }
+                item { PageActionButton("Join Channel", join, Modifier.fillMaxWidth()) }
                 val following = channels.orEmpty().filter { !it.owned && it.name.contains(search, true) }
                 if (following.isEmpty() && channels != null && error == null) item {
                     EmptyTabMessage(if (search.isBlank()) "You’re not following any channels yet" else "No matching channels")
@@ -620,7 +620,7 @@ private fun ChannelPostCard(
                 playbackKey = "channel:${post.id}", usePlaybackPoster = true)
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), itemVerticalAlignment = Alignment.CenterVertically) {
-            StarButton(post.saved, "post", saving, savePost)
+            StarButton(post.saved, "post", background = colors.surfaceVariant, saving = saving, toggle = savePost)
             IconButton(onClick = react) { Icon(Icons.Outlined.EmojiEmotions, "React to post") }
             options?.let { action -> IconButton(onClick = action) { Icon(Icons.Outlined.MoreVert, "Post options") } }
             post.reactionCounts.forEach { (emoji, count) ->

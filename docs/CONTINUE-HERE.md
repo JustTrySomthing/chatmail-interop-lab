@@ -1,5 +1,9 @@
 # Continue Relay Lab development
 
+## Theme and control contrast
+
+Saved stars use the foreground contrast of their own message, post, or media tile. Unread counts use the text color paired with the accent. Quoted authors, media feedback, file status, Talk status, and Quiet Hours labels use readable colors for their surfaces. Video thumbnails add a solid background behind the play icon. The Apps desktop places labels and page controls on themed surfaces so custom wallpapers do not wash them out. Secondary actions use outlines, and the catalog actions can wrap on narrower screens.
+
 ## Streamlined updates
 
 The update notice and Settings → Updates offer **Update Now**, which downloads and verifies the GitHub APK and opens Android's installer when the update screen is active. **Check for Updates** stays available for a manual check. **Install automatically on Wi-Fi** is off by default. When enabled, Relay Lab uses unmetered Wi-Fi to request a background self-update while the app is out of the foreground and no Talk call or manual installer is active. If Android needs confirmation, Relay Lab keeps the verified APK and offers the normal interactive installation.

@@ -1569,7 +1569,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                                                     Column(horizontalAlignment = Alignment.End) {
                                                         FittedLabel(inboxTimestamp(newest.created, now), size = 12,
                                                             color = Quiet, fontWeight = FontWeight.Normal)
-                                                        if (unread > 0) Badge(containerColor = Mint, contentColor = Base) { Text(unread.toString()) }
+                                                        if (unread > 0) UnreadCountBadge(unread)
                                                     }
                                                 }
                                                 IconToggleButton(checked = pinned, onCheckedChange = {
@@ -1578,11 +1578,11 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                                                 }) {
                                                     Icon(if (pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                                                         if (pinned) "Unpin " + title else "Pin " + title,
-                                                        tint = if (pinned) Mint else Quiet)
+                                                        tint = if (pinned) readableAccent(Edge, Ink) else Quiet)
                                                 }
                                             },
                                             detail = {
-                                                if (isGroup && unread > 0) Badge(containerColor = Mint, contentColor = Base) { Text(unread.toString()) }
+                                                if (isGroup && unread > 0) UnreadCountBadge(unread)
                                                 if (preference?.optBoolean("muted") == true || data.optBoolean("alertMuted")) {
                                                     Icon(Icons.Outlined.NotificationsOff, "Muted", Modifier.size(15.dp), tint = Quiet)
                                                 }
@@ -3552,7 +3552,8 @@ internal fun ColumnScope.ThreadView(
                                                 IconButton(onClick = { react(message.key) }, enabled = canCompose) {
                                                     Icon(Icons.Outlined.EmojiEmotions, if (isAttachment) "React to attachment" else "React to message", Modifier.size(24.dp))
                                                 }
-                                                StarButton(message.isSavedItem(), if (isAttachment) "attachment" else "message", message.key in savingItems) { star(message.key) }
+                                                StarButton(message.isSavedItem(), if (isAttachment) "attachment" else "message",
+                                                    background = bubbleColor, saving = message.key in savingItems) { star(message.key) }
                                             }
                                         }
                                         if (maxWidth < 300.dp) Column {
@@ -3799,21 +3800,30 @@ internal fun ChatAttachment(
 @Composable
 private fun QuotedMessage(author: String, text: String) {
     Column(Modifier.fillMaxWidth().background(Edge, RoundedCornerShape(9.dp)).padding(8.dp)) {
-        Text(author, color = Mint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Text(author, color = readableAccent(Edge, Ink), fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (text.isNotBlank()) Text(text, color = Ink, style = contentTextStyle(MaterialTheme.typography.bodySmall),
             maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
 @Composable
-internal fun StarButton(starred: Boolean, item: String, saving: Boolean = false, toggle: () -> Unit) {
-    val savedColor = MaterialTheme.colorScheme.primary
+internal fun StarButton(starred: Boolean, item: String, background: Color, saving: Boolean = false, toggle: () -> Unit) {
+    val foreground = LocalContentColor.current
+    val savedColor = readableAccent(background, foreground)
     IconButton(onClick = toggle, enabled = !saving) {
-        if (saving) CircularProgressIndicator(Modifier.size(23.dp).semantics { contentDescription = (if (starred) "Removing saved " else "Saving ") + item }, strokeWidth = 2.dp)
+        if (saving) CircularProgressIndicator(Modifier.size(23.dp).semantics { contentDescription = (if (starred) "Removing saved " else "Saving ") + item },
+            color = savedColor, strokeWidth = 2.dp)
         else Icon(if (starred) Icons.Outlined.Star else Icons.Outlined.StarBorder,
             if (starred) "Remove " + item + " from Saved" else "Save " + item,
-            Modifier.size(25.dp), tint = if (starred) savedColor else LocalContentColor.current)
+            Modifier.size(25.dp), tint = if (starred) savedColor else foreground)
     }
+}
+
+@Composable
+internal fun UnreadCountBadge(count: Int) {
+    val colors = MaterialTheme.colorScheme
+    Badge(containerColor = colors.primary, contentColor = colors.onPrimary) { Text(count.toString()) }
 }
 
 @Composable
@@ -3857,9 +3867,14 @@ private fun MediaGallery(
                             kind != null -> Icons.Outlined.Image
                             else -> Icons.Outlined.InsertDriveFile
                         }, null, Modifier.size(36.dp), tint = readableAccent(Edge, Ink))
-                        if (isVideo && image != null) Icon(Icons.Outlined.PlayCircle, "Video", tint = Color.White)
+                        if (isVideo && image != null) {
+                            Surface(shape = CircleShape, color = Edge, contentColor = Ink) {
+                                Icon(Icons.Outlined.PlayCircle, "Video", Modifier.padding(4.dp))
+                            }
+                        }
                         Surface(Modifier.align(Alignment.TopEnd).padding(5.dp), shape = CircleShape, color = Edge, contentColor = Ink, shadowElevation = 4.dp) {
-                            StarButton(record.isSavedItem(), "attachment", record.key in savingItems) { star(record.key) }
+                            StarButton(record.isSavedItem(), "attachment", background = Edge,
+                                saving = record.key in savingItems) { star(record.key) }
                         }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3896,7 +3911,7 @@ private fun FileRow(record: Record, person: String, click: () -> Unit) {
     P2pRow(data.optString("name", "Shared file"), formatSize(data.optLong("size")) + " · " + person,
         Icons.AutoMirrored.Outlined.InsertDriveFile, trailing = {
             if (status.isNotBlank()) {
-                Text(status, color = Mint, fontSize = 11.sp, maxLines = 1)
+                Text(status, color = readableAccent(Edge, Ink), fontSize = 11.sp, maxLines = 1)
             }
         }, click = click)
 }
