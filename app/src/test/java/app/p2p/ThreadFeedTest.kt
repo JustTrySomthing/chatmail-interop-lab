@@ -64,6 +64,25 @@ class ThreadFeedTest {
     }
 
     @Test
+    fun pinnedStripScrollsAndJumpsToAnOlderMessageFromMedia() {
+        val records = mutableStateOf((20 downTo 1).map { message(it) })
+        val pins = mutableStateOf((42 downTo 31).map { PinnedItem(it, "Pinned item $it") })
+        showFeed(records, pins = pins, revealPin = { id ->
+            records.value = records.value + message(id).copy(key = nativeMessageKey(id))
+        }).use {
+            compose.onNodeWithText("Media").performClick()
+            compose.onNodeWithText("12").assertIsDisplayed()
+            compose.onNodeWithText("Pinned").performClick()
+            compose.onNodeWithContentDescription("Pinned items").performScrollToIndex(11)
+            compose.onNodeWithText("Pinned item 31").performClick()
+            compose.onNodeWithText("Pinned item 31").assertDoesNotExist()
+            compose.onNodeWithText("Message 31").assertIsDisplayed()
+            compose.runOnIdle { pins.value = emptyList() }
+            compose.onNodeWithText("Pinned").assertDoesNotExist()
+        }
+    }
+
+    @Test
     fun feedAndMediaKeepSaveActionsWithoutASavedTab() {
         val audio = Record("audio", "file-sent", obj("thread" to "test-thread", "name" to "Recording.wav",
             "mime" to "audio/wav").toString())
@@ -186,7 +205,9 @@ class ThreadFeedTest {
         appearance: Appearance = Appearance(),
         apps: (() -> Unit)? = null,
         openApp: ((Record) -> Unit)? = null,
-        channelReply: MutableState<ChannelReply?> = mutableStateOf(null)
+        channelReply: MutableState<ChannelReply?> = mutableStateOf(null),
+        pins: MutableState<List<PinnedItem>> = mutableStateOf(emptyList()),
+        revealPin: suspend (Int) -> Unit = {}
     ): ActivityScenario<MainActivity> {
         seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
         val view = mutableStateOf("Feed")
@@ -197,6 +218,7 @@ class ThreadFeedTest {
                     Column(Modifier.fillMaxSize()) {
                         ThreadView("test-thread", view.value, records.value, "me", find = "", searchOpen = false,
                             name = { "Avery" }, photo = { "" }, onView = { view.value = it },
+                            pins = pins.value, revealPin = revealPin,
                             quote = null, clearQuote = { channelReply.value = null },
                             channelReply = channelReply.value, attachments = emptyList(), preparing = false,
                             removeAttachment = {}, trimAttachment = {}, send = { _, _ -> },

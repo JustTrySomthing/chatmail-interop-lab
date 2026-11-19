@@ -188,6 +188,10 @@ class P2pModel internal constructor(application: Application, internal val profi
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     internal val webxdcEvents = webxdcEventFlow.asSharedFlow()
 
+    private val pinEventFlow = kotlinx.coroutines.flow.MutableSharedFlow<Int>(extraBufferCapacity = 16,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
+    internal val pinEvents = pinEventFlow.asSharedFlow()
+
     private val incomingCoreEvents = Channel<Pair<Chatmail, ChatmailCallEvent>>(Channel.UNLIMITED)
 
     private fun openChatmail(directory: File): Chatmail {
@@ -199,6 +203,8 @@ class P2pModel internal constructor(application: Application, internal val profi
         core.listenForEvents(onMessagesChanged = { changed ->
             nativeChangedMessages.addAll(changed)
             nextNativeSync = 0L
+        }, onPinsChanged = { chat ->
+            if (chatmail === core) pinEventFlow.tryEmit(chat)
         }, onWebxdc = { event ->
             if (chatmail === core) webxdcEventFlow.tryEmit(event)
         }) { event -> incomingCoreEvents.trySend(core to event) }
@@ -632,12 +638,12 @@ class P2pModel internal constructor(application: Application, internal val profi
         core.channels().also { cacheChannelAttention(it) }
     }
 
-    internal suspend fun chatmailChannelHistory(id: Int, limit: Int) = withChatmail { core ->
+    internal suspend fun chatmailChannelHistory(id: Int, limit: Int, reveal: Int? = null) = withChatmail { core ->
         val channel = requireNotNull(core.channel(id)) { "Waiting for the channel owner to process your join request." }
         core.noticeChannel(channel)
         cacheChannelAttention(core.channels())
-        val history = core.channelPosts(channel, limit)
-        history.copy(posts = history.posts.map(::channelPostMedia))
+        val history = core.channelPosts(channel, limit, reveal)
+        history.copy(posts = history.posts.map(::channelPostMedia), pinned = core.pinnedChannelPosts(channel))
     }
 
     internal suspend fun chatmailChannelFeed(channels: List<ChatmailChannel>, limit: Int) =
@@ -2201,6 +2207,14 @@ class P2pModel internal constructor(application: Application, internal val profi
     }
     internal suspend fun editChannelPost(id: Int, text: String) = withChatmail { it.editChannelPost(id, text.trim()) }
     internal suspend fun deleteChannelPost(id: Int) = withChatmail { it.deleteChannelPost(id) }
+    internal suspend fun toggleChannelPostPin(channelId: Int, id: Int) = withChatmail { core ->
+        val channel = core.channel(channelId)
+        val post = core.channelPost(id)
+        require(channel?.canPost == true && post?.channelId == channelId && post.state != 24) {
+            "This post can’t be pinned."
+        }
+        core.setMessagePinned(id, !post.pinned)
+    }
     internal suspend fun localRetention() = withChatmail { it.localRetention() }
     internal suspend fun setLocalRetention(seconds: Long) = withChatmail { it.setLocalRetention(seconds) }
 
@@ -2683,7 +2697,20 @@ class P2pModel internal constructor(application: Application, internal val profi
     internal suspend fun pinnedNativeMessages(thread: String): List<NativeMessage> = withChatmail { core ->
         val chat = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
         check(core.nativeThread(chat) != null) { "This conversation is unavailable." }
-        core.pinnedMessages(chat)
+        core.pinnedMessages(chat).filter { records.get("discarded-message:" + nativeMessageKey(it.id)) == null }
+    }
+
+    internal suspend fun revealPinnedNativeMessage(thread: String, id: Int) = withChatmail { core ->
+        val chatId = records.get(thread)?.data()?.optInt("nativeChat") ?: 0
+        val chat = core.nativeThread(chatId)
+        val key = nativeMessageKey(id)
+        check(chat != null && core.nativeMessage(chatId, id) != null && records.get("discarded-message:" + key) == null) {
+            "This message is unavailable."
+        }
+        updateNativeHistory(core, chat, thread, 1, messageId = id)
+        check(records.get(key)?.data()?.let { it.optString("thread") == thread && !it.optBoolean("locallyDeleted") } == true) {
+            "This message is unavailable."
+        }
     }
 
     internal suspend fun nativeDisappearingTimer(thread: String): Int = withChatmail { core ->

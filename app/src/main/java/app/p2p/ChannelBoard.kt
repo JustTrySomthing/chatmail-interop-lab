@@ -2,7 +2,10 @@ package app.p2p
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
@@ -86,7 +89,8 @@ internal fun ChannelBoard(
     preview: (PreviewLink) -> Unit,
     openLink: (PreviewLink) -> Unit,
     replyPrivately: (ChannelReply) -> Unit,
-    profilePhoto: String
+    profilePhoto: String,
+    clearSearchForPin: () -> Unit
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
@@ -124,6 +128,10 @@ internal fun ChannelBoard(
     var revision by remember { mutableIntStateOf(0) }
     var limit by remember(selected) { mutableIntStateOf(50) }
     var hasOlder by remember(selected) { mutableStateOf(false) }
+    var pins by remember(selected) { mutableStateOf<List<PinnedItem>>(emptyList()) }
+    var revealPost by remember(selected) { mutableStateOf<Int?>(null) }
+    var jumpPost by remember(selected) { mutableStateOf<Int?>(null) }
+    var highlightedPost by remember(selected) { mutableStateOf<Int?>(null) }
 
     val owned = channels.orEmpty().filter { it.owned }
     val current = channels.orEmpty().firstOrNull { it.id == selected }
@@ -138,7 +146,8 @@ internal fun ChannelBoard(
         current?.imagePath?.let { path -> chatAction { value = model.chatmailChannelImage(path) } }
     }
     val viewingFeed = page == "Feed" && selected == null
-    LaunchedEffect(model, lifecycle, page, selected, active, limit, revision) {
+    LaunchedEffect(model, lifecycle, page, selected, active, limit, revision, revealPost) {
+        val target = revealPost
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
                 error = chatAction {
@@ -146,9 +155,16 @@ internal fun ChannelBoard(
                     channels = catalog
                     when {
                         active != null -> {
-                            val history = model.chatmailChannelHistory(active, limit)
+                            val history = model.chatmailChannelHistory(active, limit, target)
                             posts = history.posts.asReversed()
                             hasOlder = history.hasOlder
+                            pins = history.pinned.asReversed().map { post ->
+                                PinnedItem(post.id, post.text.ifBlank { post.attachment?.name.orEmpty() })
+                            }
+                            if (target != null && jumpPost == target && posts.none { it.id == target }) {
+                                jumpPost = null
+                                actionError = "This post is unavailable."
+                            }
                         }
                         viewingFeed -> posts = model.chatmailChannelFeed(catalog, limit)
                     }
@@ -171,18 +187,24 @@ internal fun ChannelBoard(
         }
     }
 
-    postOptions?.let { post ->
+    postOptions?.let { selectedPost ->
+        val post = posts.firstOrNull { it.id == selectedPost.id } ?: selectedPost
         Sheet("Post Options", { if (!busy) { postOptions = null; actionError = null } }) {
             if (post.replyContactId != null) {
                 P2pRow("Reply Privately", "Message the channel owner", Icons.AutoMirrored.Outlined.Reply, enabled = !busy) {
                     submit { replyPrivately(model.prepareChannelReply(post.id, post.channelId)) }
                 }
-                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                actionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             } else if (current?.owned == true) {
+                if (current.canPost && post.state != 24) {
+                    PageActionButton(if (post.pinned) "Unpin Post" else "Pin Post", {
+                        submit { model.toggleChannelPostPin(current.id, post.id); postOptions = null }
+                    }, Modifier.fillMaxWidth(), icon = Icons.Outlined.PushPin, enabled = !busy)
+                }
                 if (post.text.isNotBlank()) PageActionButton("Edit Post", { postOptions = null; actionError = null; editPost = post }, Modifier.fillMaxWidth())
                 PageActionButton("Delete Post", { postOptions = null; actionError = null; deletePost = post }, Modifier.fillMaxWidth())
             }
+            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+            actionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
 
@@ -373,6 +395,14 @@ internal fun ChannelBoard(
     }
 
     Segments(listOf("Feed", "Following", "My Channels"), page, select = selectPage)
+    if (selected != null) key(selected) {
+        PinnedStrip(pins) { post ->
+            actionError = null
+            clearSearchForPin()
+            jumpPost = post
+            revealPost = post
+        }
+    }
     if (page == "My Channels" && selected == null) {
         PageActionButton("Create a Channel", {
             actionError = null
@@ -382,10 +412,29 @@ internal fun ChannelBoard(
     val listState = key(page) { rememberLazyListState() }
     val detailState = key(selected) { rememberLazyListState() }
     val matches = posts.filter { search.isBlank() || it.channelName.contains(search, true) || it.text.contains(search, true) }
+    val showLoading = channels == null && error == null
+    val showActionError = actionError != null && !composePost && !creating && editing == null
+    val showPostHeading = current?.owned == true && matches.isNotEmpty()
+    val jumpIndex = jumpPost?.let { target -> matches.indexOfFirst { it.id == target } } ?: -1
+    val detailHeaders = listOf(error != null, showLoading, showActionError, selected != null,
+        current != null, current?.owned == true, showPostHeading).count { it }
+    LaunchedEffect(selected, jumpPost, jumpIndex, detailHeaders, search) {
+        if (selected != null && jumpIndex >= 0 && search.isBlank()) {
+            detailState.scrollToItem(detailHeaders + jumpIndex)
+            highlightedPost = jumpPost
+            jumpPost = null
+        }
+    }
+    LaunchedEffect(highlightedPost) {
+        if (highlightedPost != null) {
+            delay(2_000)
+            highlightedPost = null
+        }
+    }
     LazyColumn(state = if (selected == null) listState else detailState, contentPadding = PaddingValues(16.dp, 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (error != null) item { Text(error.orEmpty(), color = MaterialTheme.colorScheme.error) }
-        if (channels == null && error == null) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-        if (actionError != null && !composePost && !creating && editing == null) item { Text(actionError.orEmpty(), color = MaterialTheme.colorScheme.error) }
+        if (showLoading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        if (showActionError) item { Text(actionError.orEmpty(), color = MaterialTheme.colorScheme.error) }
         if (selected != null) item {
             P2pTextButton(onClick = { selectChannel(null) }) { Text("Back to $page") }
         }
@@ -403,7 +452,7 @@ internal fun ChannelBoard(
                             composePost = true
                         }, Modifier.fillMaxWidth(), icon = Icons.Outlined.Edit, enabled = current.canPost && !busy)
                     }
-                    if (current.owned && matches.isNotEmpty()) item {
+                    if (showPostHeading) item {
                         val colors = MaterialTheme.colorScheme
                         Surface(color = colors.surfaceVariant, contentColor = colors.onSurface,
                             shape = RoundedCornerShape(16.dp)) {
@@ -430,7 +479,8 @@ internal fun ChannelBoard(
                     }
                     ChannelPostCard(post, ownedPost, channelPhoto.ifEmpty { profilePhoto.takeIf { ownedPost }.orEmpty() },
                         null, preview, openLink, { openAttachment(post) }, { if (!busy) reactingTo = post }, views, savePost = { submit { savingPost = post.id; try { model.saveChannelPost(post.id) } finally { savingPost = null } } }, saving = savingPost == post.id,
-                        options = if (ownedPost || post.replyContactId != null) ({ showPostOptions(post) }) else null)
+                        options = if (ownedPost || post.replyContactId != null) ({ showPostOptions(post) }) else null,
+                        highlighted = highlightedPost == post.id)
                 }
                 if (hasOlder) item { P2pTextButton(onClick = { limit += 50 }) { Text("Load Older Posts") } }
             }
@@ -578,11 +628,11 @@ private fun ChannelProfileCard(
 internal fun SocialPostCard(
     author: String, date: String?, key: String, body: String, photo: String = "",
     icon: androidx.compose.ui.graphics.vector.ImageVector? = null, open: (() -> Unit)? = null,
-    modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit
+    modifier: Modifier = Modifier, border: BorderStroke? = null, content: @Composable ColumnScope.() -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
     Surface(modifier = modifier, color = colors.surfaceVariant, contentColor = colors.onSurface,
-        shape = RoundedCornerShape(20.dp)) {
+        shape = RoundedCornerShape(20.dp), border = border) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Avatar(author, icon = icon, photo = photo)
@@ -599,11 +649,13 @@ internal fun SocialPostCard(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun ChannelPostCard(
     post: ChannelPost, owned: Boolean, photo: String, open: (() -> Unit)?, preview: (PreviewLink) -> Unit,
-    openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit, react: () -> Unit, views: Int? = null, savePost: () -> Unit, saving: Boolean = false, options: (() -> Unit)? = null
+    openLink: (PreviewLink) -> Unit, openAttachment: () -> Unit, react: () -> Unit, views: Int? = null,
+    savePost: () -> Unit, saving: Boolean = false, options: (() -> Unit)? = null,
+    highlighted: Boolean = false
 ) {
     val save = LocalMediaDownload.current
     val colors = MaterialTheme.colorScheme
@@ -611,7 +663,10 @@ private fun ChannelPostCard(
         post.time.takeIf { it > 0 }?.let { DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it)) }
     }
     SocialPostCard(post.channelName, date, "channel-post:${post.id}", post.text, photo,
-        icon = Icons.Outlined.Campaign.takeIf { photo.isBlank() }, open = open) {
+        icon = Icons.Outlined.Campaign.takeIf { photo.isBlank() }, open = open,
+        modifier = if (owned && options != null) Modifier.combinedClickable(
+            onClick = {}, onLongClick = options, onLongClickLabel = "Post options") else Modifier,
+        border = if (highlighted) BorderStroke(2.dp, readableAccent(colors.surfaceVariant, colors.onSurface)) else null) {
         MessageBodyWithPreviews(post.text, preview, openLink, colors.surfaceVariant)
         post.attachment?.let { attachment ->
             val download = post.download()

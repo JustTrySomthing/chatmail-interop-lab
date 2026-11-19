@@ -74,7 +74,8 @@ internal class Chatmail(directory: File) : AutoCloseable {
     private fun call(method: String, vararg params: Any?): Any = rpc(method, account, *params)
 
     fun listenForEvents(
-        onMessagesChanged: (Set<Int>) -> Unit, onWebxdc: (JSONObject) -> Unit, onCall: (ChatmailCallEvent) -> Unit
+        onMessagesChanged: (Set<Int>) -> Unit, onPinsChanged: (Int) -> Unit,
+        onWebxdc: (JSONObject) -> Unit, onCall: (ChatmailCallEvent) -> Unit
     ) {
         synchronized(eventLock) {
             if (readingEvents || closing) return
@@ -91,11 +92,15 @@ internal class Chatmail(directory: File) : AutoCloseable {
                         if (row.optInt("contextId") != account) continue
                         val event = row.optJSONObject("event") ?: continue
                         if (synchronized(eventLock) { closing }) break
-                        if (event.optString("kind") in MESSAGE_EVENTS) {
+                        val kind = event.optString("kind")
+                        if (kind in MESSAGE_EVENTS) {
                             messagesChanged = true
                             event.optInt("msgId", event.optInt("msg_id")).takeIf { it > 9 }?.let(updatedMessages::add)
                         }
-                        if (event.optString("kind") in WEBXDC_EVENTS) onWebxdc(event)
+                        if (kind == "PinnedMessagesChanged" || kind == "MsgDeleted") {
+                            event.optInt("chatId").takeIf { it > 9 }?.let(onPinsChanged)
+                        }
+                        if (kind in WEBXDC_EVENTS) onWebxdc(event)
                         readChatmailCallEvent(event)?.let(onCall)
                     }
                     if (messagesChanged && synchronized(eventLock) { !closing }) onMessagesChanged(updatedMessages)
@@ -182,11 +187,16 @@ internal class Chatmail(directory: File) : AutoCloseable {
 
     fun channel(id: Int): ChatmailChannel? = parseChatmailChannel(fullChat(id))
 
-    fun channelPosts(channel: ChatmailChannel, limit: Int): ChannelHistory {
+    fun channelPosts(channel: ChatmailChannel, limit: Int, reveal: Int? = null): ChannelHistory {
         val ids = messageIds(channel.id)
-        val posts = messageRows(ids.takeLast(limit)).mapNotNull { parseChannelPost(it, channel) }
+        val recent = ids.takeLast(limit)
+        val displayed = if (reveal != null && reveal !in recent && reveal in ids) listOf(reveal) + recent else recent
+        val posts = messageRows(displayed).mapNotNull { parseChannelPost(it, channel) }
         return ChannelHistory(posts.toList(), ids.size > limit)
     }
+
+    fun pinnedChannelPosts(channel: ChatmailChannel): List<ChannelPost> =
+        messageRows(pinnedMessageIds(channel.id)).mapNotNull { parseChannelPost(it, channel) }.toList()
 
     fun channelPost(id: Int): ChannelPost? {
         val row = messageRows(listOf(id)).firstOrNull() ?: return null
@@ -398,10 +408,8 @@ internal class Chatmail(directory: File) : AutoCloseable {
     fun editMessage(id: Int, text: String) { call("send_edit_request", id, text) }
     fun deleteMessageForEveryone(id: Int) { call("delete_messages_for_all", JSONArray(listOf(id))) }
     fun setMessagePinned(id: Int, pinned: Boolean) { call("set_pinned_message_state", id, pinned) }
-    fun pinnedMessages(chat: Int): List<NativeMessage> {
-        val ids = call("get_pinned_messages", chat) as JSONArray
-        return nativeRows(chat, (0 until ids.length()).map(ids::getInt))
-    }
+    private fun pinnedMessageIds(chat: Int) = (call("get_pinned_messages", chat) as JSONArray).intValues()
+    fun pinnedMessages(chat: Int): List<NativeMessage> = nativeRows(chat, pinnedMessageIds(chat))
     fun deleteSavedMessage(id: Int) { call("delete_messages", JSONArray(listOf(id))) }
 
     fun saveMessage(id: Int) { call("save_msgs", JSONArray(listOf(id))) }
@@ -656,9 +664,11 @@ internal data class ChannelPost(
     val id: Int, val channelId: Int, val channelName: String, val text: String,
     val time: Long, val state: Int, val attachment: ChatmailAttachment?, val localFile: File? = null,
     val reactionCounts: Map<String, Int> = emptyMap(), val reacted: Boolean = false,
-    val saved: Boolean = false, val replyContactId: Int? = null
+    val saved: Boolean = false, val replyContactId: Int? = null, val pinned: Boolean = false
 )
-internal data class ChannelHistory(val posts: List<ChannelPost>, val hasOlder: Boolean)
+internal data class ChannelHistory(
+    val posts: List<ChannelPost>, val hasOlder: Boolean, val pinned: List<ChannelPost> = emptyList()
+)
 
 internal data class ChannelReply(
     val thread: String, val channelId: Int, val postId: Int, val channelName: String, val excerpt: String
@@ -694,7 +704,8 @@ internal fun parseChannelPost(message: JSONObject, channel: ChatmailChannel): Ch
         message.optLong("timestamp") * 1_000L, message.optInt("state"), attachment,
         reactionCounts = counts, reacted = readNativeReactions(message).containsKey(1),
         saved = message.optInt("savedMessageId") > 9,
-        replyContactId = message.optInt("fromId").takeIf { !channel.owned && it > 9 })
+        replyContactId = message.optInt("fromId").takeIf { !channel.owned && it > 9 },
+        pinned = message.optBoolean("isPinned"))
 }
 
 internal data class ChatmailContact(

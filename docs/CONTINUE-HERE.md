@@ -1,5 +1,13 @@
 # Continue Relay Lab development
 
+## Shared pin navigation after RC77
+
+Chatmail chats, groups, and individual channels show a compact **Pinned** strip with a count badge when they have pins. Tap to expand the newest-first, scrollable list. Selecting an entry closes the list, clears a conversation search if needed, and briefly outlines the original message or post. The jump works for items outside the current history page. A pinned mini-app opens through its original message's existing **Open App** action. The former **Chat Options → Pinned Messages** sheet was removed.
+
+Message pinning uses the existing Core RPC. Channel owners can use **Pin Post** or **Unpin Post** from a long press or **Post Options**. Followers see shared pins inside that channel. The combined Feed has no pin strip.
+
+Device checks still needed with fresh profiles include shared pin/unpin propagation to and from Delta Chat and ArcaneChat, channel owner and follower behavior, and jumping to an older message, attachment, mini-app, or post. Use the RC77 tag to verify the RC77 recovery manifest.
+
 ## RC77 (113) release checkpoint
 
 RC77 includes improved theme contrast and narrow layouts, the simplified updater with optional background installation on Wi-Fi, and shared Channel reaction totals and private replies. It uses the established RC58+ signing certificate and can update RC76 in place.

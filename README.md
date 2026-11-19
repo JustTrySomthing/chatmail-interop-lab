@@ -75,7 +75,9 @@ Relay Lab follows the 1 GiB local Android attachment ceiling used by Delta Chat 
 
 ## Chatmail controls and recovery
 
-Long-press a message for editing, deletion for everyone, shared pinning, and saving to Saved Messages. Open **Saved** with the top-bar star. It is the same global collection from every conversation. Older stars are migrated to saved copies when Saved opens; unavailable legacy attachments keep their old marker until they can be downloaded and saved. Tap the conversation title for Chat options. Groups include Chat options inside Group info. Chat options has the disappearing-message timer and the shared pin list. Long-press a message containing a point location to open it in a maps app. Chats render basic inline Markdown formatting and loop Telegram TGS stickers. SVG attachments open in the media viewer.
+Long-press a message for editing, deletion for everyone, shared pinning, and saving to Saved Messages. In the development build, **Pinned** appears below the controls in a Chatmail chat, group, or individual channel when it has pins. Tap the strip to see the shared list, then tap an item to jump to it. Channel owners can pin or unpin a post from **Post Options**.
+
+Open **Saved** with the top-bar star. It is the same global collection from every conversation. Older stars are migrated to saved copies when Saved opens; unavailable legacy attachments keep their old marker until they can be downloaded and saved. Tap the conversation title for Chat options and its disappearing-message timer. Groups include Chat options inside Group info. Long-press a message containing a point location to open it in a maps app. Chats render basic inline Markdown formatting and loop Telegram TGS stickers. SVG attachments open in the media viewer.
 
 In Group info, choose or remove a group photo. On a channel post, use the emoji button to send or remove your reaction. The Chatmail contact list shows the day a contact was last seen when Core reports it.
 

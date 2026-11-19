@@ -206,6 +206,7 @@ class ChatmailTest {
         val media = ChatmailAttachment(null, "trail.png", "", 0, "", "")
         assertEquals(ChannelPost(51, 14, "Trail notes", "The trail is open", 900_000L, 0, media),
             parseChannelPost(message, channel))
+        assertTrue(requireNotNull(parseChannelPost(message.put("isPinned", true), channel)).pinned)
         message.put("fileMime", "image/png").put("downloadState", "InProgress").put("text", "")
         val attachment = requireNotNull(parseChannelPost(message, channel)?.attachment)
         assertEquals("image/png", attachment.mime)

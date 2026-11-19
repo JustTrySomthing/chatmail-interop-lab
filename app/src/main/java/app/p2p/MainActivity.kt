@@ -104,6 +104,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -761,6 +762,9 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
         fun blocked(id: String): Boolean =
             contacts.firstOrNull { it.key == id }?.data()?.optBoolean("blocked") == true ||
                 threadPreferences[id]?.optBoolean("blocked") == true
+        fun canSetChatTimer(id: String, chat: JSONObject?): Boolean =
+            chat?.optBoolean("nativeCanSend") == true && !chat.optBoolean("contactRequest") &&
+                !chat.optBoolean("nativeSelfTalk") && !blocked(id)
         val inlineAudio = LocalInlineAudio.current
         val appsInChat = remember(records, thread) { records.webxdcMessages(thread) }
         LaunchedEffect(area == Area.Apps, modal == "saved", personalRevision) {
@@ -1307,7 +1311,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                         else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             val title = name(id)
                             val hasGroupInfo = group?.data()?.optInt("nativeChat")?.let { it > 9 } == true
-                            val hasChatOptions = (records.firstOrNull { it.key == id }?.data()?.optInt("nativeChat") ?: 0) > 9
+                            val chat = records.firstOrNull { it.key == id && it.kind == "contact" }?.data()
+                            val hasChatOptions = chat != null && chat.optInt("nativeChat") > 9 && !chat.optBoolean("nativeSelfTalk")
                             val groupInfo = when {
                                 hasGroupInfo -> Modifier.clickable(onClickLabel = "View group info") { modal = "group-info" }
                                 hasChatOptions -> Modifier.clickable(onClickLabel = "Chat Options") {
@@ -1390,10 +1395,30 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                                 Text("Accept Chat")
                             }
                         }
+                        val nativeChat = conversation?.optInt("nativeChat") ?: 0
+                        val pins by key(id, nativeChat) {
+                            produceState(emptyList<PinnedItem>(), model) {
+                                if (nativeChat > 9) model.pinEvents.onSubscription { emit(nativeChat) }.collect { updated ->
+                                    if (updated == nativeChat) chatAction {
+                                        value = model.pinnedNativeMessages(id).asReversed().map { pin ->
+                                            PinnedItem(pin.id, pin.text.ifBlank {
+                                                pin.attachment?.name ?: "Shared location"
+                                            })
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         ThreadView(
                             id = id, view = threadView, records = records, peer = peer,
                             find = threadQuery, searchOpen = modal == "thread-search",
                             name = ::name, photo = ::photo, onView = { threadView = it },
+                            pins = pins.filterNot { pin -> records.any { record ->
+                                record.key == nativeMessageKey(pin.id) && record.data().optBoolean("locallyDeleted")
+                            } },
+                            revealPin = { model.revealPinnedNativeMessage(id, it) },
+                            clearSearchForPin = { threadQuery = ""; if (modal == "thread-search") modal = null },
+                            pinError = { message -> downloadScope.launch { snack.showSnackbar(message) } },
                             quote = records.firstOrNull { it.key == quote && it.kind == "message" },
                             clearQuote = { quote = null; channelReply = null },
                             channelReply = channelReply?.takeIf { it.thread == id },
@@ -1612,7 +1637,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                                 messageContact(reply.thread)
                                 channelReply = reply
                             },
-                            profilePhoto = profileData?.optString("photo").orEmpty())
+                            profilePhoto = profileData?.optString("photo").orEmpty(),
+                            clearSearchForPin = { search = "" })
                     }
                     area == Area.Social -> {
                         Segments(listOf("My Page", "Friends", "Feed"), socialPage) { socialPage = it }
@@ -1840,11 +1866,15 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                         if (activeThread && data.optInt("nativeMessage") > 9 && data.optInt("webxdcParent") <= 9) {
                             add(ItemAction("Forward", Icons.AutoMirrored.Outlined.Reply) { modal = "forward-message" })
                             add(ItemAction("Message Info", Icons.Outlined.Info) { modal = "message-info" })
-                            add(ItemAction(if (data.optBoolean("nativePinned")) "Unpin Message" else "Pin Message",
-                                Icons.Outlined.PushPin) {
-                                model.toggleNativeMessagePin(item.key)
-                                modal = null
-                            })
+                            val chat = records.firstOrNull { it.key == threadId }?.data()
+                            if (chat?.optBoolean("nativeCanSend") == true && !chat.optBoolean("contactRequest") &&
+                                data.optInt("failed") == 0) {
+                                add(ItemAction(if (data.optBoolean("nativePinned")) "Unpin Message" else "Pin Message",
+                                    Icons.Outlined.PushPin) {
+                                    model.toggleNativeMessagePin(item.key)
+                                    modal = null
+                                })
+                            }
                             if (author == peer) {
                                 if (text.isNotBlank() && !data.optBoolean("webxdc")) {
                                     add(ItemAction("Edit Message", Icons.Outlined.Edit) { modal = "native-edit-message" })
@@ -1955,39 +1985,17 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
             )
             "native-conversation-options" -> selected?.let { target ->
                 val chat = records.firstOrNull { it.key == target }?.data()
-                val canChange = chat?.optBoolean("nativeCanSend") == true && !chat.optBoolean("contactRequest") &&
-                    !chat.optBoolean("nativeSelfTalk") && !blocked(target)
                 ItemActionsDialog("Chat Options", buildList {
                     if (chat != null && !chat.optBoolean("nativeSelfTalk") &&
                         records.firstOrNull { it.key == target }?.kind == "contact") {
                         add(ItemAction("Encryption Info", Icons.Outlined.Lock) { modal = "encryption-info" })
                     }
-                    add(ItemAction("Pinned Messages", Icons.Outlined.PushPin) { modal = "native-pinned-messages" })
-                    if (canChange) add(ItemAction("Disappearing Messages", Icons.Outlined.Timer) {
+                    if (canSetChatTimer(target, chat)) add(ItemAction("Disappearing Messages", Icons.Outlined.Timer) {
                         modal = "native-disappearing-messages"
                     })
                 }) { modal = null }
             }
             "encryption-info" -> selected?.let { EncryptionInfoSheet(model, it) { modal = "native-conversation-options" } }
-            "native-pinned-messages" -> selected?.let { target ->
-                Sheet("Pinned Messages", { modal = null }) {
-                    val result by produceState<Result<List<NativeMessage>>?>(null, target) {
-                        try { value = Result.success(model.pinnedNativeMessages(target)) }
-                        catch (cancelled: CancellationException) { throw cancelled }
-                        catch (failure: Exception) { value = Result.failure(failure) }
-                    }
-                    when {
-                        result == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
-                        result?.isFailure == true -> Text(result?.exceptionOrNull()?.message ?: "Couldn’t load pinned messages.")
-                        result?.getOrNull().isNullOrEmpty() -> Text("No pinned messages")
-                        else -> result?.getOrNull()?.forEach { message ->
-                            val text = message.text.ifBlank { message.attachment?.name.orEmpty() }
-                            Text(text, style = contentTextStyle(MaterialTheme.typography.bodyLarge))
-                            HorizontalDivider()
-                        }
-                    }
-                }
-            }
             "native-disappearing-messages" -> selected?.let { target ->
                 Sheet("Disappearing Messages", { if (!nativeActionBusy) modal = null }) {
                     val choices = listOf(0 to "Off", 300 to "5 minutes", 3600 to "1 hour", 86400 to "1 day",
@@ -2420,7 +2428,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                         else LinkedMessageText(it, ::openLink)
                     }
                     GroupDescriptionFeedback(description)
-                    P2pTextButton(onClick = {
+                    if (canSetChatTimer(group.key, group.data())) P2pTextButton(onClick = {
                         selected = group.key
                         modal = "native-conversation-options"
                     }) { Text("Chat Options") }
@@ -3415,7 +3423,11 @@ internal fun ColumnScope.ThreadView(
     draftText: String? = null,
     consumeDraftText: () -> Unit = {},
     savingItems: Set<String> = emptySet(),
-    channelReply: ChannelReply? = null
+    channelReply: ChannelReply? = null,
+    pins: List<PinnedItem> = emptyList(),
+    revealPin: suspend (Int) -> Unit = {},
+    clearSearchForPin: () -> Unit = {},
+    pinError: (String) -> Unit = {}
 ) {
     LaunchedEffect(view) { if (view == "Saved") onView(Feed) }
     val messages = remember(records, id) {
@@ -3462,8 +3474,36 @@ internal fun ColumnScope.ThreadView(
             onView(next)
         }
     }
+    var requestedPin by remember(id) { mutableStateOf<Int?>(null) }
+    var jumpKey by remember(id) { mutableStateOf<String?>(null) }
+    var highlightedKey by remember(id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(id, requestedPin) {
+        val target = requestedPin ?: return@LaunchedEffect
+        val error = chatAction { revealPin(target) }
+        if (error != null) pinError(error) else {
+            clearSearchForPin()
+            onView(Feed)
+            jumpKey = nativeMessageKey(target)
+        }
+        requestedPin = null
+    }
+    LaunchedEffect(highlightedKey) {
+        if (highlightedKey != null) {
+            kotlinx.coroutines.delay(2_000)
+            highlightedKey = null
+        }
+    }
+    key(id) { PinnedStrip(pins) { requestedPin = it } }
     key(id, view, find) {
         val listState = rememberLazyListState()
+        val jumpIndex = jumpKey?.let { target -> visible.indexOfFirst { it.key == target } } ?: -1
+        LaunchedEffect(jumpKey, jumpIndex) {
+            if (view == Feed && find.isBlank() && jumpIndex >= 0) {
+                listState.scrollToItem(jumpIndex)
+                highlightedKey = jumpKey
+                jumpKey = null
+            }
+        }
         val scope = rememberCoroutineScope()
         val closeDistance = with(density) { 96.dp.roundToPx() }
         val nearLatest by remember(listState, closeDistance) {
@@ -3479,7 +3519,7 @@ internal fun ColumnScope.ThreadView(
             previousLatest = latest?.key
             val newHead = latest != null && previous != null &&
                 visible.indexOfFirst { it.key == previous } > 0
-            if (view == Feed && find.isBlank() && newHead &&
+            if (jumpKey == null && highlightedKey == null && view == Feed && find.isBlank() && newHead &&
                 ((nearLatest && !listState.isScrollInProgress) ||
                     (peer.isNotBlank() && latest?.data()?.optString("author") == peer))) {
                 listState.animateScrollToItem(0)
@@ -3532,6 +3572,7 @@ internal fun ColumnScope.ThreadView(
                                 color = bubbleColor,
                                 contentColor = inkOnAccent(bubbleColor),
                                 shape = RoundedCornerShape(18.dp),
+                                border = if (highlightedKey == message.key) BorderStroke(2.dp, inkOnAccent(bubbleColor)) else null,
                                 modifier = Modifier.widthIn(max = 460.dp).fillMaxWidth()
                                     .combinedClickable(onClick = {}, onLongClick = options, onLongClickLabel = "Message options")
                             ) {
