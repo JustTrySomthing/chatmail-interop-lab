@@ -8,16 +8,16 @@ Relay Lab is a Chatmail-based Android messenger built to work with Delta Chat an
 
 | Build | Android APK |
 | --- | --- |
-| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc76**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc76/P2P-0.7.23-rc76-ARM64-Preview.apk) · ARM64 · Android 12+ |
+| **Latest release candidate** | [**Download Relay Lab 0.7.23-rc77**](https://github.com/JustTrySomthing/chatmail-interop-lab/releases/download/v0.7.23-rc77/P2P-0.7.23-rc77-ARM64-Preview.apk) · ARM64 · Android 12+ |
 | **Final release** | A final release has yet to be published. |
 
-RC means release candidate. **RC76 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
+RC means release candidate. **RC77 is the current build to install.** For release notes and older builds, see [Releases](https://github.com/JustTrySomthing/chatmail-interop-lab/releases).
 
-RC76 (112) adds a separate Attach Original File option that bypasses media compression for that selection, expands searchable Help to 28 questions, and makes Privacy a hub for existing controls with clearer explanations. Normal attachments retain user compression settings. Includes all RC75 improvements and the established RC58+ signing identity.
+RC77 (113) improves Light and Dark theme contrast, simplifies the update flow, and adds shared channel reaction totals and private replies to channel posts. It keeps the established RC58+ signing identity.
 
 ### Update from the app
 
-Open **Settings → Updates** and tap **Check now**. **Check daily** and **Include release candidates** are enabled by default. Back up chat history before uninstalling an older build.
+Open **Settings → Updates** and tap **Check for Updates**. When an update is available, tap **Update Now**. **Check daily** and **Include release candidates** are enabled by default. **Install automatically on Wi-Fi** is optional. Back up chat history before uninstalling an older build.
 
 ## Features
 
@@ -41,7 +41,7 @@ The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Run `python3 
 
 Download signed Android builds from the Releases page.
 
-The downloadable APK's source is at the [RC76 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc76). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
+The downloadable APK's source is at the [RC77 release tag](https://github.com/JustTrySomthing/chatmail-interop-lab/tree/v0.7.23-rc77). Use a fresh Relay Lab profile for interoperability testing. The development app uses Android package `app.p2p.interop`, an independent update feed, and daily update checks and release candidates enabled by default.
 
 ### Release publishing
 
