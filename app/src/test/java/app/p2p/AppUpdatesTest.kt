@@ -55,6 +55,17 @@ class AppUpdatesTest {
     }
 
     @Test
+    fun backgroundInstallationRequiresSeparateOptInAndDailyChecks() {
+        val prefs = UpdateChecks.prefs(RuntimeEnvironment.getApplication())
+        val candidate = release("9.0.0")
+        assertFalse(UpdateAutoInstall.eligible(prefs, candidate))
+        prefs.edit { putBoolean(UpdateAutoInstall.ENABLED, true) }
+        assertTrue(UpdateAutoInstall.eligible(prefs, candidate))
+        prefs.edit { putBoolean("automatic", false) }
+        assertFalse(UpdateAutoInstall.eligible(prefs, candidate))
+    }
+
+    @Test
     fun autoCheckIsDailyButRunsOnceOnNextOpenAfterReboot() {
         val prefs = UpdateChecks.prefs(RuntimeEnvironment.getApplication())
         prefs.edit {

@@ -25,13 +25,13 @@ internal fun UpdateNotice(model: P2pUpdateModel, open: () -> Unit) {
     if (!state.prompt || state.busy || state.requestInstall) return
     P2pAlertDialog(
         onDismissRequest = model::dismissPrompt,
-        title = { Text("P2P update available") },
+        title = { Text("Relay Lab update available") },
         text = { Text(if (state.ready) "Version ${release.version} is ready to install."
             else "Version ${release.version} is ready to download.") },
         dismissButton = { P2pTextButton(onClick = model::dismissPrompt) { Text("Later") } },
         confirmButton = {
-            Button(onClick = { model.dismissPrompt(); open() }, shape = P2pButtonShape) {
-                Text("View Update")
+            Button(onClick = { open(); model.updateNow() }, shape = P2pButtonShape) {
+                Text("Update Now")
             }
         }
     )
@@ -48,7 +48,7 @@ internal fun UpdateSettingsContent(model: P2pUpdateModel) {
         active = true
         onDispose {
             active = false
-            model.consumeInstallRequest()
+            if ((context as? android.app.Activity)?.isChangingConfigurations != true) model.leaveUpdateScreen()
         }
     }
     val installer = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -57,6 +57,11 @@ internal fun UpdateSettingsContent(model: P2pUpdateModel) {
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         model.installPermissionReturned()
     }
+    val automaticPermission = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (context.packageManager.canRequestPackageInstalls()) model.changeAutoInstall(true)
+        else model.installPermissionDenied()
+    }
+    fun installPermissionSettings() = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
     LaunchedEffect(state.requestInstall, state.busy, lifecycle) {
         if (state.requestInstall && !state.busy) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             if (!model.state.requestInstall) return@repeatOnLifecycle
@@ -67,7 +72,7 @@ internal fun UpdateSettingsContent(model: P2pUpdateModel) {
                 } else false
             }
             else runCatching {
-                permission.launch(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")))
+                permission.launch(installPermissionSettings())
             }.onFailure { model.installPermissionDenied() }
         }
     }
@@ -93,20 +98,28 @@ internal fun UpdateSettingsContent(model: P2pUpdateModel) {
         val checked = remember(state.checked) { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(state.checked)) }
         Text("Last checked $checked", style = MaterialTheme.typography.bodySmall)
     }
-    UpdateToggle("Check daily for updates", model.automatic, onChange = model::changeAutomatic)
-    UpdateToggle("Include release candidates", model.previews, enabled = !state.busy, onChange = model::changePreviews)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         when {
             state.downloading -> P2pOutlinedButton(onClick = model::cancelDownload) { Text("Cancel Download") }
             state.release != null -> {
                 Button(onClick = model::updateNow, shape = P2pButtonShape, enabled = !state.busy) {
-                    Text(if (state.ready) "Install Update" else "Download Update")
+                    Text("Update Now")
                 }
-                P2pTextButton(onClick = { model.checkNow() }, enabled = !state.busy) { Text("Check Again") }
             }
-            else -> Button(onClick = { model.checkNow() }, shape = P2pButtonShape, enabled = !state.busy) { Text("Check Now") }
+        }
+        if (state.release == null) {
+            Button(onClick = { model.checkNow() }, shape = P2pButtonShape, enabled = !state.busy) { Text("Check for Updates") }
+        } else {
+            P2pTextButton(onClick = { model.checkNow() }, enabled = !state.busy) { Text("Check for Updates") }
         }
     }
+    UpdateToggle("Check daily for updates", model.automatic, onChange = model::changeAutomatic)
+    UpdateToggle("Install automatically on Wi-Fi", model.autoInstall, enabled = !state.busy) { enabled ->
+        if (!enabled || context.packageManager.canRequestPackageInstalls()) model.changeAutoInstall(enabled)
+        else runCatching { automaticPermission.launch(installPermissionSettings()) }
+            .onFailure { model.installPermissionDenied() }
+    }
+    UpdateToggle("Include release candidates", model.previews, enabled = !state.busy, onChange = model::changePreviews)
 }
 
 @Composable

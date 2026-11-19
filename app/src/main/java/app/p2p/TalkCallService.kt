@@ -60,6 +60,7 @@ class TalkCallService : Service() {
         const val ACTION_END = "app.p2p.END_TALK"
         private const val CHANNEL = "p2p_ongoing_talk"
         private var pending: Pair<String, CompletableDeferred<Unit>>? = null
+        internal val isRunning get() = pending != null
         internal suspend fun ensure(context: Context, id: String) {
             val ready = CompletableDeferred<Unit>()
             pending = id to ready

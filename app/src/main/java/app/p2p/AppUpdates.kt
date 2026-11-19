@@ -43,6 +43,7 @@ internal object UpdateChecks {
     val installed = requireNotNull(UpdateVersion.parse(BuildConfig.VERSION_NAME))
     private val testBuild = BuildConfig.APPLICATION_ID == "app.p2p.interop"
     @Volatile var foreground = false
+    var manualInstallerOpen = false
 
     fun prefs(context: Context): SharedPreferences = context.getSharedPreferences("app-updates", Context.MODE_PRIVATE)
     fun boot(context: Context) = runCatching {
@@ -103,6 +104,7 @@ internal object UpdateChecks {
             if (release == null) remove("available") else putString("available", release.json().toString())
         }
         if (release == null) cancelNotice(context)
+        UpdateAutoInstall.schedule(context)
         Result(release)
     }
 
@@ -121,8 +123,8 @@ internal object UpdateChecks {
     fun cancelNotice(context: Context) =
         context.getSystemService(NotificationManager::class.java).cancel(CHANNEL, JOB_ID)
 
-    fun notifyAvailable(context: Context, release: UpdateRelease) {
-        if (foreground || AppAlertMute.isMuted(context) || !shouldPrompt(prefs(context), release) ||
+    fun notifyAvailable(context: Context, release: UpdateRelease, finishInstall: Boolean = false) {
+        if ((!finishInstall && (foreground || !shouldPrompt(prefs(context), release))) || AppAlertMute.isMuted(context) ||
             !NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Relay Lab updates", NotificationManager.IMPORTANCE_DEFAULT))
@@ -136,7 +138,8 @@ internal object UpdateChecks {
                 .setSmallIcon(R.drawable.ic_notification)
                 .setSilent(QuietHours.read(context).active())
                 .setContentTitle("Relay Lab update available")
-                .setContentText("Version ${release.version} is available.")
+                .setContentText(if (finishInstall) "Tap to finish updating to ${release.version}."
+                    else "Version ${release.version} is available.")
                 .setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(true).build())
         }
     }
@@ -212,9 +215,13 @@ class P2pUpdateModel(application: Application) : AndroidViewModel(application) {
         private set
     internal var previews by mutableStateOf(UpdateChecks.previews(prefs))
         private set
+    internal var autoInstall by mutableStateOf(UpdateAutoInstall.enabled(prefs))
+        private set
+    private var installAfterDownload = false
 
     init {
         UpdateChecks.schedule(context)
+        UpdateAutoInstall.schedule(context)
         // Clear orphaned files left by a process exit before any new action can use them.
         partial.delete()
         if (prefs.contains("ready")) {
@@ -319,8 +326,13 @@ class P2pUpdateModel(application: Application) : AndroidViewModel(application) {
 
     internal fun changeAutomatic(enabled: Boolean) {
         automatic = enabled
-        prefs.edit { putBoolean("automatic", enabled) }
+        prefs.edit {
+            putBoolean("automatic", enabled)
+            if (!enabled) putBoolean(UpdateAutoInstall.ENABLED, false)
+        }
+        if (!enabled) autoInstall = false
         UpdateChecks.schedule(context)
+        UpdateAutoInstall.schedule(context)
         setForeground(UpdateChecks.foreground)
         if (!enabled) state = state.copy(prompt = false)
     }
@@ -335,6 +347,13 @@ class P2pUpdateModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    internal fun changeAutoInstall(enabled: Boolean) {
+        autoInstall = enabled
+        prefs.edit { putBoolean(UpdateAutoInstall.ENABLED, enabled) }
+        if (enabled && !automatic) changeAutomatic(true)
+        UpdateAutoInstall.schedule(context)
+    }
+
     internal fun dismissPrompt() {
         state.release?.let { release ->
             prefs.edit { putString("dismissed", release.version.toString()); putLong("dismissedAt", System.currentTimeMillis()) }
@@ -347,23 +366,30 @@ class P2pUpdateModel(application: Application) : AndroidViewModel(application) {
         val release = state.release ?: return
         if (state.busy) return
         dismissPrompt()
+        if (UpdateAutoInstall.installing(context)) {
+            state = state.copy(message = "Android is already installing the update.")
+            return
+        }
         if (state.ready) {
             state = state.copy(requestInstall = true, error = null, message = null)
             return
         }
         start(state.copy(downloading = true, progress = 0, message = null)) {
+            installAfterDownload = true
             clearDownload()
-            val route = checkNotNull(UpdateRoute.current(context)) { "Connect to the internet to download the update." }
             try {
                 withContext(Dispatchers.IO) {
                     verified.parentFile?.mkdirs()
                     check(directory.usableSpace >= release.bytes + 16 * 1024 * 1024) { "Free some space and try again." }
-                    var last = 0L
-                    UpdateFeed.download(route, release, partial) { bytes ->
-                        val now = SystemClock.elapsedRealtime()
-                        if (now - last >= 250 || bytes == release.bytes) {
-                            last = now
-                            withContext(Dispatchers.Main) { state = state.copy(progress = bytes) }
+                    if (!UpdateAutoInstall.copyCached(context, release, partial)) {
+                        val route = checkNotNull(UpdateRoute.current(context)) { "Connect to the internet to download the update." }
+                        var last = 0L
+                        UpdateFeed.download(route, release, partial) { bytes ->
+                            val now = SystemClock.elapsedRealtime()
+                            if (now - last >= 250 || bytes == release.bytes) {
+                                last = now
+                                withContext(Dispatchers.Main) { state = state.copy(progress = bytes) }
+                            }
                         }
                     }
                     UpdateApk.verify(context, partial, release)
@@ -371,8 +397,9 @@ class P2pUpdateModel(application: Application) : AndroidViewModel(application) {
                     check(partial.renameTo(verified)) { "Couldn’t save the verified APK." }
                 }
                 prefs.edit { putString("ready", release.json().toString()) }
-                state = state.copy(ready = true, progress = release.bytes)
+                state = state.copy(ready = true, progress = release.bytes, requestInstall = installAfterDownload)
             } finally {
+                installAfterDownload = false
                 withContext(NonCancellable + Dispatchers.IO) { partial.delete() }
             }
         }
@@ -384,6 +411,11 @@ class P2pUpdateModel(application: Application) : AndroidViewModel(application) {
 
     internal fun consumeInstallRequest() {
         state = state.copy(requestInstall = false)
+    }
+
+    internal fun leaveUpdateScreen() {
+        installAfterDownload = false
+        consumeInstallRequest()
     }
 
     internal fun install(launch: (Intent) -> Boolean) {
@@ -399,10 +431,12 @@ class P2pUpdateModel(application: Application) : AndroidViewModel(application) {
                 clearDownload()
                 throw error
             }
-            if (launch(UpdateApk.installer(context, verified))) {
+            val installer = UpdateApk.installer(context, verified)
+            UpdateChecks.manualInstallerOpen = launch(installer)
+            if (UpdateChecks.manualInstallerOpen) {
                 installAttempt = release.version
             } else {
-                state = state.copy(error = "Relay Lab couldn’t open the Android installer. Return to this screen and tap Install update again.")
+                state = state.copy(error = "Relay Lab couldn’t open the Android installer. Tap Update Now to try again.")
             }
         }
     }
@@ -414,6 +448,7 @@ class P2pUpdateModel(application: Application) : AndroidViewModel(application) {
     }
 
     internal fun installReturned() {
+        UpdateChecks.manualInstallerOpen = false
         state = state.copy(message = "Android returned without updating Relay Lab. You can try again.")
     }
 

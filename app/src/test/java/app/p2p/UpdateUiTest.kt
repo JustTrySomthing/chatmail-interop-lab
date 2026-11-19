@@ -77,11 +77,21 @@ class UpdateUiTest {
                 }
                 compose.waitForIdle()
                 compose.waitUntil(5_000) {
-                    compose.onAllNodesWithText("P2P update available").fetchSemanticsNodes().isNotEmpty()
+                    compose.onAllNodesWithText("Relay Lab update available").fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNodeWithText("Update Now").assertIsDisplayed()
+                if (tab == "Talk") {
+                    compose.onNodeWithText("Update Now").performClick()
+                    compose.waitUntil(5_000) {
+                        compose.onAllNodesWithText("Check for Updates").fetchSemanticsNodes().isNotEmpty()
+                    }
+                    compose.onNodeWithText("Check for Updates").assertIsDisplayed()
+                    compose.onNodeWithText("Update Now").assertIsDisplayed()
+                    continue
                 }
                 compose.onNodeWithText("Later").performClick()
                 compose.waitUntil(5_000) {
-                    compose.onAllNodesWithText("P2P update available").fetchSemanticsNodes().isEmpty()
+                    compose.onAllNodesWithText("Relay Lab update available").fetchSemanticsNodes().isEmpty()
                 }
                 compose.onNodeWithText(control).assertIsDisplayed()
             }

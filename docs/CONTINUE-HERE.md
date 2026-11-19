@@ -1,5 +1,11 @@
 # Continue Relay Lab development
 
+## Streamlined updates
+
+The update notice and Settings → Updates offer **Update Now**, which downloads and verifies the GitHub APK and opens Android's installer when the update screen is active. **Check for Updates** stays available for a manual check. **Install automatically on Wi-Fi** is off by default. When enabled, Relay Lab uses unmetered Wi-Fi to request a background self-update while the app is out of the foreground and no Talk call or manual installer is active. If Android needs confirmation, Relay Lab keeps the verified APK and offers the normal interactive installation.
+
+Debug assembly and APK packaging passed. On-device testing is pending for granting install permission, the Android confirmation fallback, and background self-update. The latest published candidate is RC76.
+
 ## Channel reactions and private replies
 
 Channel posts display the shared reaction totals supplied by Chatmail Core. The post menu in Feed and Following offers **Reply Privately** for eligible incoming posts. It opens a one-to-one chat with the publisher and a removable post quote. It sends only after the user taps Send. The composer rechecks that the quoted post belongs to the original channel and that the selected recipient is its publisher.

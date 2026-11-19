@@ -204,22 +204,30 @@ internal object UpdateFeed {
     }
 }
 
-internal class UpdateRoute(private val context: Context, val network: Network) {
+internal class UpdateRoute(private val context: Context, val network: Network, private val wifiOnly: Boolean) {
     private val manager = context.getSystemService(ConnectivityManager::class.java)
 
     fun check() {
-        check(manager.getNetworkCapabilities(network) != null) {
+        val capabilities = manager.getNetworkCapabilities(network)
+        check(capabilities != null && (!wifiOnly || unmeteredWifi(capabilities))) {
             "The network changed. Try again when the connection is ready."
         }
     }
 
     companion object {
-        fun current(context: Context, requireValidated: Boolean = false): UpdateRoute? {
+        private fun unmeteredWifi(capabilities: NetworkCapabilities): Boolean =
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+
+        fun current(context: Context, requireValidated: Boolean = false, wifiOnly: Boolean = false,
+                    jobNetwork: Network? = null): UpdateRoute? {
             val manager = context.getSystemService(ConnectivityManager::class.java)
-            val network = manager.activeNetwork ?: return null
+            val network = jobNetwork ?: manager.activeNetwork ?: return null
             val capabilities = manager.getNetworkCapabilities(network) ?: return null
             if (requireValidated && !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return null
-            return UpdateRoute(context, network)
+            if (wifiOnly && !unmeteredWifi(capabilities)) return null
+            return UpdateRoute(context, network, wifiOnly)
         }
     }
 }

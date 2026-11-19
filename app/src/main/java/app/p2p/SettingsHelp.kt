@@ -75,7 +75,7 @@ private val helpEntries = listOf(
     HelpEntry("Will deleting a profile erase it everywhere?",
         "No. Deleting a profile removes its local data from this device after confirmation. Other profiles, other devices, recipients’ copies and exported backups are separate. Export an important profile before deleting it, and keep the backup somewhere safe. A second-device transfer code grants access to the profile; share it only with a device you control."),
     HelpEntry("How do I find updates or report a problem?",
-        "Open Settings → Updates and tap Check now. Check daily and Include release candidates are enabled by default; keep release candidates enabled to get preview builds. For troubleshooting, open Settings → App log and copy the relevant error to share with support.")
+        "In Settings → Updates, tap Check for Updates whenever you want. If an update is available, tap Update Now to download, verify and install it. Android may ask you to allow installs or confirm the update. Install automatically on Wi-Fi is optional and uses unmetered Wi-Fi when Relay Lab is in the background. Keep Include release candidates enabled to get preview builds. For troubleshooting, open Settings → App log and copy the relevant error to share with support.")
 )
 
 @Composable
