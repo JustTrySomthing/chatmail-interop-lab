@@ -1,5 +1,13 @@
 # Continue Relay Lab development
 
+## RC77 (113) release checkpoint
+
+RC77 includes improved theme contrast and narrow layouts, the simplified updater with optional background installation on Wi-Fi, and shared Channel reaction totals and private replies. It uses the established RC58+ signing certificate and can update RC76 in place.
+
+Verification: debug and signed preview builds passed. All 228 automated tests passed. The preview APK passed the WebRTC packaging, package/version, ARM64, and signing certificate checks. Phone testing remains pending for theme rendering, Android installer confirmation and background updates, and channel behavior across clients.
+
+APK `P2P-0.7.23-rc77-ARM64-Preview.apk` (141,523,595 bytes). SHA-256 `776bf3844f84cbc281ee0a6a47b5a5b97738dc40c75d92298b5e1df9c61ce098`.
+
 ## Theme and control contrast
 
 Saved stars use the foreground contrast of their own message, post, or media tile. Unread counts use the text color paired with the accent. Quoted authors, media feedback, file status, Talk status, and Quiet Hours labels use readable colors for their surfaces. Video thumbnails add a solid background behind the play icon. The Apps desktop places labels and page controls on themed surfaces so custom wallpapers do not wash them out. Secondary actions use outlines, and the catalog actions can wrap on narrower screens.
@@ -8,13 +16,13 @@ Saved stars use the foreground contrast of their own message, post, or media til
 
 The update notice and Settings → Updates offer **Update Now**, which downloads and verifies the GitHub APK and opens Android's installer when the update screen is active. **Check for Updates** stays available for a manual check. **Install automatically on Wi-Fi** is off by default. When enabled, Relay Lab uses unmetered Wi-Fi to request a background self-update while the app is out of the foreground and no Talk call or manual installer is active. If Android needs confirmation, Relay Lab keeps the verified APK and offers the normal interactive installation.
 
-Debug assembly and APK packaging passed. On-device testing is pending for granting install permission, the Android confirmation fallback, and background self-update. The latest published candidate is RC76.
+Debug assembly and APK packaging passed. On-device testing is pending for granting install permission, the Android confirmation fallback, and background self-update.
 
 ## Channel reactions and private replies
 
 Channel posts display the shared reaction totals supplied by Chatmail Core. The post menu in Feed and Following offers **Reply Privately** for eligible incoming posts. It opens a one-to-one chat with the publisher and a removable post quote. It sends only after the user taps Send. The composer rechecks that the quoted post belongs to the original channel and that the selected recipient is its publisher.
 
-Debug APK assembly, WebRTC packaging, and 226 automated tests passed. The added tests cover aggregate counts, private reply eligibility, and the removable quote in the chat composer. Phone interoperability testing with Delta Chat and ArcaneChat is pending. The latest published candidate is RC76.
+Debug APK assembly, WebRTC packaging, and 226 automated tests passed. The added tests cover aggregate counts, private reply eligibility, and the removable quote in the chat composer. Phone interoperability testing with Delta Chat and ArcaneChat is pending.
 
 ## RC76 (112): original attachments, Help and Privacy
 
