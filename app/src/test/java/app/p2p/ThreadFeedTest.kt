@@ -95,6 +95,20 @@ class ThreadFeedTest {
     }
 
     @Test
+    fun privateChannelReplyShowsARemovableQuoteInTheExistingComposer() {
+        val reply = mutableStateOf<ChannelReply?>(
+            ChannelReply("test-thread", 14, 51, "Trail notes", "The trail is open")
+        )
+        showFeed(mutableStateOf(listOf(message(1))), channelReply = reply).use {
+            compose.onNodeWithText("Trail notes").assertIsDisplayed()
+            compose.onNodeWithText("The trail is open").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Remove reply quote").performClick()
+            compose.onNodeWithText("The trail is open").assertDoesNotExist()
+            compose.onNodeWithText("Message 1").assertIsDisplayed()
+        }
+    }
+
+    @Test
     fun attachmentCaptionsKeepTheirTextAndRenderLinkCards() {
         val url = "https://example.org/route"
         val attachment = Record("clip", "file-received", obj(
@@ -171,7 +185,8 @@ class ThreadFeedTest {
         react: (String) -> Unit = {},
         appearance: Appearance = Appearance(),
         apps: (() -> Unit)? = null,
-        openApp: ((Record) -> Unit)? = null
+        openApp: ((Record) -> Unit)? = null,
+        channelReply: MutableState<ChannelReply?> = mutableStateOf(null)
     ): ActivityScenario<MainActivity> {
         seedCompletedSetup(ApplicationProvider.getApplicationContext<P2pApplication>())
         val view = mutableStateOf("Feed")
@@ -182,7 +197,8 @@ class ThreadFeedTest {
                     Column(Modifier.fillMaxSize()) {
                         ThreadView("test-thread", view.value, records.value, "me", find = "", searchOpen = false,
                             name = { "Avery" }, photo = { "" }, onView = { view.value = it },
-                            quote = null, clearQuote = {}, attachments = emptyList(), preparing = false,
+                            quote = null, clearQuote = { channelReply.value = null },
+                            channelReply = channelReply.value, attachments = emptyList(), preparing = false,
                             removeAttachment = {}, trimAttachment = {}, send = { _, _ -> },
                             preview = {}, openLink = {}, attach = {}, messageMenu = {}, react = react,
                             star = { key ->

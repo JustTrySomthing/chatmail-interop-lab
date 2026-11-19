@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -26,6 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.EmojiEmotions
@@ -82,6 +85,7 @@ internal fun ChannelBoard(
     legacy: () -> Unit,
     preview: (PreviewLink) -> Unit,
     openLink: (PreviewLink) -> Unit,
+    replyPrivately: (ChannelReply) -> Unit,
     profilePhoto: String
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -168,10 +172,24 @@ internal fun ChannelBoard(
     }
 
     postOptions?.let { post ->
-        Sheet("Post Options", { postOptions = null }) {
-            if (post.text.isNotBlank()) PageActionButton("Edit Post", { postOptions = null; actionError = null; editPost = post }, Modifier.fillMaxWidth())
-            PageActionButton("Delete Post", { postOptions = null; actionError = null; deletePost = post }, Modifier.fillMaxWidth())
+        Sheet("Post Options", { if (!busy) { postOptions = null; actionError = null } }) {
+            if (post.replyContactId != null) {
+                P2pRow("Reply Privately", "Message the channel owner", Icons.AutoMirrored.Outlined.Reply, enabled = !busy) {
+                    submit { replyPrivately(model.prepareChannelReply(post.id, post.channelId)) }
+                }
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                actionError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            } else if (current?.owned == true) {
+                if (post.text.isNotBlank()) PageActionButton("Edit Post", { postOptions = null; actionError = null; editPost = post }, Modifier.fillMaxWidth())
+                PageActionButton("Delete Post", { postOptions = null; actionError = null; deletePost = post }, Modifier.fillMaxWidth())
+            }
         }
+    }
+
+    fun showPostOptions(post: ChannelPost) {
+        if (busy) return
+        actionError = null
+        postOptions = post
     }
     editPost?.let { post ->
         var text by remember(post.id) { mutableStateOf(post.text) }
@@ -220,7 +238,7 @@ internal fun ChannelBoard(
                 reactingTo = null
                 submit { model.reactToChannelPost(post.id, emoji) }
             }, close = { reactingTo = null })
-            if (post.reactions.containsKey(1)) P2pTextButton(onClick = {
+            if (post.reacted) P2pTextButton(onClick = {
                 reactingTo = null
                 submit { model.reactToChannelPost(post.id, "") }
             }) { Text("Remove Your Reaction") }
@@ -411,7 +429,8 @@ internal fun ChannelBoard(
                         }
                     }
                     ChannelPostCard(post, ownedPost, channelPhoto.ifEmpty { profilePhoto.takeIf { ownedPost }.orEmpty() },
-                        null, preview, openLink, { openAttachment(post) }, { if (!busy) reactingTo = post }, views, savePost = { submit { savingPost = post.id; try { model.saveChannelPost(post.id) } finally { savingPost = null } } }, saving = savingPost == post.id, options = if (ownedPost) ({ if (!busy) postOptions = post }) else null)
+                        null, preview, openLink, { openAttachment(post) }, { if (!busy) reactingTo = post }, views, savePost = { submit { savingPost = post.id; try { model.saveChannelPost(post.id) } finally { savingPost = null } } }, saving = savingPost == post.id,
+                        options = if (ownedPost || post.replyContactId != null) ({ showPostOptions(post) }) else null)
                 }
                 if (hasOlder) item { P2pTextButton(onClick = { limit += 50 }) { Text("Load Older Posts") } }
             }
@@ -421,7 +440,8 @@ internal fun ChannelBoard(
                 }
                 items(matches, key = { it.id }) { post ->
                     ChannelPostCard(post, false, "", { selectChannel(post.channelId) }, preview, openLink,
-                        { openAttachment(post) }, { if (!busy) reactingTo = post }, savePost = { submit { savingPost = post.id; try { model.saveChannelPost(post.id) } finally { savingPost = null } } }, saving = savingPost == post.id)
+                        { openAttachment(post) }, { if (!busy) reactingTo = post }, savePost = { submit { savingPost = post.id; try { model.saveChannelPost(post.id) } finally { savingPost = null } } }, saving = savingPost == post.id,
+                        options = if (post.replyContactId != null) ({ showPostOptions(post) }) else null)
                 }
             }
             page == "Following" -> {
@@ -579,6 +599,7 @@ internal fun SocialPostCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChannelPostCard(
     post: ChannelPost, owned: Boolean, photo: String, open: (() -> Unit)?, preview: (PreviewLink) -> Unit,
@@ -598,14 +619,13 @@ private fun ChannelPostCard(
                 openAttachment, if (post.localFile == null || download == null || save == null) null else ({ save(download) }),
                 playbackKey = "channel:${post.id}", usePlaybackPoster = true)
         }
-        val reactions = post.reactions.values.flatten().groupingBy { it }.eachCount()
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), itemVerticalAlignment = Alignment.CenterVertically) {
             StarButton(post.saved, "post", saving, savePost)
             IconButton(onClick = react) { Icon(Icons.Outlined.EmojiEmotions, "React to post") }
             options?.let { action -> IconButton(onClick = action) { Icon(Icons.Outlined.MoreVert, "Post options") } }
-            if (reactions.isNotEmpty()) Text(reactions.entries.joinToString("  ") { (emoji, count) ->
-                if (count == 1) emoji else "$emoji $count"
-            }, style = MaterialTheme.typography.labelLarge)
+            post.reactionCounts.forEach { (emoji, count) ->
+                Text("$emoji $count", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(horizontal = 2.dp))
+            }
         }
         if (views != null) Text(if (views == 1) "1 view" else "$views views", style = MaterialTheme.typography.labelMedium)
         if (owned && post.state == 20) Text("Queued", style = MaterialTheme.typography.labelMedium)

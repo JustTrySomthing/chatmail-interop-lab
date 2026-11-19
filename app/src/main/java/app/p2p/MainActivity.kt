@@ -515,6 +515,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
         var threadView by rememberSaveable { mutableStateOf(Feed) }
         var threadQuery by rememberSaveable(thread) { mutableStateOf("") }
         var quote by rememberSaveable { mutableStateOf<String?>(null) }
+        var channelReply by rememberSaveable { mutableStateOf<ChannelReply?>(null) }
         var modal by rememberSaveable { mutableStateOf<String?>(null) }
         var addContactTab by rememberSaveable { mutableStateOf("Send invite") }
         var pastedInvite by remember { mutableStateOf("") }
@@ -828,6 +829,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
         fun goThread(id: String) {
             thread = id
             quote = null
+            channelReply = null
             threadView = Feed
             modal = null
         }
@@ -842,6 +844,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
             area = value
             thread = null
             quote = null
+            channelReply = null
             threadView = Feed
             search = ""
             modal = null
@@ -1392,7 +1395,8 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             find = threadQuery, searchOpen = modal == "thread-search",
                             name = ::name, photo = ::photo, onView = { threadView = it },
                             quote = records.firstOrNull { it.key == quote && it.kind == "message" },
-                            clearQuote = { quote = null },
+                            clearQuote = { quote = null; channelReply = null },
+                            channelReply = channelReply?.takeIf { it.thread == id },
                             attachments = mediaDrafts[id].orEmpty(), preparing = submitting || sendingDraft,
                             loadOlder = if (conversation?.optBoolean("nativeHasOlder") == true)
                                 ({ model.loadOlderNativeMessages(id) }) else null,
@@ -1404,10 +1408,12 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             send = { text, done ->
                                 val drafts = mediaDrafts[id].orEmpty()
                                 val reference = quote
-                                model.sendDraft(id, text, reference, drafts) {
+                                val privateReply = channelReply?.takeIf { it.thread == id }
+                                model.sendDraft(id, text, reference, drafts, channelReply = privateReply) {
                                     val remaining = mediaDrafts[id].orEmpty().filterNot { it in drafts }
                                     if (remaining.isEmpty()) mediaDrafts.remove(id) else mediaDrafts[id] = remaining
                                     if (thread == id && quote == reference) quote = null
+                                    if (thread == id && channelReply == privateReply) channelReply = null
                                     done()
                                 }
                             },
@@ -1602,6 +1608,10 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                             },
                             share = { sharingChannel = it; modal = "channel-invite" },
                             legacy = { legacySocial = true }, preview = ::showLink, openLink = ::openLink,
+                            replyPrivately = { reply ->
+                                messageContact(reply.thread)
+                                channelReply = reply
+                            },
                             profilePhoto = profileData?.optString("photo").orEmpty())
                     }
                     area == Area.Social -> {
@@ -1816,6 +1826,7 @@ private fun P2pApp(model: P2pModel, updates: P2pUpdateModel, shared: IncomingSha
                         if (item.kind == "message" && threadId.isNotBlank()) {
                             add(ItemAction("Reply", Icons.AutoMirrored.Outlined.Reply) {
                                 quote = item.key
+                                channelReply = null
                                 threadView = Feed
                                 modal = null
                             })
@@ -3403,7 +3414,8 @@ internal fun ColumnScope.ThreadView(
     openWebxdc: ((Record) -> Unit)? = null,
     draftText: String? = null,
     consumeDraftText: () -> Unit = {},
-    savingItems: Set<String> = emptySet()
+    savingItems: Set<String> = emptySet(),
+    channelReply: ChannelReply? = null
 ) {
     LaunchedEffect(view) { if (view == "Saved") onView(Feed) }
     val messages = remember(records, id) {
@@ -3638,9 +3650,12 @@ internal fun ColumnScope.ThreadView(
     if (view == Feed) {
         AttachmentDraftList(attachments, preparing, removeAttachment, trimAttachment,
             if (keyboardVisible || showEmoji) 58.dp else 140.dp)
-        if (quote != null) {
+        if (channelReply != null || quote != null) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 15.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { QuotedMessage(name(quote.data().optString("author")), quote.data().optString("text")) }
+                Box(Modifier.weight(1f)) {
+                    if (channelReply != null) QuotedMessage(channelReply.channelName, channelReply.excerpt)
+                    else if (quote != null) QuotedMessage(name(quote.data().optString("author")), quote.data().optString("text"))
+                }
                 IconButton(onClick = clearQuote) { Icon(Icons.Outlined.Close, "Remove reply quote") }
             }
         }

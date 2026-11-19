@@ -25,7 +25,7 @@ private val helpEntries = listOf(
     HelpEntry("How do I create or join a group?",
         "Open Groups to create a group. Open its details to add members, edit its description, or share its invite. Accept a group invite through Contacts → Add contact. To leave, open the group’s details and choose Leave Group; existing messages stay here."),
     HelpEntry("How do I create or follow a channel?",
-        "Open Channels → My Channels to create a channel and write posts. Share the channel’s invite from its details. Use Following → Join a channel to follow someone else’s channel. Feed collects their recent posts. Open a channel to unfollow it. For your channels, use Post options to edit or delete a post, or Delete Channel in the channel’s details."),
+        "Open Channels → My Channels to create a channel and write posts. Share the channel’s invite from its details. Use Following → Join a channel to follow someone else’s channel. Feed collects their recent posts. Tap the emoji button to react. To message the owner with the post quoted, open Post Options and choose Reply Privately. Open a channel to unfollow it. For your channels, use Post Options to edit or delete a post, or Delete Channel in the channel’s details."),
     HelpEntry("How do I share a photo, video, or other file?",
         "Use Add attachment in chats, groups, or channels. Choose Take Photo, Record Video, Record Audio, or Attach File for existing media and documents. Local file selection follows the Android clients’ 1 GiB ceiling. Mail relays can enforce smaller message limits."),
     HelpEntry("How do I send media at its original quality?",

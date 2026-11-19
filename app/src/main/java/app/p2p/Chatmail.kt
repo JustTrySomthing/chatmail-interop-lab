@@ -195,6 +195,11 @@ internal class Chatmail(directory: File) : AutoCloseable {
         return channel(chatId)?.let { parseChannelPost(row, it) }
     }
 
+    fun channelPostForPrivateReply(id: Int, channelId: Int): ChannelPost =
+        requireNotNull(channelPost(id)?.takeIf { it.channelId == channelId && it.replyContactId != null }) {
+            "This post is unavailable for a private reply."
+        }
+
     fun createChannel(name: String): Int = (call("create_broadcast", name) as Number).toInt()
 
     fun chatDescription(id: Int): String = call("get_chat_description", id) as String
@@ -650,9 +655,14 @@ internal data class ChatmailChannel(
 internal data class ChannelPost(
     val id: Int, val channelId: Int, val channelName: String, val text: String,
     val time: Long, val state: Int, val attachment: ChatmailAttachment?, val localFile: File? = null,
-    val reactions: Map<Int, List<String>> = emptyMap(), val saved: Boolean = false
+    val reactionCounts: Map<String, Int> = emptyMap(), val reacted: Boolean = false,
+    val saved: Boolean = false, val replyContactId: Int? = null
 )
 internal data class ChannelHistory(val posts: List<ChannelPost>, val hasOlder: Boolean)
+
+internal data class ChannelReply(
+    val thread: String, val channelId: Int, val postId: Int, val channelName: String, val excerpt: String
+) : java.io.Serializable
 
 internal fun parseChatmailChannel(chat: JSONObject): ChatmailChannel? {
     val id = chat.optInt("id")
@@ -671,9 +681,20 @@ internal fun parseChannelPost(message: JSONObject, channel: ChatmailChannel): Ch
     val text = message.optString("text")
     val attachment = readChatmailAttachment(message)
     if (text.isBlank() && attachment == null) return null
+    val reactions = message.optJSONObject("reactions")?.optJSONArray("reactions")
+    val counts = buildMap {
+        for (index in 0 until (reactions?.length() ?: 0)) {
+            val item = reactions?.optJSONObject(index) ?: continue
+            val emoji = item.optString("emoji")
+            val count = item.optInt("count")
+            if (emoji.isNotBlank() && count > 0) put(emoji, count)
+        }
+    }
     return ChannelPost(id, channel.id, channel.name, text,
         message.optLong("timestamp") * 1_000L, message.optInt("state"), attachment,
-        reactions = readNativeReactions(message), saved = message.optInt("savedMessageId") > 9)
+        reactionCounts = counts, reacted = readNativeReactions(message).containsKey(1),
+        saved = message.optInt("savedMessageId") > 9,
+        replyContactId = message.optInt("fromId").takeIf { !channel.owned && it > 9 })
 }
 
 internal data class ChatmailContact(

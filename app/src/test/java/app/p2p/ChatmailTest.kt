@@ -1,6 +1,7 @@
 package app.p2p
 
 import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -212,6 +213,30 @@ class ChatmailTest {
         assertNull(parseChannelPost(message.put("isInfo", true), channel))
         assertNull(parseChannelPost(message.put("isInfo", false).put("showPadlock", false), channel))
         assertNull(parseChannelPost(message.put("showPadlock", true).put("chatId", 12), channel))
+    }
+
+    @Test
+    fun channelPostUsesSharedReactionTotalsWithoutCountingYourReactionTwice() {
+        val channel = ChatmailChannel(14, "Trail notes", false, false, 0)
+        val message = obj("id" to 51, "kind" to "message", "chatId" to 14, "showPadlock" to true,
+            "fromId" to 20, "text" to "The trail is open", "reactions" to JSONObject("""
+                {"reactionsByContact":{"1":["👍"]},"reactions":[{"emoji":"👍","count":3,"isFromSelf":true},{"emoji":"❤️","count":2}]}
+            """.trimIndent()))
+
+        val post = requireNotNull(parseChannelPost(message, channel))
+        assertEquals(mapOf("👍" to 3, "❤️" to 2), post.reactionCounts)
+        assertTrue(post.reacted)
+    }
+
+    @Test
+    fun privateChannelReplyTargetsOnlyThePublisherOfAnIncomingPost() {
+        val channel = ChatmailChannel(14, "Trail notes", false, false, 0)
+        val message = obj("id" to 51, "kind" to "message", "chatId" to 14, "showPadlock" to true,
+            "fromId" to 20, "text" to "The trail is open")
+
+        assertEquals(20, parseChannelPost(message, channel)?.replyContactId)
+        assertNull(parseChannelPost(message, channel.copy(owned = true))?.replyContactId)
+        assertNull(parseChannelPost(message.put("fromId", 1), channel)?.replyContactId)
     }
 
     @Test

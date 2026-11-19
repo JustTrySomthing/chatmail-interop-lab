@@ -1,5 +1,11 @@
 # Continue Relay Lab development
 
+## Channel reactions and private replies
+
+Channel posts display the shared reaction totals supplied by Chatmail Core. The post menu in Feed and Following offers **Reply Privately** for eligible incoming posts. It opens a one-to-one chat with the publisher and a removable post quote. It sends only after the user taps Send. The composer rechecks that the quoted post belongs to the original channel and that the selected recipient is its publisher.
+
+Debug APK assembly, WebRTC packaging, and 226 automated tests passed. The added tests cover aggregate counts, private reply eligibility, and the removable quote in the chat composer. Phone interoperability testing with Delta Chat and ArcaneChat is pending. The latest published candidate is RC76.
+
 ## RC76 (112): original attachments, Help and Privacy
 
 Release verification: debug and signed preview assembly passed; all 223 tests passed with zero failures/errors/skips. WebRTC APK packaging and established certificate checks passed. APK `P2P-0.7.23-rc76-ARM64-Preview.apk` SHA-256: `44e750a7aeca90204c7b239fe2464672db0bb8338c7f2da6a1c915d9d3e76d06`. The build daemons stopped during packaging at 1536 MiB; rerunning the completed compilation/packaging with 1024 MiB succeeded. Keep unit tests in a separate 512 MiB run.

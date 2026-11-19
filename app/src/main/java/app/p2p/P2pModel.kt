@@ -2716,6 +2716,23 @@ class P2pModel internal constructor(application: Application, internal val profi
         core.nativeReact(id, emoji)
     }
 
+    internal suspend fun prepareChannelReply(id: Int, channelId: Int): ChannelReply = withChatmail { core ->
+        val post = core.channelPostForPrivateReply(id, channelId)
+        val contact = checkNotNull(post.replyContactId)
+        val chatId = core.openContact(contact)
+        val chat = requireNotNull(core.nativeThread(chatId)?.takeIf { it.contactId == contact }) {
+            "This encrypted conversation is unavailable."
+        }
+        check(!isBlockedChatmailContact(chatId)) { "Unblock this contact before replying." }
+        val thread = records.all("contact").firstOrNull { it.data().optInt("chatmailChat") == chatId }?.key
+            ?: nativeThreadKey(chatId)
+        cacheNativeThread(chat, thread)
+        nextNativeSync = 0L
+        ChannelReply(thread, channelId, id, post.channelName, post.text.ifBlank {
+            post.attachment?.name ?: "Attachment"
+        }.take(500))
+    }
+
     private suspend fun recipients(thread: String): List<String> {
         val record = records.get(thread) ?: return emptyList()
         return if (record.kind == "group") {
@@ -2740,12 +2757,15 @@ class P2pModel internal constructor(application: Application, internal val profi
         targets.forEach { queue(it, data) }
     }
 
-    internal fun sendDraft(thread: String, text: String, replyTo: String?, attachments: List<AttachmentDraft>, voicemail: Boolean = false, sent: () -> Unit) {
+    internal fun sendDraft(
+        thread: String, text: String, replyTo: String?, attachments: List<AttachmentDraft>,
+        voicemail: Boolean = false, channelReply: ChannelReply? = null, sent: () -> Unit
+    ) {
         if (text.isBlank() && attachments.isEmpty()) return
         if (!draftSendState.compareAndSet(false, true)) return
         work {
             try {
-                commitDraft(thread, text, replyTo, attachments, voicemail)
+                commitDraft(thread, text, replyTo, attachments, voicemail, channelReply)
                 withContext(Dispatchers.Main.immediate) { sent() }
             } finally {
                 draftSendState.value = false
@@ -2753,13 +2773,19 @@ class P2pModel internal constructor(application: Application, internal val profi
         }
     }
 
-    private suspend fun commitDraft(thread: String, text: String, replyTo: String?, attachments: List<AttachmentDraft>, voicemail: Boolean = false) {
+    private suspend fun commitDraft(
+        thread: String, text: String, replyTo: String?, attachments: List<AttachmentDraft>,
+        voicemail: Boolean = false, channelReply: ChannelReply? = null
+    ) {
         require(text.trim().length <= MAX_MESSAGE_LENGTH) { "This message is too long. Split it into shorter messages." }
         val record = records.get(thread)
         val native = record?.data()?.optInt("nativeChat") ?: 0
+        check(channelReply == null || (channelReply.thread == thread && native > 9)) {
+            "This encrypted conversation is unavailable."
+        }
         if (native > 9) {
             check(record?.data()?.optBoolean("blocked") != true && !groupBlocked(thread)) { "This conversation is blocked." }
-            sendChatmailDraft(native, thread, text.trim(), replyTo, attachments, voicemail)
+            sendChatmailDraft(native, thread, text.trim(), replyTo, attachments, voicemail, channelReply = channelReply)
             deleteTemporaryDrafts(attachments)
             return
         }
@@ -2833,9 +2859,9 @@ class P2pModel internal constructor(application: Application, internal val profi
 
     private suspend fun sendChatmailDraft(
         chat: Int, thread: String, text: String, replyTo: String?, attachments: List<AttachmentDraft>,
-        voicemail: Boolean = false, channelPost: Boolean = false
+        voicemail: Boolean = false, channelPost: Boolean = false, channelReply: ChannelReply? = null
     ) {
-        val quote = replyTo?.let { key ->
+        val quote = channelReply?.postId ?: replyTo?.let { key ->
             records.get(key)?.data()?.takeIf { it.optString("thread") == thread }?.optInt("nativeMessage")?.takeIf { it > 9 }
         }
         val submission = UUID.nameUUIDFromBytes(obj("thread" to thread, "text" to text, "quote" to quote,
@@ -2859,6 +2885,15 @@ class P2pModel internal constructor(application: Application, internal val profi
             }
             withChatmail { core ->
                 val channel = if (channelPost) requireNotNull(core.channel(chat)) { "Channel unavailable." } else null
+                if (channelReply != null) {
+                    check(!isBlockedChatmailContact(chat)) { "Unblock this contact before replying." }
+                    if (start == 0) {
+                        val post = core.channelPostForPrivateReply(channelReply.postId, channelReply.channelId)
+                        check(core.nativeThread(chat)?.contactId == post.replyContactId) {
+                            "This private reply must go to the channel owner."
+                        }
+                    }
+                }
                 if (attachments.isEmpty()) {
                     if (channel != null) core.postToChannel(channel, text) else core.nativeSend(chat, text, quote)
                 }
